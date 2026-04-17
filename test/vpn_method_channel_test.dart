@@ -1,0 +1,143 @@
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:tunnel_forge/profile_models.dart';
+import 'package:tunnel_forge/vpn_client.dart';
+import 'package:tunnel_forge/vpn_contract.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('VpnContract', () {
+    test('channel', () {
+      expect(VpnContract.channel, 'com.example.tunnel_forge/vpn');
+    });
+  });
+
+  group('VpnClient', () {
+    late List<MethodCall> calls;
+
+    setUp(() {
+      calls = [];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel(VpnContract.channel), (
+            call,
+          ) async {
+            calls.add(call);
+            switch (call.method) {
+              case VpnContract.prepareVpn:
+                return true;
+              case VpnContract.connect:
+              case VpnContract.disconnect:
+              case VpnContract.onEngineLog:
+                return null;
+              case VpnContract.listVpnCandidateApps:
+                return <Map<String, String>>[];
+              case VpnContract.getAppIcon:
+                return Uint8List.fromList([0x89, 0x50, 0x4e, 0x47]);
+              default:
+                fail('unexpected method ${call.method}');
+            }
+          });
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel(VpnContract.channel),
+            null,
+          );
+    });
+
+    test('prepareVpn', () async {
+      final client = VpnClient();
+      final ok = await client.prepareVpn();
+      expect(ok, isTrue);
+      expect(calls, hasLength(1));
+      expect(calls.single.method, VpnContract.prepareVpn);
+    });
+
+    test('connect map', () async {
+      final client = VpnClient();
+      await client.connect(
+        server: '10.0.0.1',
+        user: 'u',
+        password: 'p',
+        psk: 's',
+        dns: '1.1.1.1',
+      );
+      expect(calls.single.method, VpnContract.connect);
+      final args = calls.single.arguments as Map;
+      expect(args[VpnContract.argServer], '10.0.0.1');
+      expect(args[VpnContract.argUser], 'u');
+      expect(args[VpnContract.argPassword], 'p');
+      expect(args[VpnContract.argPsk], 's');
+      expect(args[VpnContract.argDns], '1.1.1.1');
+      expect(args[VpnContract.argMtu], Profile.defaultVpnMtu);
+      expect(
+        args[VpnContract.argRoutingMode],
+        RoutingMode.fullTunnel.jsonValue,
+      );
+      expect(args[VpnContract.argAllowedPackages], isA<List<Object?>>());
+      expect((args[VpnContract.argAllowedPackages] as List).isEmpty, isTrue);
+    });
+
+    test('connect map includes per-app routing', () async {
+      final client = VpnClient();
+      await client.connect(
+        server: '10.0.0.1',
+        routingMode: RoutingMode.perAppAllowList,
+        allowedAppPackages: const ['com.example.a', 'com.example.b'],
+      );
+      final args = calls.single.arguments as Map;
+      expect(
+        args[VpnContract.argRoutingMode],
+        RoutingMode.perAppAllowList.jsonValue,
+      );
+      expect(args[VpnContract.argAllowedPackages], [
+        'com.example.a',
+        'com.example.b',
+      ]);
+    });
+
+    test('listVpnCandidateApps maps rows', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel(VpnContract.channel), (
+            call,
+          ) async {
+            if (call.method == VpnContract.listVpnCandidateApps) {
+              return [
+                {'packageName': 'a.b', 'label': 'App B'},
+                {'packageName': 'bad', 'label': 1},
+              ];
+            }
+            return null;
+          });
+      final client = VpnClient();
+      final apps = await client.listVpnCandidateApps();
+      expect(apps, hasLength(1));
+      expect(apps.single.packageName, 'a.b');
+      expect(apps.single.label, 'App B');
+    });
+
+    test('getAppIcon', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel(VpnContract.channel), (
+            call,
+          ) async {
+            expect(call.method, VpnContract.getAppIcon);
+            expect(call.arguments, 'com.example.app');
+            return Uint8List.fromList([1, 2, 3]);
+          });
+      final client = VpnClient();
+      final bytes = await client.getAppIcon('com.example.app');
+      expect(bytes, Uint8List.fromList([1, 2, 3]));
+    });
+
+    test('disconnect', () async {
+      final client = VpnClient();
+      await client.disconnect();
+      expect(calls.single.method, VpnContract.disconnect);
+    });
+  });
+}

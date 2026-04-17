@@ -1,0 +1,34 @@
+# Libreswan + L2TP server for local Android VPN testing. Linux-focused: network_mode
+# host attaches IKE/xl2tpd to the real LAN. Mapping UDP 500/4500 through docker-proxy
+# often breaks IKE; see README.md for context.
+#
+# Copy vpn.env.example to vpn.env. Set VPN_PUBLIC_IP to this machine's LAN address
+# (e.g. 192.168.1.104) and fill PSK / VPN_USER / VPN_PASSWORD.
+#
+# Docker Desktop and macOS differ; host networking here matches a typical Linux dev box.
+#
+# Pluto (IKE) rarely prints enough on container stdout. Enable rsyslog and tail auth.log:
+#   sh tool/vpn_debug.sh pluto-logs
+#   docker exec -it ipsec-vpn-server tail -f /var/log/auth.log
+#
+# tcpdump: after Quick Mode, L2TP sits inside ESP. On the wire you usually see UDP 500
+# (IKE) and UDP 4500 (NAT-T, including ESP-in-UDP). Cleartext UDP 1701 often does not
+# show on the Wi-Fi/Ethernet interface - the stack decapsulates ESP before xl2tpd.
+#   sh tool/vpn_debug.sh capture --iface <iface>
+#   # or: sudo tcpdump -ni <iface> 'udp port 500 or udp port 4500'
+
+volumes:
+  ikev2-vpn-data:
+
+services:
+  vpn:
+    image: hwdsl2/ipsec-vpn-server
+    restart: always
+    network_mode: host
+    env_file:
+      - ./vpn.env
+    privileged: true
+    container_name: ipsec-vpn-server
+    volumes:
+      - ikev2-vpn-data:/etc/ipsec.d
+      - /lib/modules:/lib/modules:ro

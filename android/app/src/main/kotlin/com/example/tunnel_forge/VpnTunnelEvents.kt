@@ -1,0 +1,82 @@
+package com.example.tunnel_forge
+
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import androidx.annotation.Keep
+import io.flutter.plugin.common.MethodChannel
+
+/** Pushes tunnel lifecycle updates to Flutter on the main thread (same [MethodChannel] as [MainActivity]). */
+object VpnTunnelEvents {
+    @Volatile
+    private var channel: MethodChannel? = null
+
+    private val noopResult =
+        object : MethodChannel.Result {
+            override fun success(result: Any?) {}
+
+            override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {}
+
+            override fun notImplemented() {}
+        }
+
+    fun attach(c: MethodChannel) {
+        channel = c
+    }
+
+    fun detach() {
+        channel = null
+    }
+
+    private fun invokeOnMain(method: String, payload: Map<String, Any?>) {
+        val ch =
+            channel
+                ?: run {
+                    Log.w(TAG, "event_drop reason=no_channel method=$method")
+                    return
+                }
+        val job =
+            Runnable {
+                try {
+                    ch.invokeMethod(method, payload, noopResult)
+                } catch (e: Exception) {
+                    Log.w(TAG, "event_drop reason=invoke_exception method=$method err=${e.javaClass.simpleName}:${e.message}")
+                }
+            }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            job.run()
+        } else {
+            Handler(Looper.getMainLooper()).post(job)
+        }
+    }
+
+    fun emit(state: String, detail: String?) {
+        invokeOnMain(
+            VpnContract.ON_TUNNEL_STATE,
+            mapOf(
+                VpnContract.ARG_TUNNEL_STATE to state,
+                VpnContract.ARG_TUNNEL_DETAIL to (detail ?: ""),
+            ),
+        )
+    }
+
+    /** Kotlin host: same payload shape as JNI [emitEngineLogFromNative]. */
+    fun emitEngineLog(priority: Int, tag: String, message: String) {
+        invokeOnMain(
+            VpnContract.ON_ENGINE_LOG,
+            mapOf(
+                VpnContract.ARG_ENGINE_LOG_LEVEL to priority,
+                VpnContract.ARG_ENGINE_LOG_TAG to tag,
+                VpnContract.ARG_ENGINE_LOG_MESSAGE to message,
+            ),
+        )
+    }
+
+    @Keep
+    @JvmStatic
+    fun emitEngineLogFromNative(priority: Int, tag: String, message: String) {
+        emitEngineLog(priority, tag, message)
+    }
+
+    private const val TAG = "VpnTunnelEvents"
+}

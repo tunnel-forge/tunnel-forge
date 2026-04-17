@@ -43,3 +43,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/build/
+
+# VPN server credentials
+vpn.env
+
+# Local VPN debug logs
+.vpn-debug/
