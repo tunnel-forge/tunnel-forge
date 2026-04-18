@@ -1010,7 +1010,8 @@ static int ppp_send_lcp_echo_reply(int esp_fd, esp_keys_t *esp, const struct soc
 }
 
 int ppp_dispatch_ppp_frame(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
-                           l2tp_session_t *l2tp, ppp_session_t *ppp, const uint8_t *frame, size_t len, int tun_fd) {
+                           l2tp_session_t *l2tp, ppp_session_t *ppp, const uint8_t *frame, size_t len,
+                           packet_endpoint_t *endpoint) {
   (void)ppp;
   if (len < 2) return -1;
   const uint8_t log_b0 = frame[0];
@@ -1026,12 +1027,13 @@ int ppp_dispatch_ppp_frame(int esp_fd, esp_keys_t *esp, const struct sockaddr *p
   p += 2;
   len -= 2;
   if (proto == PROTO_IP) {
-    if (write(tun_fd, p, len) != (ssize_t)len) {
+    if (packet_endpoint_write(endpoint, p, len) != 0) {
       static time_t s_last_tun_write_warn;
       time_t now = time(NULL);
       if (now - s_last_tun_write_warn >= 3) {
         s_last_tun_write_warn = now;
-        tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "ppp ip write tun failed errno=%d len=%zu", errno, len);
+        tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "ppp ip write endpoint=%s failed errno=%d len=%zu",
+                          endpoint != NULL && endpoint->name != NULL ? endpoint->name : "unknown", errno, len);
       }
       return -1;
     }

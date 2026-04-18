@@ -17,7 +17,9 @@ void main() {
     return tester.widget<Text>(find.byKey(const Key('vpn_status'))).data ?? '';
   }
 
-  testWidgets('Connect runs prepare then connect; awaits TUN status', (WidgetTester tester) async {
+  testWidgets('Connect runs prepare then connect; awaits TUN status', (
+    WidgetTester tester,
+  ) async {
     SharedPreferences.setMockInitialValues({
       ProfileStore.prefsKeyProfilesJson: jsonEncode([
         {
@@ -99,5 +101,48 @@ void main() {
     }
 
     expect(find.byKey(const Key('profile_picker_tile')), findsOneWidget);
+  });
+
+  testWidgets('proxy-only skips VPN prepare and sends connect', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      ProfileStore.prefsKeyProfilesJson: jsonEncode([
+        {
+          'id': 'widget_test_proxy',
+          'displayName': 'Proxy Test',
+          'server': 'vpn.test.example',
+          'user': '',
+          'dns': '8.8.8.8',
+        },
+      ]),
+      ProfileStore.prefsKeyLastProfileId: 'widget_test_proxy',
+      ProfileStore.prefsKeyConnectionMode: 'proxyOnly',
+    });
+    final methods = <String>[];
+    installVpnChannelMock(methods);
+    addTearDown(uninstallVpnChannelMock);
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 50; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await tester.tap(find.byKey(const Key('vpn_connect')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(methods, [VpnContract.connect]);
+    expect(statusText(tester), contains('Connecting'));
   });
 }

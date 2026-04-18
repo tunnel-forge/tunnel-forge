@@ -18,6 +18,11 @@ object VpnContract {
     const val ARG_DNS = "dns"
     const val ARG_MTU = "mtu"
     const val ARG_PROFILE_NAME = "profileName"
+    const val ARG_CONNECTION_MODE = "connectionMode"
+    const val ARG_PROXY_HTTP_ENABLED = "proxyHttpEnabled"
+    const val ARG_PROXY_HTTP_PORT = "proxyHttpPort"
+    const val ARG_PROXY_SOCKS_ENABLED = "proxySocksEnabled"
+    const val ARG_PROXY_SOCKS_PORT = "proxySocksPort"
 
     /** `fullTunnel` or `perAppAllowList` - must match Dart `RoutingMode`. */
     const val ARG_ROUTING_MODE = "routingMode"
@@ -31,6 +36,8 @@ object VpnContract {
 
     const val ROUTING_FULL_TUNNEL = "fullTunnel"
     const val ROUTING_PER_APP_ALLOW_LIST = "perAppAllowList"
+    const val MODE_VPN_TUNNEL = "vpnTunnel"
+    const val MODE_PROXY_ONLY = "proxyOnly"
 
     /** Flutter [MethodChannel.invokeMethod] from Android -> Dart. */
     const val ON_TUNNEL_STATE = "onTunnelState"

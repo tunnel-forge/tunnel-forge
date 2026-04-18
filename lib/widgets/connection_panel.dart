@@ -46,31 +46,64 @@ class ConnectionPanel extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Material(
-                  color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+                  color: colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.45,
+                  ),
                   borderRadius: BorderRadius.circular(12),
                   child: InkWell(
                     key: const Key('profile_picker_tile'),
                     onTap: pickerEnabled ? onOpenProfilePicker : null,
                     borderRadius: BorderRadius.circular(12),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
                       child: Row(
                         children: [
-                          Icon(Icons.folder_outlined, color: colorScheme.primary, size: 26),
+                          Icon(
+                            Icons.folder_outlined,
+                            color: colorScheme.primary,
+                            size: 26,
+                          ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Active profile', style: textTheme.labelMedium?.copyWith(color: colorScheme.onSurfaceVariant)),
+                                Text(
+                                  'Active profile',
+                                  style: textTheme.labelMedium?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
                                 const SizedBox(height: 2),
-                                Text(profileSummaryTitle, style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                Text(
+                                  profileSummaryTitle,
+                                  style: textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                                 const SizedBox(height: 2),
-                                Text(profileSummarySubtitle, style: textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                Text(
+                                  profileSummarySubtitle,
+                                  style: textTheme.bodySmall?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ],
                             ),
                           ),
-                          Icon(Icons.keyboard_arrow_up, color: pickerEnabled ? colorScheme.onSurfaceVariant : colorScheme.outline),
+                          Icon(
+                            Icons.keyboard_arrow_up,
+                            color: pickerEnabled
+                                ? colorScheme.onSurfaceVariant
+                                : colorScheme.outline,
+                          ),
                         ],
                       ),
                     ),
@@ -79,13 +112,27 @@ class ConnectionPanel extends StatelessWidget {
                 SizedBox(height: centerGap),
                 Builder(
                   builder: (context) {
-                    final bg = tunnelUp ? colorScheme.tertiary : colorScheme.primary;
-                    final fg = ThemeData.estimateBrightnessForColor(bg) == Brightness.dark ? Colors.white : const Color(0xFF1B1B1F);
+                    final bg = tunnelUp
+                        ? colorScheme.tertiary
+                        : colorScheme.primary;
+                    final fg =
+                        ThemeData.estimateBrightnessForColor(bg) ==
+                            Brightness.dark
+                        ? Colors.white
+                        : const Color(0xFF1B1B1F);
                     final disabledFg = colorScheme.onSurfaceVariant;
                     final effectiveFg = locked ? disabledFg : fg;
-                    final buttonBg = locked ? colorScheme.surfaceContainerHighest : bg;
-                    final spinnerColor = ThemeData.estimateBrightnessForColor(buttonBg) == Brightness.dark ? Colors.white : const Color(0xFF1B1B1F);
-                    final ringColor = locked ? colorScheme.outline.withValues(alpha: 0.18) : bg.withValues(alpha: 0.20);
+                    final buttonBg = locked
+                        ? colorScheme.surfaceContainerHighest
+                        : bg;
+                    final spinnerColor =
+                        ThemeData.estimateBrightnessForColor(buttonBg) ==
+                            Brightness.dark
+                        ? Colors.white
+                        : const Color(0xFF1B1B1F);
+                    final ringColor = locked
+                        ? colorScheme.outline.withValues(alpha: 0.18)
+                        : bg.withValues(alpha: 0.20);
 
                     return Column(
                       children: [
@@ -93,7 +140,10 @@ class ConnectionPanel extends StatelessWidget {
                           child: Container(
                             width: 172,
                             height: 172,
-                            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: ringColor, width: 1.5)),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(color: ringColor, width: 1.5),
+                            ),
                             alignment: Alignment.center,
                             child: FilledButton(
                               key: const Key('vpn_connect'),
@@ -103,7 +153,8 @@ class ConnectionPanel extends StatelessWidget {
                                 fixedSize: const Size.square(136),
                                 backgroundColor: buttonBg,
                                 foregroundColor: effectiveFg,
-                                disabledBackgroundColor: colorScheme.surfaceContainerHighest,
+                                disabledBackgroundColor:
+                                    colorScheme.surfaceContainerHighest,
                                 disabledForegroundColor: disabledFg,
                                 elevation: 0,
                               ),
@@ -111,14 +162,28 @@ class ConnectionPanel extends StatelessWidget {
                                   ? SizedBox(
                                       width: 32,
                                       height: 32,
-                                      child: CircularProgressIndicator(strokeWidth: 2.6, color: spinnerColor),
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.6,
+                                        color: spinnerColor,
+                                      ),
                                     )
-                                  : Icon(Icons.power_settings_new, size: 44, color: effectiveFg),
+                                  : Icon(
+                                      Icons.power_settings_new,
+                                      size: 44,
+                                      color: effectiveFg,
+                                    ),
                             ),
                           ),
                         ),
                         const SizedBox(height: 16),
-                        Text(connectButtonLabel, key: const Key('vpn_status'), style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600), textAlign: TextAlign.center),
+                        Text(
+                          connectButtonLabel,
+                          key: const Key('vpn_status'),
+                          style: textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
                       ],
                     );
                   },

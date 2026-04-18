@@ -46,7 +46,11 @@ class _AppSelectorPageState extends State<AppSelectorPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Apps using VPN'),
-        leading: IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop(), tooltip: 'Cancel'),
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.of(context).pop(),
+          tooltip: 'Cancel',
+        ),
         actions: [
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
@@ -56,7 +60,9 @@ class _AppSelectorPageState extends State<AppSelectorPage> {
               } else if (action == 'all') {
                 _future.then((apps) {
                   if (!mounted) return;
-                  setState(() => _selected = apps.map((e) => e.packageName).toSet());
+                  setState(
+                    () => _selected = apps.map((e) => e.packageName).toSet(),
+                  );
                 });
               }
             },
@@ -65,7 +71,11 @@ class _AppSelectorPageState extends State<AppSelectorPage> {
               PopupMenuItem(value: 'clear', child: Text('Clear all')),
             ],
           ),
-          TextButton(onPressed: () => Navigator.of(context).pop(Set<String>.from(_selected)), child: const Text('Done')),
+          TextButton(
+            onPressed: () =>
+                Navigator.of(context).pop(Set<String>.from(_selected)),
+            child: const Text('Done'),
+          ),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(52),
@@ -79,7 +89,9 @@ class _AppSelectorPageState extends State<AppSelectorPage> {
                 prefixIcon: const Icon(Icons.search, size: 22),
                 isDense: true,
                 filled: true,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
           ),
@@ -99,7 +111,9 @@ class _AppSelectorPageState extends State<AppSelectorPage> {
                 child: Text(
                   'No launchable apps found. If this is wrong, check that the app can query other packages on your Android version.',
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: cs.onSurfaceVariant),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyLarge?.copyWith(color: cs.onSurfaceVariant),
                 ),
               ),
             );
@@ -108,9 +122,20 @@ class _AppSelectorPageState extends State<AppSelectorPage> {
           final q = _query;
           final filtered = q.isEmpty
               ? apps
-              : apps.where((a) => a.label.toLowerCase().contains(q) || a.packageName.toLowerCase().contains(q)).toList();
+              : apps
+                    .where(
+                      (a) =>
+                          a.label.toLowerCase().contains(q) ||
+                          a.packageName.toLowerCase().contains(q),
+                    )
+                    .toList();
           if (filtered.isEmpty) {
-            return Center(child: Text('No matches.', style: Theme.of(context).textTheme.bodyLarge));
+            return Center(
+              child: Text(
+                'No matches.',
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+            );
           }
 
           return ListView.builder(
@@ -120,9 +145,21 @@ class _AppSelectorPageState extends State<AppSelectorPage> {
               final app = filtered[i];
               final selected = _selected.contains(app.packageName);
               return SwitchListTile(
-                secondary: _SelectorAppIcon(packageName: app.packageName, loadIcon: widget.loadIcon),
-                title: Text(app.label, maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: Text(app.packageName, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
+                secondary: _SelectorAppIcon(
+                  packageName: app.packageName,
+                  loadIcon: widget.loadIcon,
+                ),
+                title: Text(
+                  app.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  app.packageName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
                 value: selected,
                 onChanged: (next) {
                   setState(() {
@@ -191,7 +228,11 @@ class _SelectorAppIconState extends State<_SelectorAppIcon> {
       return CircleAvatar(
         radius: 20,
         backgroundColor: cs.surfaceContainerHighest,
-        child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: cs.primary)),
+        child: SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(strokeWidth: 2, color: cs.primary),
+        ),
       );
     }
     if (_bytes != null && _bytes!.isNotEmpty) {

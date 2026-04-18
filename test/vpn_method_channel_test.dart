@@ -75,11 +75,22 @@ void main() {
       expect(args[VpnContract.argDns], '1.1.1.1');
       expect(args[VpnContract.argMtu], Profile.defaultVpnMtu);
       expect(
+        args[VpnContract.argConnectionMode],
+        ConnectionMode.vpnTunnel.jsonValue,
+      );
+      expect(
         args[VpnContract.argRoutingMode],
         RoutingMode.fullTunnel.jsonValue,
       );
       expect(args[VpnContract.argAllowedPackages], isA<List<Object?>>());
       expect((args[VpnContract.argAllowedPackages] as List).isEmpty, isTrue);
+      expect(args[VpnContract.argProxyHttpEnabled], isTrue);
+      expect(args[VpnContract.argProxyHttpPort], ProxySettings.defaultHttpPort);
+      expect(args[VpnContract.argProxySocksEnabled], isTrue);
+      expect(
+        args[VpnContract.argProxySocksPort],
+        ProxySettings.defaultSocksPort,
+      );
     });
 
     test('connect map includes per-app routing', () async {
@@ -98,6 +109,29 @@ void main() {
         'com.example.a',
         'com.example.b',
       ]);
+    });
+
+    test('connect map includes proxy-only settings', () async {
+      final client = VpnClient();
+      await client.connect(
+        server: '10.0.0.1',
+        connectionMode: ConnectionMode.proxyOnly,
+        proxySettings: const ProxySettings(
+          httpEnabled: true,
+          httpPort: 18080,
+          socksEnabled: false,
+          socksPort: 11080,
+        ),
+      );
+      final args = calls.single.arguments as Map;
+      expect(
+        args[VpnContract.argConnectionMode],
+        ConnectionMode.proxyOnly.jsonValue,
+      );
+      expect(args[VpnContract.argProxyHttpEnabled], isTrue);
+      expect(args[VpnContract.argProxyHttpPort], 18080);
+      expect(args[VpnContract.argProxySocksEnabled], isFalse);
+      expect(args[VpnContract.argProxySocksPort], 11080);
     });
 
     test('listVpnCandidateApps maps rows', () async {

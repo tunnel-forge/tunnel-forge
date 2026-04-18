@@ -67,6 +67,7 @@ class VpnClient {
     String attemptId = '',
     required String server,
     String? profileName,
+    ConnectionMode connectionMode = ConnectionMode.vpnTunnel,
     String user = '',
     String password = '',
     String psk = '',
@@ -74,6 +75,7 @@ class VpnClient {
     int mtu = Profile.defaultVpnMtu,
     RoutingMode routingMode = RoutingMode.fullTunnel,
     List<String> allowedAppPackages = const [],
+    ProxySettings proxySettings = const ProxySettings(),
   }) {
     final mtuClamped = Profile.normalizeMtu(mtu);
     return _channel.invokeMethod<void>(VpnContract.connect, <String, Object?>{
@@ -86,8 +88,19 @@ class VpnClient {
       VpnContract.argPsk: psk,
       VpnContract.argDns: dns,
       VpnContract.argMtu: mtuClamped,
+      VpnContract.argConnectionMode: connectionMode.jsonValue,
       VpnContract.argRoutingMode: routingMode.jsonValue,
       VpnContract.argAllowedPackages: List<String>.from(allowedAppPackages),
+      VpnContract.argProxyHttpEnabled: proxySettings.httpEnabled,
+      VpnContract.argProxyHttpPort: ProxySettings.normalizePort(
+        proxySettings.httpPort,
+        fallback: ProxySettings.defaultHttpPort,
+      ),
+      VpnContract.argProxySocksEnabled: proxySettings.socksEnabled,
+      VpnContract.argProxySocksPort: ProxySettings.normalizePort(
+        proxySettings.socksPort,
+        fallback: ProxySettings.defaultSocksPort,
+      ),
     });
   }
 

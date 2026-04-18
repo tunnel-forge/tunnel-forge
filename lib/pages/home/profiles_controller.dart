@@ -26,6 +26,8 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
       await _profileStore.ensureDebugDefaultProfileIfEmpty();
       final list = await _profileStore.loadProfiles();
       final last = await _profileStore.loadLastProfileId();
+      final connectionMode = await _profileStore.loadConnectionMode();
+      final proxySettings = await _profileStore.loadProxySettings();
       if (!mounted) return;
       if (last != null && list.any((e) => e.id == last)) {
         final row = await _profileStore.loadProfileWithSecrets(last);
@@ -35,6 +37,8 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
             _profiles = list;
             _activeProfileId = last;
             _profilesLoading = false;
+            _connectionMode = connectionMode;
+            _proxySettings = proxySettings;
             _applyProfileToControllers(row.profile, row.password, row.psk);
           });
           return;
@@ -44,6 +48,8 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
         _profiles = list;
         _activeProfileId = null;
         _profilesLoading = false;
+        _connectionMode = connectionMode;
+        _proxySettings = proxySettings;
       });
       _applyNewFormTemplate();
     } catch (_) {
@@ -61,16 +67,30 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
     final row = await _profileStore.loadProfileWithSecrets(id);
     if (!mounted) return;
     if (row != null) {
-      setState(() => _applyProfileToControllers(row.profile, row.password, row.psk));
+      setState(
+        () => _applyProfileToControllers(row.profile, row.password, row.psk),
+      );
       await _profileStore.setLastProfileId(id);
     }
   }
 
   Future<void> _pickAppsForVpn() async {
-    final picked = await _pickAppsWithInitial(Set<String>.from(_allowedAppPackages));
+    final picked = await _pickAppsWithInitial(
+      Set<String>.from(_allowedAppPackages),
+    );
     if (picked != null && mounted) {
       setState(() => _allowedAppPackages = picked.toList()..sort());
     }
+  }
+
+  Future<void> _setConnectionMode(ConnectionMode mode) async {
+    setState(() => _connectionMode = mode);
+    await _profileStore.saveConnectionMode(mode);
+  }
+
+  Future<void> _setProxySettings(ProxySettings settings) async {
+    setState(() => _proxySettings = settings);
+    await _profileStore.saveProxySettings(settings);
   }
 
   Future<Set<String>?> _pickAppsWithInitial(Set<String> initial) {
@@ -88,7 +108,13 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
 
   Future<void> _createAndSelectNewProfile() async {
     final id = ProfileStore.newProfileId();
-    final profile = Profile(id: id, displayName: 'New profile', server: 'example.invalid', user: '', dns: '8.8.8.8');
+    final profile = Profile(
+      id: id,
+      displayName: 'New profile',
+      server: 'example.invalid',
+      user: '',
+      dns: '8.8.8.8',
+    );
     try {
       await _profileStore.upsertProfile(profile, password: '', psk: '');
       if (!mounted) return;
@@ -104,9 +130,14 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete profile?'),
-        content: const Text('This will remove the server and saved credentials from this device.'),
+        content: const Text(
+          'This will remove the server and saved credentials from this device.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(ctx).colorScheme.error,
@@ -140,7 +171,11 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
     await ProfilePickerSheet.show(
       context,
       getProfiles: () => List<Profile>.from(_profiles),
-      getSelectedId: () => _activeProfileId != null && _profiles.any((p) => p.id == _activeProfileId) ? _activeProfileId : null,
+      getSelectedId: () =>
+          _activeProfileId != null &&
+              _profiles.any((p) => p.id == _activeProfileId)
+          ? _activeProfileId
+          : null,
       loading: _profilesLoading,
       onSelect: (id) async {
         Navigator.of(context).pop();
@@ -148,7 +183,11 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
       },
       onEdit: (id) async {
         Navigator.of(context).pop();
-        final saved = await ProfileEditorSheet.show(context, profileId: id, store: _profileStore);
+        final saved = await ProfileEditorSheet.show(
+          context,
+          profileId: id,
+          store: _profileStore,
+        );
         if (!mounted) return;
         await _loadPersistedProfiles();
         if (saved) {

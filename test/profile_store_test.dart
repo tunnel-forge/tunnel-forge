@@ -96,5 +96,24 @@ void main() {
       expect(row.password, 'pw1');
       expect(row.psk, 'psk1');
     });
+
+    test('persists connection mode and proxy settings', () async {
+      await store.saveConnectionMode(ConnectionMode.proxyOnly);
+      await store.saveProxySettings(
+        const ProxySettings(
+          httpEnabled: false,
+          httpPort: 18080,
+          socksEnabled: true,
+          socksPort: 11080,
+        ),
+      );
+
+      expect(await store.loadConnectionMode(), ConnectionMode.proxyOnly);
+      final proxy = await store.loadProxySettings();
+      expect(proxy.httpEnabled, isFalse);
+      expect(proxy.httpPort, 18080);
+      expect(proxy.socksEnabled, isTrue);
+      expect(proxy.socksPort, 11080);
+    });
   });
 }

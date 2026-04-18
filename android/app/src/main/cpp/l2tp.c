@@ -610,7 +610,8 @@ int l2tp_send_ppp(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, sock
 }
 
 int l2tp_dispatch_incoming(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
-                           l2tp_session_t *s, const uint8_t *data, size_t len, int tun_fd, ppp_session_t *ppp) {
+                           l2tp_session_t *s, const uint8_t *data, size_t len, packet_endpoint_t *endpoint,
+                           ppp_session_t *ppp) {
   (void)esp_fd;
   if (len < 2) return -1;
   uint16_t flags = util_read_be16(data + 0);
@@ -627,5 +628,5 @@ int l2tp_dispatch_incoming(int esp_fd, esp_keys_t *esp, const struct sockaddr *p
   const uint8_t *ppp_ptr = NULL;
   size_t ppp_len = 0;
   if (l2tp_data_extract_ppp(data, len, s, &ppp_ptr, &ppp_len, 1) != 0) return 0;
-  return ppp_dispatch_ppp_frame(esp_fd, esp, peer, peer_len, s, ppp, ppp_ptr, ppp_len, tun_fd);
+  return ppp_dispatch_ppp_frame(esp_fd, esp, peer, peer_len, s, ppp, ppp_ptr, ppp_len, endpoint);
 }

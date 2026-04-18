@@ -4,6 +4,7 @@
  * JNI via tunnel_loop_stop for cooperative shutdown.
  */
 #include "engine.h"
+#include "packet_endpoint.h"
 
 #include <android/log.h>
 #include <errno.h>
@@ -33,6 +34,9 @@ static struct {
   ppp_session_t ppp;
   int ready;
 } g_state;
+
+static proxy_packet_queue_ctx_t g_proxy_queue;
+static atomic_int g_proxy_bridge_active;
 
 void tunnel_loop_stop(void) { atomic_store(&g_stop, 1); }
 
@@ -83,18 +87,20 @@ void tunnel_negotiated_client_ipv4(uint8_t out[4]) {
   memcpy(out, g_state.ppp.local_ip, 4);
 }
 
-int tunnel_run_loop(int tun_fd) {
+static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint) {
   if (!g_state.ready) {
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "tunnel_run_loop: not negotiated");
     return TUNNEL_EXIT_BAD_ARGS;
   }
   atomic_store(&g_stop, 0);
 
-  if (set_nonblock(tun_fd) != 0 || set_nonblock(g_state.ike.esp_fd) != 0) {
+  const int endpoint_fd = packet_endpoint_poll_fd(endpoint);
+  if ((endpoint_fd >= 0 && set_nonblock(endpoint_fd) != 0) || set_nonblock(g_state.ike.esp_fd) != 0) {
     tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "nonblock failed: errno=%d", errno);
   }
 
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "tunnel poll loop: tun_fd=%d esp_fd=%d udp_encap=%d", tun_fd,
+  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "tunnel poll loop: endpoint=%s fd=%d esp_fd=%d udp_encap=%d",
+                    endpoint != NULL && endpoint->name != NULL ? endpoint->name : "unknown", endpoint_fd,
                     g_state.ike.esp_fd, g_state.esp.udp_encap ? 1 : 0);
 
   uint8_t tun_buf[65536];
@@ -103,7 +109,7 @@ int tunnel_run_loop(int tun_fd) {
 
   while (!atomic_load(&g_stop)) {
     struct pollfd fds[2];
-    fds[0].fd = tun_fd;
+    fds[0].fd = endpoint_fd;
     fds[0].events = POLLIN;
     fds[1].fd = g_state.ike.esp_fd;
     fds[1].events = POLLIN;
@@ -129,10 +135,10 @@ int tunnel_run_loop(int tun_fd) {
     }
 
     if (fds[0].revents & POLLIN) {
-      ssize_t n = read(tun_fd, tun_buf, sizeof(tun_buf));
-      if (n > 0) {
-        engine_dp_note_tun_rx();
-        if (ppp_encapsulate_and_send(g_state.ike.esp_fd, &g_state.esp,
+        ssize_t n = packet_endpoint_read(endpoint, tun_buf, sizeof(tun_buf));
+        if (n > 0) {
+          engine_dp_note_tun_rx();
+          if (ppp_encapsulate_and_send(g_state.ike.esp_fd, &g_state.esp,
                                      (struct sockaddr *)&g_state.ike.peer,
                                      g_state.ike.peer_len, &g_state.l2tp,
                                      &g_state.ppp, tun_buf, (size_t)n) < 0) {
@@ -160,7 +166,7 @@ int tunnel_run_loop(int tun_fd) {
         if (esp_try_decrypt(&g_state.esp, esp_buf, (size_t)n, plain, &plain_len) == 0 && plain_len > 0) {
           engine_dp_note_esp_plain_ok();
           l2tp_dispatch_incoming(g_state.ike.esp_fd, &g_state.esp, (struct sockaddr *)&g_state.ike.peer,
-                                 g_state.ike.peer_len, &g_state.l2tp, plain, plain_len, tun_fd, &g_state.ppp);
+                                 g_state.ike.peer_len, &g_state.l2tp, plain, plain_len, endpoint, &g_state.ppp);
         } else {
           engine_dp_note_esp_plain_fail();
           static time_t s_last_esp_plain_warn;
@@ -184,12 +190,59 @@ int tunnel_run_loop(int tun_fd) {
   return TUNNEL_EXIT_OK;
 }
 
+int tunnel_run_loop(int tun_fd) {
+  tun_packet_endpoint_ctx_t tun_ctx;
+  packet_endpoint_t endpoint;
+  packet_endpoint_init_tun(&endpoint, &tun_ctx, tun_fd);
+  return tunnel_run_loop_with_endpoint(tun_fd, &endpoint);
+}
+
+int tunnel_run_proxy_loop(void) {
+  if (!g_state.ready) {
+    tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "tunnel_run_proxy_loop: not negotiated");
+    return TUNNEL_EXIT_BAD_ARGS;
+  }
+  packet_endpoint_t endpoint;
+  if (packet_endpoint_init_proxy_queue(&endpoint, &g_proxy_queue) != 0) {
+    tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "proxy queue init failed errno=%d", errno);
+    close(g_state.ike.esp_fd);
+    g_state.ready = 0;
+    return TUNNEL_EXIT_PROXY_NOT_IMPLEMENTED;
+  }
+  atomic_store(&g_proxy_bridge_active, 1);
+  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+                    "proxy-only mode negotiated; native packet bridge active on endpoint=%s",
+                    endpoint.name != NULL ? endpoint.name : "unknown");
+  const int rc = tunnel_run_loop_with_endpoint(-1, &endpoint);
+  packet_endpoint_destroy_proxy_queue(&g_proxy_queue);
+  atomic_store(&g_proxy_bridge_active, 0);
+  return rc;
+}
+
 int tunnel_loop_run(int tun_fd, const char *server, const char *user, const char *password, const char *psk) {
   atomic_store(&g_stop, 0);
   tunnel_log("tunnel start server=%s", server);
   int rc = tunnel_negotiate(server, user, password, psk);
   if (rc != TUNNEL_EXIT_OK) return rc;
   return tunnel_run_loop(tun_fd);
+}
+
+int tunnel_proxy_is_bridge_active(void) { return atomic_load(&g_proxy_bridge_active) ? 1 : 0; }
+
+int tunnel_proxy_enqueue_outbound_packet(const uint8_t *packet, size_t len) {
+  if (!atomic_load(&g_proxy_bridge_active)) {
+    errno = ENOSYS;
+    return -1;
+  }
+  return packet_endpoint_proxy_enqueue_outbound(&g_proxy_queue, packet, len);
+}
+
+ssize_t tunnel_proxy_dequeue_inbound_packet(uint8_t *packet, size_t len) {
+  if (!atomic_load(&g_proxy_bridge_active)) {
+    errno = ENOSYS;
+    return -1;
+  }
+  return packet_endpoint_proxy_dequeue_inbound(&g_proxy_queue, packet, len);
 }
 
 /* --- Dataplane counters (tunnel_run_loop + ppp_dispatch) --- */

@@ -13,22 +13,24 @@ void installVpnChannelMock(
   Future<Object?> Function(MethodCall call)? onConnect,
 }) {
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-      .setMockMethodCallHandler(const MethodChannel(VpnContract.channel), (call) async {
-    capturedMethods.add(call.method);
-    switch (call.method) {
-      case VpnContract.prepareVpn:
-        return prepareResult;
-      case VpnContract.connect:
-        if (onConnect != null) {
-          return onConnect(call);
+      .setMockMethodCallHandler(const MethodChannel(VpnContract.channel), (
+        call,
+      ) async {
+        capturedMethods.add(call.method);
+        switch (call.method) {
+          case VpnContract.prepareVpn:
+            return prepareResult;
+          case VpnContract.connect:
+            if (onConnect != null) {
+              return onConnect(call);
+            }
+            return null;
+          case VpnContract.disconnect:
+            return null;
+          default:
+            return null;
         }
-        return null;
-      case VpnContract.disconnect:
-        return null;
-      default:
-        return null;
-    }
-  });
+      });
 }
 
 void uninstallVpnChannelMock() {

@@ -43,6 +43,15 @@
             </intent-filter>
         </service>
 
+        <service
+            android:name=".ProxyTunnelService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-initiated local proxy session." />
+        </service>
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

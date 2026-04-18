@@ -1,3 +1,20 @@
+/// Connection surface: Android VPN/TUN vs. local proxy listeners only.
+enum ConnectionMode {
+  vpnTunnel('vpnTunnel'),
+  proxyOnly('proxyOnly');
+
+  const ConnectionMode(this.jsonValue);
+  final String jsonValue;
+
+  static ConnectionMode fromJson(Object? raw) {
+    if (raw is! String) return ConnectionMode.vpnTunnel;
+    return switch (raw) {
+      'proxyOnly' => ConnectionMode.proxyOnly,
+      _ => ConnectionMode.vpnTunnel,
+    };
+  }
+}
+
 /// Android routing: entire device vs. selected apps only ([RoutingMode.perAppAllowList]).
 enum RoutingMode {
   fullTunnel('fullTunnel'),
@@ -12,6 +29,51 @@ enum RoutingMode {
       'perAppAllowList' => RoutingMode.perAppAllowList,
       _ => RoutingMode.fullTunnel,
     };
+  }
+}
+
+/// Global local-proxy settings; ports are loopback-only in v1.
+class ProxySettings {
+  const ProxySettings({
+    this.httpEnabled = true,
+    this.httpPort = defaultHttpPort,
+    this.socksEnabled = true,
+    this.socksPort = defaultSocksPort,
+  });
+
+  static const int defaultHttpPort = 8080;
+  static const int defaultSocksPort = 1080;
+  static const int minPort = 1;
+  static const int maxPort = 65535;
+
+  final bool httpEnabled;
+  final int httpPort;
+  final bool socksEnabled;
+  final int socksPort;
+
+  static int normalizePort(int value, {required int fallback}) {
+    if (value < minPort || value > maxPort) return fallback;
+    return value;
+  }
+
+  static int portFromText(String text, {required int fallback}) {
+    final parsed = int.tryParse(text.trim());
+    if (parsed == null) return fallback;
+    return normalizePort(parsed, fallback: fallback);
+  }
+
+  ProxySettings copyWith({
+    bool? httpEnabled,
+    int? httpPort,
+    bool? socksEnabled,
+    int? socksPort,
+  }) {
+    return ProxySettings(
+      httpEnabled: httpEnabled ?? this.httpEnabled,
+      httpPort: httpPort ?? this.httpPort,
+      socksEnabled: socksEnabled ?? this.socksEnabled,
+      socksPort: socksPort ?? this.socksPort,
+    );
   }
 }
 
@@ -69,13 +131,13 @@ class Profile {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'displayName': displayName,
-        'server': server,
-        'user': user,
-        'dns': dns,
-        'mtu': mtu,
-      };
+    'id': id,
+    'displayName': displayName,
+    'server': server,
+    'user': user,
+    'dns': dns,
+    'mtu': mtu,
+  };
 
   static Profile? tryFromJson(Object? raw) {
     if (raw is! Map) return null;
@@ -85,7 +147,11 @@ class Profile {
     final server = m['server'];
     final user = m['user'];
     final dns = m['dns'];
-    if (id is! String || displayName is! String || server is! String || user is! String || dns is! String) {
+    if (id is! String ||
+        displayName is! String ||
+        server is! String ||
+        user is! String ||
+        dns is! String) {
       return null;
     }
     if (id.isEmpty || server.isEmpty) return null;

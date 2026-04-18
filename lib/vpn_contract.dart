@@ -19,6 +19,11 @@ abstract final class VpnContract {
   static const String argDns = 'dns';
   static const String argMtu = 'mtu';
   static const String argProfileName = 'profileName';
+  static const String argConnectionMode = 'connectionMode';
+  static const String argProxyHttpEnabled = 'proxyHttpEnabled';
+  static const String argProxyHttpPort = 'proxyHttpPort';
+  static const String argProxySocksEnabled = 'proxySocksEnabled';
+  static const String argProxySocksPort = 'proxySocksPort';
 
   /// `fullTunnel` or `perAppAllowList` — same values as [RoutingMode.jsonValue].
   static const String argRoutingMode = 'routingMode';
@@ -31,6 +36,9 @@ abstract final class VpnContract {
 
   /// Android: argument is package name; response is launcher icon PNG bytes or null.
   static const String getAppIcon = 'getAppIcon';
+
+  static const String modeVpnTunnel = 'vpnTunnel';
+  static const String modeProxyOnly = 'proxyOnly';
 
   static const String onTunnelState = 'onTunnelState';
 

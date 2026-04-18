@@ -1,6 +1,6 @@
 part of '../home_page.dart';
 
-/// Connect/disconnect, attempt IDs, Android state callbacks, and 60s TUN wait timeout.
+/// Connect/disconnect, attempt IDs, Android state callbacks, and 60s ready timeout.
 extension _VpnHomePageTunnel on _VpnHomePageState {
   void _cancelAwaitTimer() {
     _awaitTimer?.cancel();
@@ -31,16 +31,24 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
 
   void _onTunnelFromHost(String state, String detail) {
     if (!mounted) return;
-    if (_timedOutThisAttempt && (state == VpnTunnelState.connected || state == VpnTunnelState.failed)) {
+    final proxyMode = _connectionMode == ConnectionMode.proxyOnly;
+    if (_timedOutThisAttempt &&
+        (state == VpnTunnelState.connected || state == VpnTunnelState.failed)) {
       final startedAt = _connectStartedAt;
-      final elapsed = startedAt == null ? null : DateTime.now().difference(startedAt);
+      final elapsed = startedAt == null
+          ? null
+          : DateTime.now().difference(startedAt);
       final attempt = _activeAttemptId;
-      _log('Late Android event after timeout: state=$state${attempt == null ? '' : ' attempt=$attempt'}${elapsed == null ? '' : ' after_ms=${elapsed.inMilliseconds}'}');
+      _log(
+        'Late Android event after timeout: state=$state${attempt == null ? '' : ' attempt=$attempt'}${elapsed == null ? '' : ' after_ms=${elapsed.inMilliseconds}'}',
+      );
       _timedOutThisAttempt = false;
     }
     switch (state) {
       case VpnTunnelState.connecting:
-        _log('Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: $detail');
+        _log(
+          'Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: $detail',
+        );
         if (_awaitingTunnel && !_tunnelUp) _scheduleAwaitTimeout();
         break;
       case VpnTunnelState.connected:
@@ -49,8 +57,10 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
           _awaitingTunnel = false;
           _tunnelUp = true;
         });
-        _log('Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: TUN is up: $detail');
-        _toast('VPN connected');
+        _log(
+          'Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: ${proxyMode ? 'proxy ready' : 'TUN is up'}: $detail',
+        );
+        _toast(proxyMode ? 'Proxy ready' : 'VPN connected');
         break;
       case VpnTunnelState.failed:
         _cancelAwaitTimer();
@@ -58,8 +68,13 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
           _awaitingTunnel = false;
           _tunnelUp = false;
         });
-        _log('Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: tunnel failed: $detail');
-        _toast(detail.isEmpty ? 'Couldn\'t establish the tunnel' : detail, error: true);
+        _log(
+          'Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: tunnel failed: $detail',
+        );
+        _toast(
+          detail.isEmpty ? 'Couldn\'t establish the tunnel' : detail,
+          error: true,
+        );
         break;
       case VpnTunnelState.stopped:
         _cancelAwaitTimer();
@@ -67,10 +82,14 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
           _awaitingTunnel = false;
           _tunnelUp = false;
         });
-        _log('Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: tunnel stopped: $detail');
+        _log(
+          'Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: tunnel stopped: $detail',
+        );
         break;
       default:
-        _log('Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: $state${detail.isEmpty ? '' : ': $detail'}');
+        _log(
+          'Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: $state${detail.isEmpty ? '' : ': $detail'}',
+        );
     }
   }
 
@@ -82,9 +101,13 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
         setState(() => _awaitingTunnel = false);
         _timedOutThisAttempt = true;
         final startedAt = _connectStartedAt;
-        final elapsed = startedAt == null ? null : DateTime.now().difference(startedAt);
+        final elapsed = startedAt == null
+            ? null
+            : DateTime.now().difference(startedAt);
         final attempt = _activeAttemptId;
-        _log('Timeout waiting for VPN interface from Android${attempt == null ? '' : ' attempt=$attempt'}${elapsed == null ? '' : ' elapsed_ms=${elapsed.inMilliseconds}'}');
+        _log(
+          'Timeout waiting for ${_connectionMode == ConnectionMode.proxyOnly ? 'proxy service' : 'VPN interface'} from Android${attempt == null ? '' : ' attempt=$attempt'}${elapsed == null ? '' : ' elapsed_ms=${elapsed.inMilliseconds}'}',
+        );
         _toast('Still connecting. Check logs or try again.', error: true);
       }
     });
@@ -94,7 +117,10 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
     if (_busy && _tunnelUp) return 'Disconnecting...';
     if (_awaitingTunnel && !_tunnelUp) return 'Connecting...';
     if (_busy) return 'Working...';
-    if (_tunnelUp) return 'Connected';
+    if (_tunnelUp)
+      return _connectionMode == ConnectionMode.proxyOnly
+          ? 'Proxy ready'
+          : 'Connected';
     return 'Connect';
   }
 
@@ -105,14 +131,32 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
   }
 
   Future<void> _connectWithAutoPrepare() async {
+    final proxyMode = _connectionMode == ConnectionMode.proxyOnly;
     final host = _server.text.trim();
-    if (host.isEmpty) {
+    if (!proxyMode && host.isEmpty) {
       _toast('Enter a server hostname or address', error: true);
       _log('Connect blocked: empty server');
       return;
     }
-    if (_routingMode == RoutingMode.perAppAllowList && _allowedAppPackages.isEmpty) {
-      _toast('Turn on "VPN for all apps", or open "Choose apps" and select at least one app.', error: true);
+    if (proxyMode && _activeProfileId == null) {
+      _toast('Select a saved profile to start local proxy', error: true);
+      _log('Connect blocked: proxy mode requires a saved profile');
+      return;
+    }
+    if (proxyMode &&
+        !_proxySettings.httpEnabled &&
+        !_proxySettings.socksEnabled) {
+      _toast('Enable HTTP or SOCKS5 before connecting', error: true);
+      _log('Connect blocked: proxy mode has no enabled listeners');
+      return;
+    }
+    if (!proxyMode &&
+        _routingMode == RoutingMode.perAppAllowList &&
+        _allowedAppPackages.isEmpty) {
+      _toast(
+        'Turn on "VPN for all apps", or open "Choose apps" and select at least one app.',
+        error: true,
+      );
       _log('Connect blocked: per-app mode with empty allow-list');
       return;
     }
@@ -122,20 +166,31 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
     _activeAttemptId = attemptId;
     _connectStartedAt = DateTime.now();
     _timedOutThisAttempt = false;
-    _log('Requesting VPN permission (if needed)... attempt=$attemptId');
 
     try {
-      final ok = await _client.prepareVpn();
-      if (!ok) {
-        _log('VPN permission denied or cancelled attempt=$attemptId');
-        _toast('VPN permission is required', error: true);
-        return;
+      if (!proxyMode) {
+        _log('Requesting VPN permission (if needed)... attempt=$attemptId');
+        final ok = await _client.prepareVpn();
+        if (!ok) {
+          _log('VPN permission denied or cancelled attempt=$attemptId');
+          _toast('VPN permission is required', error: true);
+          return;
+        }
+        _log('VPN permission OK attempt=$attemptId');
+      } else {
+        _log(
+          'Starting local proxy mode without Android VPN permission... attempt=$attemptId',
+        );
       }
-      _log('VPN permission OK attempt=$attemptId');
 
-      _log('Sending connect to tunnel service... attempt=$attemptId');
+      _log(
+        'Sending connect to ${proxyMode ? 'proxy service' : 'tunnel service'}... attempt=$attemptId',
+      );
       final dns = _dns.text.trim().isEmpty ? '8.8.8.8' : _dns.text.trim();
-      final mtu = Profile.mtuFromText(_mtu.text, fallback: Profile.defaultVpnMtu);
+      final mtu = Profile.mtuFromText(
+        _mtu.text,
+        fallback: Profile.defaultVpnMtu,
+      );
       String? profileName;
       for (final profile in _profiles) {
         if (profile.id == _activeProfileId) {
@@ -147,12 +202,15 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
       _log(
         'Profile: server=$host user=${_user.text.isEmpty ? '(empty)' : _user.text} dns=$dns mtu=$mtu '
         'psk=${_psk.text.isEmpty ? 'off (cleartext L2TP if server allows)' : 'on'} '
-        'routing=${_routingMode.jsonValue} allowedApps=${_allowedAppPackages.length} attempt=$attemptId',
+        'mode=${_connectionMode.jsonValue} routing=${_routingMode.jsonValue} allowedApps=${_allowedAppPackages.length} '
+        'http=${_proxySettings.httpEnabled ? _proxySettings.httpPort : 'off'} socks=${_proxySettings.socksEnabled ? _proxySettings.socksPort : 'off'} '
+        'attempt=$attemptId',
       );
       await _client.connect(
         attemptId: attemptId,
         server: host,
         profileName: profileName,
+        connectionMode: _connectionMode,
         user: _user.text,
         password: _password.text,
         psk: _psk.text,
@@ -160,15 +218,18 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
         mtu: mtu,
         routingMode: _routingMode,
         allowedAppPackages: _allowedAppPackages,
+        proxySettings: _proxySettings,
       );
-      _log('Connect acknowledged; waiting for TUN from Android... attempt=$attemptId');
+      _log(
+        'Connect acknowledged; waiting for ${proxyMode ? 'proxy readiness' : 'TUN'} from Android... attempt=$attemptId',
+      );
       if (!mounted) return;
       setState(() {
         _awaitingTunnel = true;
         _tunnelUp = false;
       });
       _scheduleAwaitTimeout();
-      _toast('Connecting...');
+      _toast(proxyMode ? 'Starting proxy...' : 'Connecting...');
     } on PlatformException catch (e) {
       _log('Platform error: ${e.code} ${e.message ?? ''} attempt=$attemptId');
       _toast(e.message ?? e.code, error: true);

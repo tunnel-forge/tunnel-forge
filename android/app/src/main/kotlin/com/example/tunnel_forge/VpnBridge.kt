@@ -25,7 +25,22 @@ object VpnBridge {
     ): Int
 
     @JvmStatic
+    external fun nativeSetSocketProtectionEnabled(enabled: Boolean)
+
+    @JvmStatic
     external fun nativeStartLoop(tunFd: Int): Int
+
+    @JvmStatic
+    external fun nativeStartProxyLoop(): Int
+
+    @JvmStatic
+    external fun nativeIsProxyPacketBridgeActive(): Boolean
+
+    @JvmStatic
+    external fun nativeQueueProxyOutboundPacket(packet: ByteArray): Int
+
+    @JvmStatic
+    external fun nativeReadProxyInboundPacket(maxLen: Int): ByteArray?
 
     @JvmStatic
     external fun nativeStopTunnel()

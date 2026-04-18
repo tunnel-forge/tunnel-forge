@@ -40,7 +40,9 @@ void main() {
     expect(find.byKey(const Key('vpn_connect')), findsOneWidget);
   });
 
-  testWidgets('connect flow with mocked native channel', (WidgetTester tester) async {
+  testWidgets('connect flow with mocked native channel', (
+    WidgetTester tester,
+  ) async {
     SharedPreferences.setMockInitialValues({});
     final methods = <String>[];
     installVpnChannelMock(methods);
@@ -75,7 +77,9 @@ void main() {
     expect(find.byKey(const Key('vpn_connect')), findsOneWidget);
   });
 
-  testWidgets('prepareVpn denied surfaces message and does not connect', (WidgetTester tester) async {
+  testWidgets('prepareVpn denied surfaces message and does not connect', (
+    WidgetTester tester,
+  ) async {
     SharedPreferences.setMockInitialValues({});
     final methods = <String>[];
     installVpnChannelMock(methods, prepareResult: false);
@@ -92,12 +96,17 @@ void main() {
     expect(statusText(tester), 'Connect');
   });
 
-  testWidgets('connect PlatformException is handled', (WidgetTester tester) async {
+  testWidgets('connect PlatformException is handled', (
+    WidgetTester tester,
+  ) async {
     SharedPreferences.setMockInitialValues({});
     final methods = <String>[];
     installVpnChannelMock(
       methods,
-      onConnect: (_) async => throw PlatformException(code: 'TEST', message: 'Simulated native failure'),
+      onConnect: (_) async => throw PlatformException(
+        code: 'TEST',
+        message: 'Simulated native failure',
+      ),
     );
     addTearDown(uninstallVpnChannelMock);
 
@@ -112,7 +121,9 @@ void main() {
     expect(statusText(tester), 'Connect');
   });
 
-  testWidgets('host tunnel state connected updates UI', (WidgetTester tester) async {
+  testWidgets('host tunnel state connected updates UI', (
+    WidgetTester tester,
+  ) async {
     SharedPreferences.setMockInitialValues({});
     final methods = <String>[];
     installVpnChannelMock(methods);

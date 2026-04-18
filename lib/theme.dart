@@ -51,15 +51,27 @@ ThemeData appTheme(Brightness brightness) {
     useMaterial3: true,
     visualDensity: VisualDensity.standard,
     textTheme: baseText.copyWith(
-      titleLarge: baseText.titleLarge?.copyWith(fontWeight: FontWeight.w700, letterSpacing: -0.2),
-      titleMedium: baseText.titleMedium?.copyWith(fontWeight: FontWeight.w600, letterSpacing: -0.1),
+      titleLarge: baseText.titleLarge?.copyWith(
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.2,
+      ),
+      titleMedium: baseText.titleMedium?.copyWith(
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.1,
+      ),
       titleSmall: baseText.titleSmall?.copyWith(fontWeight: FontWeight.w600),
       bodyLarge: baseText.bodyLarge?.copyWith(height: 1.35),
       bodyMedium: baseText.bodyMedium?.copyWith(height: 1.4),
       bodySmall: baseText.bodySmall?.copyWith(height: 1.35),
-      labelLarge: baseText.labelLarge?.copyWith(fontWeight: FontWeight.w600, letterSpacing: 0.1),
+      labelLarge: baseText.labelLarge?.copyWith(
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.1,
+      ),
     ),
-    appBarTheme: const AppBarTheme(centerTitle: false, scrolledUnderElevation: 0),
+    appBarTheme: const AppBarTheme(
+      centerTitle: false,
+      scrolledUnderElevation: 0,
+    ),
     inputDecorationTheme: InputDecorationTheme(
       filled: false,
       isDense: true,

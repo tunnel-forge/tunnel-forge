@@ -14,6 +14,7 @@
 #define LOG_TAG "tunnel_engine"
 
 static JavaVM *g_vm;
+static int g_socket_protection_enabled = 1;
 
 static void tunnel_engine_forward_to_flutter(int priority, const char *tag, const char *message) {
   if (message == NULL) {
@@ -86,7 +87,12 @@ void engine_set_java_vm(JavaVM *vm) { g_vm = vm; }
 
 JavaVM *engine_get_java_vm(void) { return g_vm; }
 
+void engine_set_socket_protection_enabled(int enabled) { g_socket_protection_enabled = enabled ? 1 : 0; }
+
 int util_protect_fd(int fd) {
+  if (!g_socket_protection_enabled) {
+    return 0;
+  }
   if (fd < 0 || g_vm == NULL) {
     return -1;
   }

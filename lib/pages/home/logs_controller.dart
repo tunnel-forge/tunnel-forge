@@ -49,7 +49,10 @@ extension _VpnHomePageLogs on _VpnHomePageState {
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message, style: TextStyle(color: error ? cs.onError : cs.onInverseSurface)),
+        content: Text(
+          message,
+          style: TextStyle(color: error ? cs.onError : cs.onInverseSurface),
+        ),
         backgroundColor: error ? cs.error : cs.inverseSurface,
       ),
     );

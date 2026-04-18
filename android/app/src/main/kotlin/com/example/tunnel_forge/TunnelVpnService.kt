@@ -198,6 +198,7 @@ class TunnelVpnService : VpnService() {
                 "userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()}",
         )
         try {
+            VpnBridge.nativeSetSocketProtectionEnabled(true)
             // Phase 1: negotiate IKE+L2TP+PPP on the real network (no VPN tunnel yet).
             val negotiatedClientIp = IntArray(4)
             val negResult = VpnBridge.nativeNegotiate(server, user, password, psk, negotiatedClientIp)
@@ -412,6 +413,7 @@ class TunnelVpnService : VpnService() {
             3 -> "PPP negotiation failed."
             4 -> "Tunnel poll I/O error."
             10 -> "Invalid tunnel arguments from the app."
+            11 -> "Proxy transport is not implemented yet."
             else -> "Tunnel engine exited with code $code"
         }
 

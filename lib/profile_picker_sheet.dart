@@ -39,7 +39,9 @@ class ProfilePickerSheet extends StatelessWidget {
     required Future<void> Function() onCreateNew,
   }) {
     final theme = Theme.of(context);
-    final sheetColor = theme.bottomSheetTheme.backgroundColor ?? theme.colorScheme.surfaceContainerLow;
+    final sheetColor =
+        theme.bottomSheetTheme.backgroundColor ??
+        theme.colorScheme.surfaceContainerLow;
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -74,7 +76,9 @@ class ProfilePickerSheet extends StatelessWidget {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final tt = theme.textTheme;
-    final sheetColor = theme.bottomSheetTheme.backgroundColor ?? theme.colorScheme.surfaceContainerLow;
+    final sheetColor =
+        theme.bottomSheetTheme.backgroundColor ??
+        theme.colorScheme.surfaceContainerLow;
     final bottom = MediaQuery.paddingOf(context).bottom;
     final maxH = MediaQuery.sizeOf(context).height * 0.62;
 
@@ -112,7 +116,9 @@ class ProfilePickerSheet extends StatelessWidget {
                           padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
                           child: Text(
                             'No profiles yet. Tap + to create your first one.',
-                            style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+                            style: tt.bodyMedium?.copyWith(
+                              color: cs.onSurfaceVariant,
+                            ),
                           ),
                         )
                       : ListView.builder(
@@ -121,7 +127,12 @@ class ProfilePickerSheet extends StatelessWidget {
                             final p = profiles[i];
                             final selected = p.id == selectedId;
                             return ListTile(
-                              leading: Icon(Icons.person_outline, color: selected ? cs.primary : cs.onSurfaceVariant),
+                              leading: Icon(
+                                Icons.person_outline,
+                                color: selected
+                                    ? cs.primary
+                                    : cs.onSurfaceVariant,
+                              ),
                               title: Text(
                                 p.displayName,
                                 style: tt.titleSmall?.copyWith(
@@ -133,20 +144,33 @@ class ProfilePickerSheet extends StatelessWidget {
                                 p.server,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                                style: tt.bodySmall?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                ),
                               ),
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   IconButton(
                                     tooltip: 'Edit profile',
-                                    icon: const Icon(Icons.edit_outlined, size: 22),
-                                    onPressed: loading ? null : () => onEdit(p.id),
+                                    icon: const Icon(
+                                      Icons.edit_outlined,
+                                      size: 22,
+                                    ),
+                                    onPressed: loading
+                                        ? null
+                                        : () => onEdit(p.id),
                                   ),
                                   IconButton(
                                     tooltip: 'Delete profile',
-                                    icon: Icon(Icons.delete_outline, size: 22, color: cs.error),
-                                    onPressed: loading ? null : () async => onDelete(p.id),
+                                    icon: Icon(
+                                      Icons.delete_outline,
+                                      size: 22,
+                                      color: cs.error,
+                                    ),
+                                    onPressed: loading
+                                        ? null
+                                        : () async => onDelete(p.id),
                                   ),
                                 ],
                               ),

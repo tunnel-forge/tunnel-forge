@@ -93,6 +93,13 @@ class MainActivity : FlutterActivity() {
                         },
                     )
                     val profileName = (args[VpnContract.ARG_PROFILE_NAME] as? String)?.trim().orEmpty()
+                    val connectionModeRaw = args[VpnContract.ARG_CONNECTION_MODE] as? String
+                    val connectionMode =
+                        if (connectionModeRaw == VpnContract.MODE_PROXY_ONLY) {
+                            VpnContract.MODE_PROXY_ONLY
+                        } else {
+                            VpnContract.MODE_VPN_TUNNEL
+                        }
                     val routingModeRaw = args[VpnContract.ARG_ROUTING_MODE] as? String
                     val routingMode =
                         if (routingModeRaw == VpnContract.ROUTING_PER_APP_ALLOW_LIST) {
@@ -108,6 +115,10 @@ class MainActivity : FlutterActivity() {
                             if (!s.isNullOrBlank()) allowedPackages.add(s.trim())
                         }
                     }
+                    val proxyHttpEnabled = args[VpnContract.ARG_PROXY_HTTP_ENABLED] as? Boolean ?: true
+                    val proxyHttpPort = sanitizePort(args[VpnContract.ARG_PROXY_HTTP_PORT], ProxyTunnelService.DEFAULT_HTTP_PORT)
+                    val proxySocksEnabled = args[VpnContract.ARG_PROXY_SOCKS_ENABLED] as? Boolean ?: true
+                    val proxySocksPort = sanitizePort(args[VpnContract.ARG_PROXY_SOCKS_PORT], ProxyTunnelService.DEFAULT_SOCKS_PORT)
                     val serverTrim = server.trim()
                     val hasScheme = serverTrim.contains("://")
                     val hasPort = serverTrim.count { it == ':' } == 1 && !serverTrim.contains("::")
@@ -120,32 +131,53 @@ class MainActivity : FlutterActivity() {
                     if (hasPort) {
                         Log.w(TAG, "vpn_call connect server includes port; expected host only attempt=$attemptId server=$serverTrim")
                     }
-                    val prep = VpnService.prepare(this)
-                    if (prep != null) {
-                        Log.e(TAG, "vpn_call connect rejected vpn_permission attempt=$attemptId")
-                        result.error("vpn_permission", "VPN permission not granted", null)
-                        return@setMethodCallHandler
+                    if (connectionMode == VpnContract.MODE_VPN_TUNNEL) {
+                        val prep = VpnService.prepare(this)
+                        if (prep != null) {
+                            Log.e(TAG, "vpn_call connect rejected vpn_permission attempt=$attemptId")
+                            result.error("vpn_permission", "VPN permission not granted", null)
+                            return@setMethodCallHandler
+                        }
                     }
                     Log.i(
                         TAG,
-                        "vpn_call connect start attempt=$attemptId server=$serverTrim userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dns=$dns mtu=$mtu routing=$routingMode allowedApps=${allowedPackages.size}",
+                        "vpn_call connect start attempt=$attemptId server=$serverTrim userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dns=$dns mtu=$mtu mode=$connectionMode routing=$routingMode allowedApps=${allowedPackages.size}",
                     )
-                    val intent = Intent(this, TunnelVpnService::class.java).apply {
-                        action = TunnelVpnService.ACTION_START
-                        putExtra(TunnelVpnService.EXTRA_ATTEMPT_ID, attemptId)
-                        putExtra(TunnelVpnService.EXTRA_SERVER, serverTrim)
-                        putExtra(TunnelVpnService.EXTRA_USER, user)
-                        putExtra(TunnelVpnService.EXTRA_PASSWORD, password)
-                        putExtra(TunnelVpnService.EXTRA_PSK, psk)
-                        putExtra(TunnelVpnService.EXTRA_DNS, dns)
-                        putExtra(TunnelVpnService.EXTRA_MTU, mtu)
-                        putExtra(TunnelVpnService.EXTRA_PROFILE_NAME, profileName)
-                        putExtra(TunnelVpnService.EXTRA_ROUTING_MODE, routingMode)
-                        putStringArrayListExtra(
-                            TunnelVpnService.EXTRA_ALLOWED_PACKAGES,
-                            ArrayList(allowedPackages),
-                        )
-                    }
+                    val intent =
+                        if (connectionMode == VpnContract.MODE_PROXY_ONLY) {
+                            Intent(this, ProxyTunnelService::class.java).apply {
+                                action = ProxyTunnelService.ACTION_START
+                                putExtra(ProxyTunnelService.EXTRA_ATTEMPT_ID, attemptId)
+                                putExtra(ProxyTunnelService.EXTRA_SERVER, serverTrim)
+                                putExtra(ProxyTunnelService.EXTRA_USER, user)
+                                putExtra(ProxyTunnelService.EXTRA_PASSWORD, password)
+                                putExtra(ProxyTunnelService.EXTRA_PSK, psk)
+                                putExtra(ProxyTunnelService.EXTRA_DNS, dns)
+                                putExtra(ProxyTunnelService.EXTRA_MTU, mtu)
+                                putExtra(ProxyTunnelService.EXTRA_PROFILE_NAME, profileName)
+                                putExtra(ProxyTunnelService.EXTRA_PROXY_HTTP_ENABLED, proxyHttpEnabled)
+                                putExtra(ProxyTunnelService.EXTRA_PROXY_HTTP_PORT, proxyHttpPort)
+                                putExtra(ProxyTunnelService.EXTRA_PROXY_SOCKS_ENABLED, proxySocksEnabled)
+                                putExtra(ProxyTunnelService.EXTRA_PROXY_SOCKS_PORT, proxySocksPort)
+                            }
+                        } else {
+                            Intent(this, TunnelVpnService::class.java).apply {
+                                action = TunnelVpnService.ACTION_START
+                                putExtra(TunnelVpnService.EXTRA_ATTEMPT_ID, attemptId)
+                                putExtra(TunnelVpnService.EXTRA_SERVER, serverTrim)
+                                putExtra(TunnelVpnService.EXTRA_USER, user)
+                                putExtra(TunnelVpnService.EXTRA_PASSWORD, password)
+                                putExtra(TunnelVpnService.EXTRA_PSK, psk)
+                                putExtra(TunnelVpnService.EXTRA_DNS, dns)
+                                putExtra(TunnelVpnService.EXTRA_MTU, mtu)
+                                putExtra(TunnelVpnService.EXTRA_PROFILE_NAME, profileName)
+                                putExtra(TunnelVpnService.EXTRA_ROUTING_MODE, routingMode)
+                                putStringArrayListExtra(
+                                    TunnelVpnService.EXTRA_ALLOWED_PACKAGES,
+                                    ArrayList(allowedPackages),
+                                )
+                            }
+                        }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasPostNotificationsPermission()) {
                         if (notificationPermissionResult != null) {
                             result.error("notification_permission_pending", "Notification permission request already in progress", null)
@@ -160,7 +192,7 @@ class MainActivity : FlutterActivity() {
                         )
                         return@setMethodCallHandler
                     }
-                    startTunnelService(intent)
+                    startForegroundWorkerService(intent)
                     Log.i(TAG, "vpn_call connect dispatched action=ACTION_START attempt=$attemptId")
                     result.success(null)
                 }
@@ -170,6 +202,11 @@ class MainActivity : FlutterActivity() {
                         action = TunnelVpnService.ACTION_STOP
                     }
                     startService(intent)
+                    startService(
+                        Intent(this, ProxyTunnelService::class.java).apply {
+                            action = ProxyTunnelService.ACTION_STOP
+                        },
+                    )
                     result.success(null)
                 }
                 else -> result.notImplemented()
@@ -220,7 +257,7 @@ class MainActivity : FlutterActivity() {
             pending.error("internal", "Missing pending VPN connect intent", null)
             return
         }
-        startTunnelService(connectIntent)
+        startForegroundWorkerService(connectIntent)
         Log.i(TAG, "vpn_call connect dispatched action=ACTION_START after notification grant")
         pending.success(null)
     }
@@ -287,12 +324,23 @@ class MainActivity : FlutterActivity() {
         return bmp
     }
 
-    private fun startTunnelService(intent: Intent) {
+    private fun startForegroundWorkerService(intent: Intent) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
             startService(intent)
         }
+    }
+
+    private fun sanitizePort(raw: Any?, fallback: Int): Int {
+        val candidate =
+            when (raw) {
+                is Int -> raw
+                is Long -> raw.toInt()
+                is Number -> raw.toInt()
+                else -> fallback
+            }
+        return if (candidate in 1..65535) candidate else fallback
     }
 
     private fun hasPostNotificationsPermission(): Boolean {

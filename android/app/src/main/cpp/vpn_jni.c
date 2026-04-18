@@ -71,11 +71,66 @@ cleanup:
   return out;
 }
 
+JNIEXPORT void JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeSetSocketProtectionEnabled(JNIEnv *env,
+                                                                                                  jclass clazz,
+                                                                                                  jboolean enabled) {
+  (void)env;
+  (void)clazz;
+  engine_set_socket_protection_enabled(enabled ? 1 : 0);
+}
+
 JNIEXPORT jint JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeStartLoop(JNIEnv *env, jclass clazz,
-                                                                                jint tun_fd) {
+                                                                                 jint tun_fd) {
   (void)env;
   (void)clazz;
   return (jint)tunnel_run_loop(tun_fd);
+}
+
+JNIEXPORT jint JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeStartProxyLoop(JNIEnv *env, jclass clazz) {
+  (void)env;
+  (void)clazz;
+  return (jint)tunnel_run_proxy_loop();
+}
+
+JNIEXPORT jboolean JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeIsProxyPacketBridgeActive(JNIEnv *env,
+                                                                                                     jclass clazz) {
+  (void)env;
+  (void)clazz;
+  return tunnel_proxy_is_bridge_active() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jint JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeQueueProxyOutboundPacket(JNIEnv *env,
+                                                                                                jclass clazz,
+                                                                                                jbyteArray jpacket) {
+  (void)clazz;
+  if (jpacket == NULL) return (jint)TUNNEL_EXIT_BAD_ARGS;
+  jsize len = (*env)->GetArrayLength(env, jpacket);
+  if (len <= 0) return (jint)TUNNEL_EXIT_BAD_ARGS;
+  jbyte *bytes = (*env)->GetByteArrayElements(env, jpacket, NULL);
+  if (bytes == NULL) return (jint)TUNNEL_EXIT_BAD_ARGS;
+  int rc = tunnel_proxy_enqueue_outbound_packet((const uint8_t *)bytes, (size_t)len);
+  (*env)->ReleaseByteArrayElements(env, jpacket, bytes, JNI_ABORT);
+  return (jint)rc;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeReadProxyInboundPacket(JNIEnv *env,
+                                                                                                    jclass clazz,
+                                                                                                    jint max_len) {
+  (void)clazz;
+  if (max_len <= 0) return NULL;
+  uint8_t *buf = (uint8_t *)malloc((size_t)max_len);
+  if (buf == NULL) return NULL;
+  ssize_t n = tunnel_proxy_dequeue_inbound_packet(buf, (size_t)max_len);
+  if (n <= 0) {
+    free(buf);
+    return NULL;
+  }
+  jbyteArray out = (*env)->NewByteArray(env, (jsize)n);
+  if (out != NULL) {
+    (*env)->SetByteArrayRegion(env, out, 0, (jsize)n, (const jbyte *)buf);
+  }
+  free(buf);
+  return out;
 }
 
 JNIEXPORT void JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeStopTunnel(JNIEnv *env, jclass clazz) {

@@ -53,17 +53,25 @@ class _LogsPanelState extends State<LogsPanel> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.terminal_rounded, size: 36, color: widget.colorScheme.outline),
+              Icon(
+                Icons.terminal_rounded,
+                size: 36,
+                color: widget.colorScheme.outline,
+              ),
               const SizedBox(height: 12),
               Text(
                 'No activity yet',
-                style: widget.textTheme.bodyLarge?.copyWith(color: widget.colorScheme.onSurfaceVariant),
+                style: widget.textTheme.bodyLarge?.copyWith(
+                  color: widget.colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 6),
               Text(
                 'Connect to see engine output here.',
                 textAlign: TextAlign.center,
-                style: widget.textTheme.bodySmall?.copyWith(color: widget.colorScheme.onSurfaceVariant),
+                style: widget.textTheme.bodySmall?.copyWith(
+                  color: widget.colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ),
@@ -81,7 +89,10 @@ class _LogsPanelState extends State<LogsPanel> {
       height: 1.38,
       fontFeatures: const [FontFeature.tabularFigures()],
     );
-    final timeStyle = mono?.copyWith(color: cs.onSurfaceVariant, fontWeight: FontWeight.w500);
+    final timeStyle = mono?.copyWith(
+      color: cs.onSurfaceVariant,
+      fontWeight: FontWeight.w500,
+    );
     final bodyStyle = mono?.copyWith(color: cs.onSurface);
 
     Widget logList({double? height, double? width}) {
@@ -94,7 +105,9 @@ class _LogsPanelState extends State<LogsPanel> {
         itemBuilder: (context, i) {
           final line = logs[i];
           final (time, body) = _splitLogLine(line);
-          final stripe = i.isEven ? cs.surfaceContainerHighest.withValues(alpha: 0.18) : null;
+          final stripe = i.isEven
+              ? cs.surfaceContainerHighest.withValues(alpha: 0.18)
+              : null;
           return RepaintBoundary(
             child: ColoredBox(
               color: stripe ?? Colors.transparent,
@@ -104,8 +117,10 @@ class _LogsPanelState extends State<LogsPanel> {
                   TextSpan(
                     style: mono,
                     children: [
-                      if (time.isNotEmpty) TextSpan(text: time, style: timeStyle),
-                      if (time.isNotEmpty) TextSpan(text: '  ', style: timeStyle),
+                      if (time.isNotEmpty)
+                        TextSpan(text: time, style: timeStyle),
+                      if (time.isNotEmpty)
+                        TextSpan(text: '  ', style: timeStyle),
                       TextSpan(text: body, style: bodyStyle),
                     ],
                   ),
@@ -127,7 +142,9 @@ class _LogsPanelState extends State<LogsPanel> {
         ? logList()
         : LayoutBuilder(
             builder: (context, constraints) {
-              final minW = constraints.maxWidth * 2 < 900 ? 900.0 : constraints.maxWidth * 2;
+              final minW = constraints.maxWidth * 2 < 900
+                  ? 900.0
+                  : constraints.maxWidth * 2;
               return Scrollbar(
                 controller: _horizontalScroll,
                 thumbVisibility: false,
@@ -158,7 +175,10 @@ class _LogsPanelState extends State<LogsPanel> {
               style: FilledButton.styleFrom(
                 visualDensity: VisualDensity.compact,
                 textStyle: widget.textTheme.labelMedium,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
               ),
             ),
           ),

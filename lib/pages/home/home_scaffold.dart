@@ -2,7 +2,11 @@ part of '../home_page.dart';
 
 /// Bottom nav: 0 VPN, 1 Logs, 2 Settings — animated app bar and tab bodies.
 extension _VpnHomePageUi on _VpnHomePageState {
-  Widget _buildMainTab(ColorScheme cs, TextTheme textTheme, String? effectiveProfileId) {
+  Widget _buildMainTab(
+    ColorScheme cs,
+    TextTheme textTheme,
+    String? effectiveProfileId,
+  ) {
     Profile? activeProfile;
     if (effectiveProfileId != null) {
       for (final p in _profiles) {
@@ -17,7 +21,9 @@ extension _VpnHomePageUi on _VpnHomePageState {
         : (_profiles.isEmpty ? 'No saved profile' : 'Quick connect');
     final profileSummarySubtitle = activeProfile != null
         ? activeProfile.server
-        : (_profiles.isEmpty ? 'Create your first profile' : 'Select a saved profile');
+        : (_profiles.isEmpty
+              ? 'Create your first profile'
+              : 'Select a saved profile');
 
     switch (_navIndex) {
       case 0:
@@ -54,11 +60,20 @@ extension _VpnHomePageUi on _VpnHomePageState {
         return SettingsPanel(
           themeMode: widget.themeMode,
           onThemeModeChanged: widget.onThemeModeChanged,
+          connectionMode: _connectionMode,
           routingMode: _routingMode,
           allowedAppPackages: _allowedAppPackages,
+          proxySettings: _proxySettings,
+          onConnectionModeChanged: (mode) {
+            _setConnectionMode(mode);
+          },
           onRoutingModeChanged: (m) => setState(() => _routingMode = m),
+          onProxySettingsChanged: (settings) {
+            _setProxySettings(settings);
+          },
           onChooseApps: _pickAppsForVpn,
-          routingLocked: _profilesLoading || _busy || _tunnelUp || _awaitingTunnel,
+          routingLocked:
+              _profilesLoading || _busy || _tunnelUp || _awaitingTunnel,
           colorScheme: cs,
           textTheme: textTheme,
         );
@@ -68,8 +83,16 @@ extension _VpnHomePageUi on _VpnHomePageState {
   Widget _buildHomeScaffold(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final effectiveProfileId = _activeProfileId != null && _profiles.any((p) => p.id == _activeProfileId) ? _activeProfileId : null;
-    final appBarTitle = switch (_navIndex) { 0 => 'Tunnel Forge', 1 => 'Logs', _ => 'Settings' };
+    final effectiveProfileId =
+        _activeProfileId != null &&
+            _profiles.any((p) => p.id == _activeProfileId)
+        ? _activeProfileId
+        : null;
+    final appBarTitle = switch (_navIndex) {
+      0 => 'Tunnel Forge',
+      1 => 'Logs',
+      _ => 'Settings',
+    };
 
     return Scaffold(
       appBar: AppBar(
@@ -78,12 +101,21 @@ extension _VpnHomePageUi on _VpnHomePageState {
           switchInCurve: Curves.easeOutCubic,
           switchOutCurve: Curves.easeInCubic,
           transitionBuilder: (child, animation) {
-            final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+            final curved = CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+            );
             return FadeTransition(
               opacity: curved,
               child: SlideTransition(
-                position: Tween<Offset>(begin: const Offset(0, -0.18), end: Offset.zero).animate(curved),
-                child: ScaleTransition(scale: Tween<double>(begin: 0.98, end: 1).animate(curved), child: child),
+                position: Tween<Offset>(
+                  begin: const Offset(0, -0.18),
+                  end: Offset.zero,
+                ).animate(curved),
+                child: ScaleTransition(
+                  scale: Tween<double>(begin: 0.98, end: 1).animate(curved),
+                  child: child,
+                ),
               ),
             );
           },
@@ -95,10 +127,19 @@ extension _VpnHomePageUi on _VpnHomePageState {
             switchInCurve: Curves.easeOut,
             switchOutCurve: Curves.easeIn,
             transitionBuilder: (child, animation) {
-              final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+              final curved = CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeOutCubic,
+              );
               return FadeTransition(
                 opacity: curved,
-                child: SlideTransition(position: Tween<Offset>(begin: const Offset(0.08, 0), end: Offset.zero).animate(curved), child: child),
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0.08, 0),
+                    end: Offset.zero,
+                  ).animate(curved),
+                  child: child,
+                ),
               );
             },
             child: Padding(
@@ -109,25 +150,38 @@ extension _VpnHomePageUi on _VpnHomePageState {
                 children: switch (_navIndex) {
                   0 => <Widget>[],
                   1 => [
-                      IconButton(
-                        tooltip: _logsWordWrap ? 'Turn off word wrap (wide lines scroll sideways)' : 'Turn on word wrap',
-                        onPressed: () => setState(() => _logsWordWrap = !_logsWordWrap),
-                        icon: Icon(_logsWordWrap ? Icons.wrap_text : Icons.swap_horiz),
+                    IconButton(
+                      tooltip: _logsWordWrap
+                          ? 'Turn off word wrap (wide lines scroll sideways)'
+                          : 'Turn on word wrap',
+                      onPressed: () =>
+                          setState(() => _logsWordWrap = !_logsWordWrap),
+                      icon: Icon(
+                        _logsWordWrap ? Icons.wrap_text : Icons.swap_horiz,
                       ),
-                      ListenableBuilder(
-                        listenable: _logBuffer,
-                        builder: (context, _) {
-                          final empty = _logBuffer.isEmpty;
-                          return Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(tooltip: 'Copy all', onPressed: empty ? null : _copyLogs, icon: const Icon(Icons.copy_all_outlined)),
-                              IconButton(tooltip: 'Clear', onPressed: empty ? null : _clearLogs, icon: const Icon(Icons.delete_outline)),
-                            ],
-                          );
-                        },
-                      ),
-                    ],
+                    ),
+                    ListenableBuilder(
+                      listenable: _logBuffer,
+                      builder: (context, _) {
+                        final empty = _logBuffer.isEmpty;
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'Copy all',
+                              onPressed: empty ? null : _copyLogs,
+                              icon: const Icon(Icons.copy_all_outlined),
+                            ),
+                            IconButton(
+                              tooltip: 'Clear',
+                              onPressed: empty ? null : _clearLogs,
+                              icon: const Icon(Icons.delete_outline),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ],
                   _ => <Widget>[],
                 },
               ),
@@ -144,19 +198,34 @@ extension _VpnHomePageUi on _VpnHomePageState {
           layoutBuilder: (currentChild, previousChildren) => Stack(
             fit: StackFit.expand,
             alignment: Alignment.topCenter,
-            children: <Widget>[...previousChildren, if (currentChild != null) currentChild],
+            children: <Widget>[
+              ...previousChildren,
+              if (currentChild != null) currentChild,
+            ],
           ),
           transitionBuilder: (child, animation) {
-            final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+            final curved = CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+            );
             return FadeTransition(
               opacity: curved,
               child: SlideTransition(
-                position: Tween<Offset>(begin: const Offset(0.08, 0), end: Offset.zero).animate(curved),
-                child: ScaleTransition(scale: Tween<double>(begin: 0.985, end: 1).animate(curved), child: child),
+                position: Tween<Offset>(
+                  begin: const Offset(0.08, 0),
+                  end: Offset.zero,
+                ).animate(curved),
+                child: ScaleTransition(
+                  scale: Tween<double>(begin: 0.985, end: 1).animate(curved),
+                  child: child,
+                ),
               ),
             );
           },
-          child: SizedBox.expand(key: ValueKey<int>(_navIndex), child: _buildMainTab(cs, textTheme, effectiveProfileId)),
+          child: SizedBox.expand(
+            key: ValueKey<int>(_navIndex),
+            child: _buildMainTab(cs, textTheme, effectiveProfileId),
+          ),
         ),
       ),
       bottomNavigationBar: NavigationBar(
@@ -172,9 +241,21 @@ extension _VpnHomePageUi on _VpnHomePageState {
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         animationDuration: const Duration(milliseconds: 360),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.vpn_key_outlined), selectedIcon: Icon(Icons.vpn_key), label: 'VPN'),
-          NavigationDestination(icon: Icon(Icons.article_outlined), selectedIcon: Icon(Icons.article), label: 'Logs'),
-          NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
+          NavigationDestination(
+            icon: Icon(Icons.vpn_key_outlined),
+            selectedIcon: Icon(Icons.vpn_key),
+            label: 'VPN',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.article_outlined),
+            selectedIcon: Icon(Icons.article),
+            label: 'Logs',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: 'Settings',
+          ),
         ],
       ),
     );

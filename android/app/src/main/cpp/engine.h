@@ -7,6 +7,7 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 #include <time.h>
 
 #include "util_endian.h"
@@ -24,8 +25,10 @@
 #define TUNNEL_EXIT_PPP_FAILED 3
 #define TUNNEL_EXIT_POLL_ERROR 4
 #define TUNNEL_EXIT_BAD_ARGS 10
+#define TUNNEL_EXIT_PROXY_NOT_IMPLEMENTED 11
 
 int util_protect_fd(int fd);
+void engine_set_socket_protection_enabled(int enabled);
 
 int tunnel_loop_run(int tun_fd, const char *server, const char *user, const char *password, const char *psk);
 
@@ -37,6 +40,12 @@ void tunnel_negotiated_client_ipv4(uint8_t out[4]);
 
 /** Phase 2: poll loop over TUN + ESP. Call after VPN establish(). Requires prior tunnel_negotiate() success. */
 int tunnel_run_loop(int tun_fd);
+
+/** Proxy-only placeholder until a userspace TCP/IP stack is integrated. Requires prior tunnel_negotiate(). */
+int tunnel_run_proxy_loop(void);
+int tunnel_proxy_is_bridge_active(void);
+int tunnel_proxy_enqueue_outbound_packet(const uint8_t *packet, size_t len);
+ssize_t tunnel_proxy_dequeue_inbound_packet(uint8_t *packet, size_t len);
 
 /* Do not pass secrets as format args. */
 void tunnel_log(const char *fmt, ...);

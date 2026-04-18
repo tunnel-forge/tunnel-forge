@@ -25,7 +25,9 @@ class ProfileEditorSheet extends StatefulWidget {
     required ProfileStore store,
   }) {
     final theme = Theme.of(context);
-    final sheetColor = theme.bottomSheetTheme.backgroundColor ?? theme.colorScheme.surfaceContainerLow;
+    final sheetColor =
+        theme.bottomSheetTheme.backgroundColor ??
+        theme.colorScheme.surfaceContainerLow;
     return showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -97,37 +99,55 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
   Future<void> _save() async {
     final serverTrim = _server.text.trim();
     if (serverTrim.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a server address')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Enter a server address')));
       return;
     }
     final mtuParsed = int.tryParse(_mtu.text.trim());
     if (mtuParsed == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('MTU must be a number (${Profile.minVpnMtu}–${Profile.maxVpnMtu})')),
+        SnackBar(
+          content: Text(
+            'MTU must be a number (${Profile.minVpnMtu}–${Profile.maxVpnMtu})',
+          ),
+        ),
       );
       return;
     }
     if (mtuParsed < Profile.minVpnMtu || mtuParsed > Profile.maxVpnMtu) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('MTU must be between ${Profile.minVpnMtu} and ${Profile.maxVpnMtu}')),
+        SnackBar(
+          content: Text(
+            'MTU must be between ${Profile.minVpnMtu} and ${Profile.maxVpnMtu}',
+          ),
+        ),
       );
       return;
     }
     final profile = Profile(
       id: widget.profileId,
-      displayName: _displayName.text.trim().isEmpty ? serverTrim : _displayName.text.trim(),
+      displayName: _displayName.text.trim().isEmpty
+          ? serverTrim
+          : _displayName.text.trim(),
       server: serverTrim,
       user: _user.text,
       dns: _dns.text.trim().isEmpty ? '8.8.8.8' : _dns.text.trim(),
       mtu: Profile.normalizeMtu(mtuParsed),
     );
     try {
-      await widget.store.upsertProfile(profile, password: _password.text, psk: _psk.text);
+      await widget.store.upsertProfile(
+        profile,
+        password: _password.text,
+        psk: _psk.text,
+      );
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not save changes')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Could not save changes')));
     }
   }
 
@@ -140,7 +160,9 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
       hintText: hint,
       border: border,
       enabledBorder: border,
-      focusedBorder: border.copyWith(borderSide: BorderSide(color: cs.primary, width: 2)),
+      focusedBorder: border.copyWith(
+        borderSide: BorderSide(color: cs.primary, width: 2),
+      ),
     );
   }
 
@@ -148,7 +170,9 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final tt = theme.textTheme;
-    final sheetColor = theme.bottomSheetTheme.backgroundColor ?? theme.colorScheme.surfaceContainerLow;
+    final sheetColor =
+        theme.bottomSheetTheme.backgroundColor ??
+        theme.colorScheme.surfaceContainerLow;
     final maxH = MediaQuery.sizeOf(context).height * 0.9;
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     final safeBottom = MediaQuery.paddingOf(context).bottom;
@@ -161,7 +185,10 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
           children: [
             Text(_loadError!, style: tt.bodyLarge),
             const SizedBox(height: 16),
-            FilledButton(onPressed: () => Navigator.pop(context, false), child: const Text('Close')),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Close'),
+            ),
           ],
         ),
       );
@@ -181,30 +208,78 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
             backgroundColor: sheetColor,
             surfaceTintColor: Colors.transparent,
             title: const Text('Profile details'),
-            leading: IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context, false)),
+            leading: IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () => Navigator.pop(context, false),
+            ),
             actions: [
-              TextButton(onPressed: _loading ? null : _save, child: const Text('Save')),
+              TextButton(
+                onPressed: _loading ? null : _save,
+                child: const Text('Save'),
+              ),
             ],
           ),
           body: _loading
               ? const Center(child: CircularProgressIndicator())
               : SingleChildScrollView(
-                  keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 24 + safeBottom),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      TextField(controller: _displayName, textInputAction: TextInputAction.next, decoration: _deco(context, label: 'Name', hint: 'e.g. Office VPN')),
+                      TextField(
+                        controller: _displayName,
+                        textInputAction: TextInputAction.next,
+                        decoration: _deco(
+                          context,
+                          label: 'Name',
+                          hint: 'e.g. Office VPN',
+                        ),
+                      ),
                       const SizedBox(height: 12),
-                      TextField(controller: _server, textInputAction: TextInputAction.next, keyboardType: TextInputType.url, decoration: _deco(context, label: 'Server', hint: 'Hostname or IP address')),
+                      TextField(
+                        controller: _server,
+                        textInputAction: TextInputAction.next,
+                        keyboardType: TextInputType.url,
+                        decoration: _deco(
+                          context,
+                          label: 'Server',
+                          hint: 'Hostname or IP address',
+                        ),
+                      ),
                       const SizedBox(height: 12),
-                      TextField(controller: _user, textInputAction: TextInputAction.next, decoration: _deco(context, label: 'Username')),
+                      TextField(
+                        controller: _user,
+                        textInputAction: TextInputAction.next,
+                        decoration: _deco(context, label: 'Username'),
+                      ),
                       const SizedBox(height: 12),
-                      TextField(controller: _password, obscureText: true, decoration: _deco(context, label: 'Password')),
+                      TextField(
+                        controller: _password,
+                        obscureText: true,
+                        decoration: _deco(context, label: 'Password'),
+                      ),
                       const SizedBox(height: 12),
-                      TextField(controller: _psk, obscureText: true, decoration: _deco(context, label: 'IPsec PSK', hint: 'Optional if your server does not use IPsec')),
+                      TextField(
+                        controller: _psk,
+                        obscureText: true,
+                        decoration: _deco(
+                          context,
+                          label: 'IPsec PSK',
+                          hint: 'Optional if your server does not use IPsec',
+                        ),
+                      ),
                       const SizedBox(height: 12),
-                      TextField(controller: _dns, keyboardType: TextInputType.number, decoration: _deco(context, label: 'DNS', hint: '8.8.8.8')),
+                      TextField(
+                        controller: _dns,
+                        keyboardType: TextInputType.number,
+                        decoration: _deco(
+                          context,
+                          label: 'DNS',
+                          hint: '8.8.8.8',
+                        ),
+                      ),
                       const SizedBox(height: 12),
                       TextField(
                         controller: _mtu,
@@ -212,7 +287,8 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
                         decoration: _deco(
                           context,
                           label: 'TUN MTU',
-                          hint: '${Profile.defaultVpnMtu} (typical for PPP MRU 1280)',
+                          hint:
+                              '${Profile.defaultVpnMtu} (typical for PPP MRU 1280)',
                         ),
                       ),
                     ],

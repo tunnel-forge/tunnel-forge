@@ -3,6 +3,7 @@
 
 #include "esp_udp.h"
 #include "l2tp.h"
+#include "packet_endpoint.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -21,6 +22,6 @@ int ppp_encapsulate_and_send(int esp_fd, esp_keys_t *esp, const struct sockaddr 
 
 int ppp_dispatch_ppp_frame(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
                            l2tp_session_t *l2tp, ppp_session_t *ppp, const uint8_t *frame, size_t len,
-                           int tun_fd);
+                           packet_endpoint_t *endpoint);
 
 #endif

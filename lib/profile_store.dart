@@ -18,7 +18,8 @@ abstract class SecretStore {
 
 /// Production [SecretStore] backed by [FlutterSecureStorage].
 class FlutterSecureSecretStore implements SecretStore {
-  FlutterSecureSecretStore([FlutterSecureStorage? storage]) : _storage = storage ?? const FlutterSecureStorage();
+  FlutterSecureSecretStore([FlutterSecureStorage? storage])
+    : _storage = storage ?? const FlutterSecureStorage();
 
   final FlutterSecureStorage _storage;
 
@@ -29,7 +30,8 @@ class FlutterSecureSecretStore implements SecretStore {
   Future<String?> read(String key) => _storage.read(key: key);
 
   @override
-  Future<void> write(String key, String value) => _storage.write(key: key, value: value);
+  Future<void> write(String key, String value) =>
+      _storage.write(key: key, value: value);
 }
 
 /// In-memory [SecretStore] for tests and widget tests.
@@ -48,26 +50,33 @@ class MemorySecretStore implements SecretStore {
 
 /// Loads, saves, and deletes [Profile] rows; tests may inject [prefsOverride] / [secretsOverride].
 class ProfileStore {
-  ProfileStore({
-    SharedPreferences? prefsOverride,
-    SecretStore? secretsOverride,
-  }) : _prefsOverride = prefsOverride,
-       _secrets = secretsOverride ?? FlutterSecureSecretStore();
+  ProfileStore({SharedPreferences? prefsOverride, SecretStore? secretsOverride})
+    : _prefsOverride = prefsOverride,
+      _secrets = secretsOverride ?? FlutterSecureSecretStore();
 
   static const prefsKeyProfilesJson = 'vpn_profiles_json_v1';
   static const prefsKeyLastProfileId = 'vpn_last_profile_id_v1';
+  static const prefsKeyConnectionMode = 'connection_mode_v1';
+  static const prefsKeyProxyHttpEnabled = 'proxy_http_enabled_v1';
+  static const prefsKeyProxyHttpPort = 'proxy_http_port_v1';
+  static const prefsKeyProxySocksEnabled = 'proxy_socks_enabled_v1';
+  static const prefsKeyProxySocksPort = 'proxy_socks_port_v1';
   static const debugDefaultProfileId = 'tunnel_forge_debug_local_test_v1';
 
   final SharedPreferences? _prefsOverride;
   final SecretStore _secrets;
 
-  String _passwordKey(String profileId) => 'tunnel_forge/profile/$profileId/password';
+  String _passwordKey(String profileId) =>
+      'tunnel_forge/profile/$profileId/password';
   String _pskKey(String profileId) => 'tunnel_forge/profile/$profileId/psk';
 
-  Future<SharedPreferences> _prefs() async => _prefsOverride ?? SharedPreferences.getInstance();
+  Future<SharedPreferences> _prefs() async =>
+      _prefsOverride ?? SharedPreferences.getInstance();
 
   static String newProfileId() {
-    final b = Uint8List.fromList(List<int>.generate(16, (_) => Random.secure().nextInt(256)));
+    final b = Uint8List.fromList(
+      List<int>.generate(16, (_) => Random.secure().nextInt(256)),
+    );
     return base64UrlEncode(b).replaceAll('=', '');
   }
 
@@ -120,9 +129,58 @@ class ProfileStore {
     }
   }
 
+  Future<ConnectionMode> loadConnectionMode() async {
+    final p = await _prefs();
+    return ConnectionMode.fromJson(p.getString(prefsKeyConnectionMode));
+  }
+
+  Future<void> saveConnectionMode(ConnectionMode mode) async {
+    final p = await _prefs();
+    await p.setString(prefsKeyConnectionMode, mode.jsonValue);
+  }
+
+  Future<ProxySettings> loadProxySettings() async {
+    final p = await _prefs();
+    return ProxySettings(
+      httpEnabled: p.getBool(prefsKeyProxyHttpEnabled) ?? true,
+      httpPort: ProxySettings.normalizePort(
+        p.getInt(prefsKeyProxyHttpPort) ?? ProxySettings.defaultHttpPort,
+        fallback: ProxySettings.defaultHttpPort,
+      ),
+      socksEnabled: p.getBool(prefsKeyProxySocksEnabled) ?? true,
+      socksPort: ProxySettings.normalizePort(
+        p.getInt(prefsKeyProxySocksPort) ?? ProxySettings.defaultSocksPort,
+        fallback: ProxySettings.defaultSocksPort,
+      ),
+    );
+  }
+
+  Future<void> saveProxySettings(ProxySettings settings) async {
+    final p = await _prefs();
+    await p.setBool(prefsKeyProxyHttpEnabled, settings.httpEnabled);
+    await p.setInt(
+      prefsKeyProxyHttpPort,
+      ProxySettings.normalizePort(
+        settings.httpPort,
+        fallback: ProxySettings.defaultHttpPort,
+      ),
+    );
+    await p.setBool(prefsKeyProxySocksEnabled, settings.socksEnabled);
+    await p.setInt(
+      prefsKeyProxySocksPort,
+      ProxySettings.normalizePort(
+        settings.socksPort,
+        fallback: ProxySettings.defaultSocksPort,
+      ),
+    );
+  }
+
   Future<void> _saveProfileList(List<Profile> list) async {
     final p = await _prefs();
-    await p.setString(prefsKeyProfilesJson, jsonEncode(list.map((e) => e.toJson()).toList()));
+    await p.setString(
+      prefsKeyProfilesJson,
+      jsonEncode(list.map((e) => e.toJson()).toList()),
+    );
   }
 
   Future<void> upsertProfile(
@@ -154,7 +212,8 @@ class ProfileStore {
     if (last == id) await setLastProfileId(null);
   }
 
-  Future<({Profile profile, String password, String psk})?> loadProfileWithSecrets(String id) async {
+  Future<({Profile profile, String password, String psk})?>
+  loadProfileWithSecrets(String id) async {
     final list = await loadProfiles();
     Profile? profile;
     for (final p in list) {

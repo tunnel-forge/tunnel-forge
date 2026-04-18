@@ -2,6 +2,7 @@
 #define TUNNEL_FORGE_L2TP_H
 
 #include "esp_udp.h"
+#include "packet_endpoint.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -40,7 +41,8 @@ int l2tp_data_extract_ppp(const uint8_t *plain, size_t plain_len, const l2tp_ses
                           size_t *ppp_len_out, int diag);
 
 int l2tp_dispatch_incoming(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
-                           l2tp_session_t *s, const uint8_t *data, size_t len, int tun_fd, ppp_session_t *ppp);
+                           l2tp_session_t *s, const uint8_t *data, size_t len, packet_endpoint_t *endpoint,
+                           ppp_session_t *ppp);
 
 int l2tp_send_ppp(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len, l2tp_session_t *s,
                   const uint8_t *ppp, size_t ppp_len);

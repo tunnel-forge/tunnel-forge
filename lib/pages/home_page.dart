@@ -56,8 +56,10 @@ class _VpnHomePageState extends State<VpnHomePage> {
   final _mtu = TextEditingController(text: '${Profile.defaultVpnMtu}');
   final _logsScroll = ScrollController();
 
+  ConnectionMode _connectionMode = ConnectionMode.vpnTunnel;
   RoutingMode _routingMode = RoutingMode.fullTunnel;
   List<String> _allowedAppPackages = [];
+  ProxySettings _proxySettings = const ProxySettings();
 
   int _navIndex = 0;
   final _logBuffer = LogBuffer();
@@ -77,7 +79,10 @@ class _VpnHomePageState extends State<VpnHomePage> {
     super.initState();
     _profileStore = widget.profileStore ?? ProfileStore();
     _logsScroll.addListener(_syncLogsStickToBottom);
-    _client = VpnClient(onTunnelState: _onTunnelFromHost, onEngineLog: _onEngineLogFromHost);
+    _client = VpnClient(
+      onTunnelState: _onTunnelFromHost,
+      onEngineLog: _onEngineLogFromHost,
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future<void>.delayed(Duration.zero, () {
         if (!mounted) return;
