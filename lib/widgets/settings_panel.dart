@@ -246,7 +246,8 @@ class _SettingsPanelState extends State<SettingsPanel> {
                     key: const Key('proxy_http_port_field'),
                     controller: _httpPortController,
                     enabled:
-                        !widget.routingLocked && widget.proxySettings.httpEnabled,
+                        !widget.routingLocked &&
+                        widget.proxySettings.httpEnabled,
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(labelText: 'HTTP port'),
                     onChanged: (value) => widget.onProxySettingsChanged(
@@ -281,7 +282,8 @@ class _SettingsPanelState extends State<SettingsPanel> {
                     key: const Key('proxy_socks_port_field'),
                     controller: _socksPortController,
                     enabled:
-                        !widget.routingLocked && widget.proxySettings.socksEnabled,
+                        !widget.routingLocked &&
+                        widget.proxySettings.socksEnabled,
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(labelText: 'SOCKS5 port'),
                     onChanged: (value) => widget.onProxySettingsChanged(

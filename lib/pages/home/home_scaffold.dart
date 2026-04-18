@@ -154,9 +154,8 @@ extension _VpnHomePageUi on _VpnHomePageState {
                       tooltip: _logsWordWrap
                           ? 'Turn off word wrap (wide lines scroll sideways)'
                           : 'Turn on word wrap',
-                      onPressed: () => _setHomeState(
-                        () => _logsWordWrap = !_logsWordWrap,
-                      ),
+                      onPressed: () =>
+                          _setHomeState(() => _logsWordWrap = !_logsWordWrap),
                       icon: Icon(
                         _logsWordWrap ? Icons.wrap_text : Icons.swap_horiz,
                       ),
@@ -199,10 +198,7 @@ extension _VpnHomePageUi on _VpnHomePageState {
           layoutBuilder: (currentChild, previousChildren) => Stack(
             fit: StackFit.expand,
             alignment: Alignment.topCenter,
-            children: <Widget>[
-              ...previousChildren,
-              ?currentChild,
-            ],
+            children: <Widget>[...previousChildren, ?currentChild],
           ),
           transitionBuilder: (child, animation) {
             final curved = CurvedAnimation(

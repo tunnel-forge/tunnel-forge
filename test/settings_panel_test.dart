@@ -33,9 +33,7 @@ void main() {
   testWidgets('proxy port fields update when persisted settings load later', (
     tester,
   ) async {
-    await tester.pumpWidget(
-      buildPanel(proxySettings: const ProxySettings()),
-    );
+    await tester.pumpWidget(buildPanel(proxySettings: const ProxySettings()));
 
     expect(find.text('8080'), findsOneWidget);
     expect(find.text('1080'), findsOneWidget);
