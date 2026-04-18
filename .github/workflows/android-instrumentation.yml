@@ -1,0 +1,94 @@
+name: Android Instrumentation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-instrumentation-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.41.2
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  connected-debug-android-test:
+    name: connectedDebugAndroidTest
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Create Android local.properties
+        working-directory: android
+        run: |
+          flutter_root="${FLUTTER_ROOT:-$(dirname "$(dirname "$(command -v flutter)")")}"
+          android_sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+
+          if [[ -z "${android_sdk_root}" ]]; then
+            echo "ANDROID_SDK_ROOT or ANDROID_HOME must be set" >&2
+            exit 1
+          fi
+
+          {
+            echo "flutter.sdk=${flutter_root}"
+            echo "sdk.dir=${android_sdk_root}"
+          } > local.properties
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run connected Android tests
+        uses: ReactiveCircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          profile: pixel_7
+          emulator-boot-timeout: 900
+          disable-animations: true
+          script: |
+            cd android
+            ./gradlew --stacktrace connectedDebugAndroidTest
+
+      - name: Upload instrumentation reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-instrumentation-reports
+          path: |
+            android/app/build/reports/androidTests/
+            android/app/build/outputs/androidTest-results/
+            android/app/build/outputs/logs/
+          if-no-files-found: ignore

@@ -1,0 +1,201 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - release/**
+  push:
+    branches:
+      - main
+      - release/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.41.2
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  flutter-checks:
+    name: flutter-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run unit and widget tests
+        run: flutter test
+
+  native-tests:
+    name: native-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run native tests
+        run: sh tool/run_native_tests.sh
+
+  android-unit-tests:
+    name: android-unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Create Android local.properties
+        working-directory: android
+        run: |
+          flutter_root="${FLUTTER_ROOT:-$(dirname "$(dirname "$(command -v flutter)")")}"
+          android_sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+
+          if [[ -z "${android_sdk_root}" ]]; then
+            echo "ANDROID_SDK_ROOT or ANDROID_HOME must be set" >&2
+            exit 1
+          fi
+
+          {
+            echo "flutter.sdk=${flutter_root}"
+            echo "sdk.dir=${android_sdk_root}"
+          } > local.properties
+
+      - name: Run Android JVM tests
+        working-directory: android
+        run: ./gradlew --stacktrace testDebugUnitTest
+
+      - name: Upload Android unit test reports
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-unit-test-reports
+          path: |
+            android/app/build/reports/tests/
+            android/build/reports/
+          if-no-files-found: ignore
+
+  build-android:
+    name: build-android
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs:
+      - flutter-checks
+      - native-tests
+      - android-unit-tests
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Create Android local.properties
+        working-directory: android
+        run: |
+          flutter_root="${FLUTTER_ROOT:-$(dirname "$(dirname "$(command -v flutter)")")}"
+          android_sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+
+          if [[ -z "${android_sdk_root}" ]]; then
+            echo "ANDROID_SDK_ROOT or ANDROID_HOME must be set" >&2
+            exit 1
+          fi
+
+          {
+            echo "flutter.sdk=${flutter_root}"
+            echo "sdk.dir=${android_sdk_root}"
+          } > local.properties
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: tunnel-forge-release-apk
+          path: build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+
+      - name: Upload build reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-build-reports
+          path: |
+            build/reports/
+            android/app/build/reports/
+            android/build/reports/
+          if-no-files-found: ignore

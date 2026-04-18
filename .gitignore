@@ -52,3 +52,4 @@ vpn.env
 .vpn-debug/
 .codex
 .cursor
+.gradle-home/

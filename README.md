@@ -54,10 +54,6 @@ flutter test
 ```
 
 ```sh
-flutter test integration_test/
-```
-
-```sh
 sh tool/run_native_tests.sh
 ```
 

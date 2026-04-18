@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing git tag to publish, for example v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: 3.41.2
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish-release:
+    name: publish-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
+
+      - name: Validate tag trigger
+        id: tag
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${{ github.event.inputs.release_tag }}"
+          else
+            if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+              echo "This workflow publishes releases only from git tags." >&2
+              exit 1
+            fi
+            tag="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tags must use semantic version format like v0.1.0" >&2
+            exit 1
+          fi
+
+          app_version="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)"
+          expected_tag="v${app_version}"
+          if [[ "${tag}" != "${expected_tag}" ]]; then
+            echo "Tag ${tag} does not match pubspec version ${app_version}" >&2
+            exit 1
+          fi
+
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${app_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Create Android local.properties
+        working-directory: android
+        run: |
+          flutter_root="${FLUTTER_ROOT:-$(dirname "$(dirname "$(command -v flutter)")")}"
+          android_sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+
+          if [[ -z "${android_sdk_root}" ]]; then
+            echo "ANDROID_SDK_ROOT or ANDROID_HOME must be set" >&2
+            exit 1
+          fi
+
+          {
+            echo "flutter.sdk=${flutter_root}"
+            echo "sdk.dir=${android_sdk_root}"
+          } > local.properties
+
+      - name: Build release APK
+        run: flutter build apk --release --split-per-abi
+
+      - name: Prepare release asset
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+            "dist/tunnel-forge-${{ steps.tag.outputs.tag }}-android-arm64-v8a.apk"
+          if [[ -f build/app/outputs/flutter-apk/app-x86_64-release.apk ]]; then
+            cp build/app/outputs/flutter-apk/app-x86_64-release.apk \
+              "dist/tunnel-forge-${{ steps.tag.outputs.tag }}-android-x86_64.apk"
+          fi
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: tunnel-forge-${{ steps.tag.outputs.tag }}-android-release
+          path: dist/*.apk
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.tag.outputs.tag }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "${{ steps.tag.outputs.tag }}" dist/*.apk \
+              --repo "${{ github.repository }}" \
+              --clobber
+          else
+            gh release create "${{ steps.tag.outputs.tag }}" dist/*.apk \
+              --repo "${{ github.repository }}" \
+              --verify-tag \
+              --generate-notes \
+              --title "Tunnel Forge ${{ steps.tag.outputs.version }}"
+          fi
