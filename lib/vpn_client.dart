@@ -1,4 +1,4 @@
-/// VPN [MethodChannel] client: Flutter invokes prepare/connect/disconnect; Android pushes state and engine logs.
+// VPN [MethodChannel] client: Flutter invokes prepare/connect/disconnect; Android pushes state and engine logs.
 import 'package:flutter/services.dart';
 
 import 'profile_models.dart';

@@ -21,7 +21,9 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
   }
 
   Future<void> _loadPersistedProfiles() async {
-    if (!_profilesLoading && mounted) setState(() => _profilesLoading = true);
+    if (!_profilesLoading && mounted) {
+      _setHomeState(() => _profilesLoading = true);
+    }
     try {
       await _profileStore.ensureDebugDefaultProfileIfEmpty();
       final list = await _profileStore.loadProfiles();
@@ -33,7 +35,7 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
         final row = await _profileStore.loadProfileWithSecrets(last);
         if (!mounted) return;
         if (row != null) {
-          setState(() {
+          _setHomeState(() {
             _profiles = list;
             _activeProfileId = last;
             _profilesLoading = false;
@@ -44,7 +46,7 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
           return;
         }
       }
-      setState(() {
+      _setHomeState(() {
         _profiles = list;
         _activeProfileId = null;
         _profilesLoading = false;
@@ -53,12 +55,12 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
       });
       _applyNewFormTemplate();
     } catch (_) {
-      if (mounted) setState(() => _profilesLoading = false);
+      _setHomeStateIfMounted(() => _profilesLoading = false);
     }
   }
 
   Future<void> _onProfileSelected(String? id) async {
-    setState(() => _activeProfileId = id);
+    _setHomeState(() => _activeProfileId = id);
     if (id == null) {
       _applyNewFormTemplate();
       await _profileStore.setLastProfileId(null);
@@ -67,7 +69,7 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
     final row = await _profileStore.loadProfileWithSecrets(id);
     if (!mounted) return;
     if (row != null) {
-      setState(
+      _setHomeState(
         () => _applyProfileToControllers(row.profile, row.password, row.psk),
       );
       await _profileStore.setLastProfileId(id);
@@ -79,17 +81,17 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
       Set<String>.from(_allowedAppPackages),
     );
     if (picked != null && mounted) {
-      setState(() => _allowedAppPackages = picked.toList()..sort());
+      _setHomeState(() => _allowedAppPackages = picked.toList()..sort());
     }
   }
 
   Future<void> _setConnectionMode(ConnectionMode mode) async {
-    setState(() => _connectionMode = mode);
+    _setHomeState(() => _connectionMode = mode);
     await _profileStore.saveConnectionMode(mode);
   }
 
   Future<void> _setProxySettings(ProxySettings settings) async {
-    setState(() => _proxySettings = settings);
+    _setHomeState(() => _proxySettings = settings);
     await _profileStore.saveProxySettings(settings);
   }
 

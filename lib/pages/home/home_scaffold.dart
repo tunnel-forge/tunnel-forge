@@ -67,7 +67,7 @@ extension _VpnHomePageUi on _VpnHomePageState {
           onConnectionModeChanged: (mode) {
             _setConnectionMode(mode);
           },
-          onRoutingModeChanged: (m) => setState(() => _routingMode = m),
+          onRoutingModeChanged: (m) => _setHomeState(() => _routingMode = m),
           onProxySettingsChanged: (settings) {
             _setProxySettings(settings);
           },
@@ -154,8 +154,9 @@ extension _VpnHomePageUi on _VpnHomePageState {
                       tooltip: _logsWordWrap
                           ? 'Turn off word wrap (wide lines scroll sideways)'
                           : 'Turn on word wrap',
-                      onPressed: () =>
-                          setState(() => _logsWordWrap = !_logsWordWrap),
+                      onPressed: () => _setHomeState(
+                        () => _logsWordWrap = !_logsWordWrap,
+                      ),
                       icon: Icon(
                         _logsWordWrap ? Icons.wrap_text : Icons.swap_horiz,
                       ),
@@ -200,7 +201,7 @@ extension _VpnHomePageUi on _VpnHomePageState {
             alignment: Alignment.topCenter,
             children: <Widget>[
               ...previousChildren,
-              if (currentChild != null) currentChild,
+              ?currentChild,
             ],
           ),
           transitionBuilder: (child, animation) {
@@ -231,7 +232,7 @@ extension _VpnHomePageUi on _VpnHomePageState {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _navIndex,
         onDestinationSelected: (i) {
-          setState(() => _navIndex = i);
+          _setHomeState(() => _navIndex = i);
           if (i == 1) _scheduleScrollLogsToEnd();
         },
         backgroundColor: cs.surface,

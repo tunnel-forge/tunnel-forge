@@ -9,7 +9,7 @@ extension _VpnHomePageLogs on _VpnHomePageState {
     const edge = 88.0;
     final atBottom = m.pixels >= m.maxScrollExtent - edge;
     if (atBottom == _logsStickToBottom) return;
-    setState(() => _logsStickToBottom = atBottom);
+    _setHomeState(() => _logsStickToBottom = atBottom);
   }
 
   void _scheduleScrollLogsToEnd() {
@@ -21,7 +21,7 @@ extension _VpnHomePageLogs on _VpnHomePageState {
   }
 
   void _jumpLogsToBottom() {
-    setState(() => _logsStickToBottom = true);
+    _setHomeState(() => _logsStickToBottom = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_logsScroll.hasClients) return;
       _logsScroll.animateTo(
@@ -60,7 +60,7 @@ extension _VpnHomePageLogs on _VpnHomePageState {
 
   void _clearLogs() {
     _logBuffer.clear();
-    setState(() => _logsStickToBottom = true);
+    _setHomeState(() => _logsStickToBottom = true);
     _toast('Logs cleared');
   }
 

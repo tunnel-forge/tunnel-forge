@@ -53,7 +53,7 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
         break;
       case VpnTunnelState.connected:
         _cancelAwaitTimer();
-        setState(() {
+        _setHomeState(() {
           _awaitingTunnel = false;
           _tunnelUp = true;
         });
@@ -64,7 +64,7 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
         break;
       case VpnTunnelState.failed:
         _cancelAwaitTimer();
-        setState(() {
+        _setHomeState(() {
           _awaitingTunnel = false;
           _tunnelUp = false;
         });
@@ -78,7 +78,7 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
         break;
       case VpnTunnelState.stopped:
         _cancelAwaitTimer();
-        setState(() {
+        _setHomeState(() {
           _awaitingTunnel = false;
           _tunnelUp = false;
         });
@@ -98,7 +98,7 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
     _awaitTimer = Timer(const Duration(seconds: 60), () {
       if (!mounted) return;
       if (_awaitingTunnel && !_tunnelUp) {
-        setState(() => _awaitingTunnel = false);
+        _setHomeState(() => _awaitingTunnel = false);
         _timedOutThisAttempt = true;
         final startedAt = _connectStartedAt;
         final elapsed = startedAt == null
@@ -117,10 +117,11 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
     if (_busy && _tunnelUp) return 'Disconnecting...';
     if (_awaitingTunnel && !_tunnelUp) return 'Connecting...';
     if (_busy) return 'Working...';
-    if (_tunnelUp)
+    if (_tunnelUp) {
       return _connectionMode == ConnectionMode.proxyOnly
           ? 'Proxy ready'
           : 'Connected';
+    }
     return 'Connect';
   }
 
@@ -162,7 +163,7 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
     }
 
     final attemptId = _newAttemptId();
-    setState(() => _busy = true);
+    _setHomeState(() => _busy = true);
     _activeAttemptId = attemptId;
     _connectStartedAt = DateTime.now();
     _timedOutThisAttempt = false;
@@ -233,7 +234,7 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
         'Connect acknowledged; waiting for ${proxyMode ? 'proxy readiness' : 'TUN'} from Android... attempt=$attemptId',
       );
       if (!mounted) return;
-      setState(() {
+      _setHomeState(() {
         _awaitingTunnel = true;
         _tunnelUp = false;
       });
@@ -243,12 +244,12 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
       _log('Platform error: ${e.code} ${e.message ?? ''} attempt=$attemptId');
       _toast(e.message ?? e.code, error: true);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      _setHomeStateIfMounted(() => _busy = false);
     }
   }
 
   Future<void> _disconnect() async {
-    setState(() => _busy = true);
+    _setHomeState(() => _busy = true);
     _log('Disconnect requested...');
     try {
       await _client.disconnect();
@@ -258,7 +259,7 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
       _log('Disconnect error: ${e.code} ${e.message ?? ''}');
       _toast(e.message ?? e.code, error: true);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      _setHomeStateIfMounted(() => _busy = false);
     }
   }
 }

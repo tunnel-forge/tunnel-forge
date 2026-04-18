@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 /// Splits `HH:MM:SS  message` lines produced by the home page logger.

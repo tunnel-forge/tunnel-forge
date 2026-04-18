@@ -1,4 +1,4 @@
-/// Application entry: global error hooks, persisted theme mode, and [TunnelForgeApp].
+// Application entry: global error hooks, persisted theme mode, and [TunnelForgeApp].
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';

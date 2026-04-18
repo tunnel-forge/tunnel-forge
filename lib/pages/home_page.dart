@@ -74,6 +74,15 @@ class _VpnHomePageState extends State<VpnHomePage> {
   DateTime? _connectStartedAt;
   bool _timedOutThisAttempt = false;
 
+  void _setHomeState(VoidCallback update) {
+    setState(update);
+  }
+
+  void _setHomeStateIfMounted(VoidCallback update) {
+    if (!mounted) return;
+    setState(update);
+  }
+
   @override
   void initState() {
     super.initState();
