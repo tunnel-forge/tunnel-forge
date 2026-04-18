@@ -1,6 +1,34 @@
-# Tunnel Forge
+<h1 align="center">Tunnel Forge</h1>
 
-Flutter Android client for L2TP over IPsec (IKEv1), backed by `VpnService`, Kotlin bridge code, and native C tunnel components.
+<p align="center">
+  Android-first Flutter client for L2TP/IPsec (IKEv1), with full VPN tunneling, proxy-only mode, per-app routing, and native tunnel components.
+</p>
+
+<p align="center">
+  <a href="https://flutter.dev">
+    <img alt="Flutter" src="https://img.shields.io/badge/Flutter-App-02569B?logo=flutter&logoColor=white">
+  </a>
+  <a href="https://dart.dev">
+    <img alt="Dart 3.11+" src="https://img.shields.io/badge/Dart-3.11%2B-0175C2?logo=dart&logoColor=white">
+  </a>
+  <a href="https://developer.android.com/develop/connectivity/vpn">
+    <img alt="Android VpnService" src="https://img.shields.io/badge/Android-VpnService-3DDC84?logo=android&logoColor=white">
+  </a>
+  <a href="#features">
+    <img alt="Modes VPN and Proxy" src="https://img.shields.io/badge/Modes-VPN%20%2B%20Proxy-111827">
+  </a>
+  <a href="#testing">
+    <img alt="Tests Flutter and Native" src="https://img.shields.io/badge/Tests-Flutter%20%2B%20Native-0F766E">
+  </a>
+</p>
+
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#development">Development</a> •
+  <a href="#testing">Testing</a> •
+  <a href="#local-vpn-server">Local VPN Server</a> •
+  <a href="#debugging">Debugging</a>
+</p>
 
 ## Features
 
