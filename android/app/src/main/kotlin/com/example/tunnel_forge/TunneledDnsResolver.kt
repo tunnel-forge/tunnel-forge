@@ -12,53 +12,45 @@ import java.util.concurrent.atomic.AtomicInteger
 internal class TunneledDnsResolver(
     private val bridge: ProxyPacketBridge,
     private val clientIpv4: String,
-    dnsServer: String,
+    dnsServers: List<String>,
     private val logger: (Int, String) -> Unit,
 ) {
-    private val dnsServerIpv4 = dnsServer.trim().toIpv4LiteralOrNull()
+    private val dnsServerIpv4s =
+        dnsServers
+            .mapNotNull { it.trim().toIpv4LiteralOrNull() }
+            .distinct()
     private val nextSourcePort = AtomicInteger(INITIAL_SOURCE_PORT)
     private val nextQueryId = AtomicInteger(1)
     private val pendingQueries = ConcurrentHashMap<Int, PendingDnsQuery>()
 
     @Throws(IOException::class)
     fun resolve(host: String): String {
-        val dnsServerIp = dnsServerIpv4 ?: throw IOException("Proxy hostname resolution needs an IPv4 DNS server address.")
         val queryHost = canonicalizeHostname(host)
-        val sourcePort = allocateSourcePort()
-        val txId = nextQueryId.getAndIncrement() and 0xffff
-        val query = PendingDnsQuery(txId = txId, sourcePort = sourcePort, host = queryHost, serverIp = dnsServerIp)
-        logger(Log.INFO, "proxy dns start host=$host canonical=$queryHost server=$dnsServerIp txid=$txId sport=$sourcePort")
-        val payload = buildQueryPayload(txId, queryHost)
-        val packet =
-            UdpPacketBuilder.buildIpv4UdpPacket(
-                sourceIp = clientIpv4,
-                destinationIp = dnsServerIp,
-                sourcePort = sourcePort,
-                destinationPort = DNS_PORT,
-                payload = payload,
-            )
-        pendingQueries[sourcePort] = query
-        try {
-            for (attempt in 0 until MAX_QUERY_ATTEMPTS) {
-                if (!bridge.queueOutboundPacket(packet)) {
-                    throw IOException("Failed to queue tunneled DNS query for $queryHost.")
-                }
-                logger(Log.INFO, "proxy dns query host=$queryHost server=$dnsServerIp sport=$sourcePort attempt=${attempt + 1}")
-                if (query.await(RESPONSE_WAIT_MS)) break
-            }
-            query.resolvedIpv4?.let { resolved ->
-                logger(Log.INFO, "proxy dns resolved host=$queryHost ip=$resolved")
-                return resolved
-            }
-            query.failureMessage?.let { message ->
-                logger(Log.WARN, "proxy dns failed host=$queryHost reason=$message")
-                throw IOException(message)
-            }
-            logger(Log.WARN, "proxy dns timeout host=$queryHost server=$dnsServerIp txid=$txId")
-            throw IOException("Tunneled DNS lookup timed out for $queryHost.")
-        } finally {
-            pendingQueries.remove(sourcePort, query)
+        if (dnsServerIpv4s.isEmpty()) {
+            throw IOException("Proxy hostname resolution needs at least one IPv4 DNS server address.")
         }
+        var lastRetryableMessage: String? = null
+        for ((index, dnsServerIp) in dnsServerIpv4s.withIndex()) {
+            when (val outcome = queryServer(queryHost, dnsServerIp)) {
+                is QueryOutcome.Success -> {
+                    logger(Log.INFO, "proxy dns resolved host=$queryHost ip=${outcome.resolvedIpv4} server=$dnsServerIp")
+                    return outcome.resolvedIpv4
+                }
+                is QueryOutcome.TerminalFailure -> {
+                    logger(Log.WARN, "proxy dns negative host=$queryHost server=$dnsServerIp reason=${outcome.message}")
+                    throw IOException(outcome.message)
+                }
+                is QueryOutcome.RetryableFailure -> {
+                    lastRetryableMessage = outcome.message
+                    val hasNext = index < dnsServerIpv4s.lastIndex
+                    logger(
+                        Log.WARN,
+                        "proxy dns failover host=$queryHost server=$dnsServerIp reason=${outcome.message}${if (hasNext) " next=${dnsServerIpv4s[index + 1]}" else ""}",
+                    )
+                }
+            }
+        }
+        throw IOException(lastRetryableMessage ?: "Tunneled DNS lookup timed out for $queryHost.")
     }
 
     fun handleInboundPacket(ipv4: ParsedIpv4Packet, udp: ParsedUdpDatagram, packet: ByteArray): Boolean {
@@ -76,10 +68,50 @@ internal class TunneledDnsResolver(
             logger(Log.INFO, "proxy dns answer host=${query.host} ip=${response.answerIpv4} txid=${query.txId}")
             query.completeSuccess(response.answerIpv4)
         } else {
-            logger(Log.WARN, "proxy dns negative host=${query.host} reason=${response.failureMessage}")
-            query.completeFailure(response.failureMessage ?: "Tunneled DNS lookup failed for ${query.host}.")
+            query.completeFailure(
+                message = response.failureMessage ?: "Tunneled DNS lookup failed for ${query.host}.",
+                terminal = response.terminalFailure,
+            )
         }
         return true
+    }
+
+    private fun queryServer(host: String, dnsServerIp: String): QueryOutcome {
+        val sourcePort = allocateSourcePort()
+        val txId = nextQueryId.getAndIncrement() and 0xffff
+        val query = PendingDnsQuery(txId = txId, sourcePort = sourcePort, host = host, serverIp = dnsServerIp)
+        logger(Log.INFO, "proxy dns start host=$host server=$dnsServerIp txid=$txId sport=$sourcePort")
+        val payload = buildQueryPayload(txId, host)
+        val packet =
+            UdpPacketBuilder.buildIpv4UdpPacket(
+                sourceIp = clientIpv4,
+                destinationIp = dnsServerIp,
+                sourcePort = sourcePort,
+                destinationPort = DNS_PORT,
+                payload = payload,
+            )
+        pendingQueries[sourcePort] = query
+        try {
+            for (attempt in 0 until MAX_QUERY_ATTEMPTS) {
+                if (!bridge.queueOutboundPacket(packet)) {
+                    return QueryOutcome.RetryableFailure("Failed to queue tunneled DNS query for $host.")
+                }
+                logger(Log.INFO, "proxy dns query host=$host server=$dnsServerIp sport=$sourcePort attempt=${attempt + 1}")
+                if (query.await(RESPONSE_WAIT_MS)) break
+            }
+            query.resolvedIpv4?.let { resolved -> return QueryOutcome.Success(resolved) }
+            query.failureMessage?.let { message ->
+                return if (query.failureTerminal) {
+                    QueryOutcome.TerminalFailure(message)
+                } else {
+                    QueryOutcome.RetryableFailure(message)
+                }
+            }
+            logger(Log.WARN, "proxy dns timeout host=$host server=$dnsServerIp txid=$txId")
+            return QueryOutcome.RetryableFailure("Tunneled DNS lookup timed out for $host.")
+        } finally {
+            pendingQueries.remove(sourcePort, query)
+        }
     }
 
     private fun allocateSourcePort(): Int {
@@ -138,7 +170,10 @@ internal class TunneledDnsResolver(
         if (!isResponse) return ParsedDnsResponse(failureMessage = "Malformed tunneled DNS response for $host.")
         val rcode = flags and 0x000f
         if (rcode != 0) {
-            return ParsedDnsResponse(failureMessage = "DNS response code $rcode for $host.")
+            return ParsedDnsResponse(
+                failureMessage = "DNS response code $rcode for $host.",
+                terminalFailure = isAuthoritativeNegativeRcode(rcode),
+            )
         }
         val questionCount = readUint16(payload, 4)
         val answerCount = readUint16(payload, 6)
@@ -174,7 +209,10 @@ internal class TunneledDnsResolver(
             }
             offset += rdLength
         }
-        return ParsedDnsResponse(failureMessage = "No IPv4 DNS answer returned for $host.")
+        return ParsedDnsResponse(
+            failureMessage = "No IPv4 DNS answer returned for $host.",
+            terminalFailure = true,
+        )
     }
 
     private fun skipName(payload: ByteArray, start: Int): Int? {
@@ -203,10 +241,22 @@ internal class TunneledDnsResolver(
         buf[offset + 1] = (value and 0xff).toByte()
     }
 
+    private fun isAuthoritativeNegativeRcode(rcode: Int): Boolean =
+        rcode == DNS_RCODE_NXDOMAIN
+
     private data class ParsedDnsResponse(
         val answerIpv4: String? = null,
         val failureMessage: String? = null,
+        val terminalFailure: Boolean = false,
     )
+
+    private sealed interface QueryOutcome {
+        data class Success(val resolvedIpv4: String) : QueryOutcome
+
+        data class RetryableFailure(val message: String) : QueryOutcome
+
+        data class TerminalFailure(val message: String) : QueryOutcome
+    }
 
     private class PendingDnsQuery(
         val txId: Int,
@@ -224,6 +274,10 @@ internal class TunneledDnsResolver(
         var failureMessage: String? = null
             private set
 
+        @Volatile
+        var failureTerminal: Boolean = false
+            private set
+
         fun await(timeoutMs: Long): Boolean = done.await(timeoutMs, TimeUnit.MILLISECONDS)
 
         fun completeSuccess(ipv4: String) {
@@ -232,9 +286,10 @@ internal class TunneledDnsResolver(
             done.countDown()
         }
 
-        fun completeFailure(message: String) {
+        fun completeFailure(message: String, terminal: Boolean) {
             if (done.count == 0L) return
             failureMessage = message
+            failureTerminal = terminal
             done.countDown()
         }
     }
@@ -250,5 +305,6 @@ internal class TunneledDnsResolver(
         private const val MAX_QUERY_ATTEMPTS = 2
         private const val RESPONSE_WAIT_MS = 1500L
         private const val MAX_NAME_LABELS = 64
+        private const val DNS_RCODE_NXDOMAIN = 3
     }
 }

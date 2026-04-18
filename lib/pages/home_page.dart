@@ -52,7 +52,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
   final _user = TextEditingController();
   final _password = TextEditingController();
   final _psk = TextEditingController();
-  final _dns = TextEditingController(text: '8.8.8.8');
+  final _dns = TextEditingController(text: Profile.defaultDns);
   final _mtu = TextEditingController(text: '${Profile.defaultVpnMtu}');
   final _logsScroll = ScrollController();
 

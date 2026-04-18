@@ -16,7 +16,7 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
     _user.text = '';
     _password.text = '';
     _psk.text = '';
-    _dns.text = '8.8.8.8';
+    _dns.text = Profile.defaultDns;
     _mtu.text = '${Profile.defaultVpnMtu}';
   }
 
@@ -113,7 +113,7 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
       displayName: 'New profile',
       server: 'example.invalid',
       user: '',
-      dns: '8.8.8.8',
+      dns: Profile.defaultDns,
     );
     try {
       await _profileStore.upsertProfile(profile, password: '', psk: '');

@@ -8,6 +8,7 @@
 #include "engine.h"
 #include "esp_udp.h"
 #include "l2tp_avps.h"
+#include "nat_t_keepalive.h"
 #include "ppp.h"
 
 #include <android/log.h>
@@ -65,7 +66,7 @@ static void recv_plain_log_stats(const char *ctx, const recv_plain_stats_t *st, 
                     st->decrypt_fail_alt, elapsed_ms, timeout_ms);
 }
 
-static int recv_plain(int esp_fd, esp_keys_t *esp, const esp_keys_t *esp_alt, int *used_alt, uint8_t *out,
+static int recv_plain(int esp_fd, esp_keys_t *esp, esp_keys_t *esp_alt, int *used_alt, uint8_t *out,
                       size_t out_cap, int timeout_ms) {
   struct timeval start;
   recv_plain_stats_t stats = {0};
@@ -119,8 +120,8 @@ static int recv_plain(int esp_fd, esp_keys_t *esp, const esp_keys_t *esp_alt, in
     l2tp_hs_trace_evt("recv udp4500", raw, n);
     stats.rx_datagrams++;
 
-    if (esp->udp_encap && (size_t)n == sizeof(uint32_t) && util_read_be32(raw) == ESP_UDP_NON_ESP_MARKER) {
-      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "l2tp recv_plain: skip NAT-T keepalive (4 zero bytes)");
+    if (esp->udp_encap && nat_t_keepalive_is_probe(raw, (size_t)n)) {
+      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "l2tp recv_plain: skip NAT-T keepalive (1 byte 0xff)");
       l2tp_hs_trace_evt("skip natt-keepalive", raw, n);
       stats.skip_keepalive++;
       continue;
@@ -298,7 +299,7 @@ static uint16_t pick_local_id(uint16_t remote, uint16_t salt) {
   return x;
 }
 
-static int recv_ctrl_update_nr(int esp_fd, esp_keys_t *esp, const esp_keys_t *esp_alt, uint8_t *in, size_t cap,
+static int recv_ctrl_update_nr(int esp_fd, esp_keys_t *esp, esp_keys_t *esp_alt, uint8_t *in, size_t cap,
                                int timeout_ms, l2tp_session_t *s, uint16_t *out_mt, int *used_alt) {
   int ilen = recv_plain(esp_fd, esp, esp_alt, used_alt, in, cap, timeout_ms);
   if (ilen < 0) {
@@ -609,21 +610,76 @@ int l2tp_send_ppp(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, sock
   return esp_encrypt_send(esp_fd, esp, peer, peer_len, pkt, tot);
 }
 
+static void l2tp_log_ctrl_result_details(uint16_t mt, const uint8_t *data, size_t len) {
+  uint16_t result_code = 0;
+  uint16_t error_code = 0;
+  char error_msg[128];
+  error_msg[0] = '\0';
+  int details = l2tp_ctrl_result_details(data, len, &result_code, &error_code, error_msg, sizeof(error_msg));
+  if (details != 0) return;
+  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+                    "l2tp ctrl result: mt=%u result=%u error=%u msg=%s", (unsigned)mt, (unsigned)result_code,
+                    (unsigned)error_code, error_msg[0] != '\0' ? error_msg : "-");
+}
+
+static int l2tp_dispatch_control(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
+                                 l2tp_session_t *s, const uint8_t *data, size_t len) {
+  if (s != NULL) {
+    if (len < L2TP_CTRL_HDR) return L2TP_DISPATCH_ERROR;
+    uint16_t tid = util_read_be16(data + 4);
+    uint16_t sid = util_read_be16(data + 6);
+    if (tid != 0 && tid != s->peer_tunnel_id) return L2TP_DISPATCH_OK;
+    if (sid != 0 && sid != s->peer_session_id) return L2TP_DISPATCH_OK;
+  }
+
+  uint16_t mt = 0;
+  if (l2tp_ctrl_msg_type(data, len, &mt) != 0) {
+    return L2TP_DISPATCH_OK;
+  }
+
+  uint16_t peer_ns = 0;
+  uint16_t peer_nr = 0;
+  if (l2tp_ctrl_get_ns_nr(data, len, &peer_ns, &peer_nr) == 0 && s != NULL) {
+    ingest_peer_ns(s, peer_ns);
+  }
+
+  if (esp != NULL && peer != NULL && s != NULL) {
+    if (send_zlb(esp_fd, esp, peer, peer_len, s) != 0) {
+      tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG,
+                        "l2tp ctrl dataplane: ZLB ack failed mt=%u peer_ns=%u peer_nr=%u", (unsigned)mt,
+                        (unsigned)peer_ns, (unsigned)peer_nr);
+      return L2TP_DISPATCH_ERROR;
+    }
+  }
+
+  if (mt == L2TP_MSG_HELLO) {
+    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+                      "l2tp ctrl dataplane: HELLO acked peer_ns=%u peer_nr=%u", (unsigned)peer_ns,
+                      (unsigned)peer_nr);
+    return L2TP_DISPATCH_OK;
+  }
+
+  if (mt == L2TP_MSG_STOPCCN || mt == L2TP_MSG_CDN) {
+    l2tp_log_ctrl_result_details(mt, data, len);
+    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+                      "l2tp ctrl dataplane: remote teardown mt=%u peer_ns=%u peer_nr=%u", (unsigned)mt,
+                      (unsigned)peer_ns, (unsigned)peer_nr);
+    return L2TP_DISPATCH_REMOTE_CLOSED;
+  }
+
+  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+                    "l2tp ctrl dataplane: acked mt=%u peer_ns=%u peer_nr=%u", (unsigned)mt, (unsigned)peer_ns,
+                    (unsigned)peer_nr);
+  return L2TP_DISPATCH_OK;
+}
+
 int l2tp_dispatch_incoming(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
                            l2tp_session_t *s, const uint8_t *data, size_t len, packet_endpoint_t *endpoint,
                            ppp_session_t *ppp) {
-  (void)esp_fd;
   if (len < 2) return -1;
   uint16_t flags = util_read_be16(data + 0);
   if ((flags & 0x8000u) != 0) {
-    /* Control: optional validation */
-    if (len >= L2TP_CTRL_HDR && s != NULL) {
-      uint16_t tid = util_read_be16(data + 4);
-      uint16_t sid = util_read_be16(data + 6);
-      if (tid != 0 && tid != s->peer_tunnel_id) return 0;
-      if (sid != 0 && sid != s->peer_session_id) return 0;
-    }
-    return 0;
+    return l2tp_dispatch_control(esp_fd, esp, peer, peer_len, s, data, len);
   }
   const uint8_t *ppp_ptr = NULL;
   size_t ppp_len = 0;

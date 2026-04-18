@@ -27,9 +27,18 @@ typedef struct {
   uint8_t peer_ip[4];
   uint8_t dns[4];
   int have_ip;
-  /** LCP option 8 (ACFC) accepted via peer Configure-Request: if set, omit FF 03 on IP data frames. */
+  /** Inner IPv4 link MTU chosen by the app; also advertised as our PPP MRU. */
+  uint16_t link_mtu;
+  /** TCP MSS clamp derived from [link_mtu] for outbound IPv4 SYN packets. */
+  uint16_t tcp_mss;
+  /** LCP option 8 (ACFC) accepted via peer Configure-Request: if set, omit FF 03 on outbound PPP frames. */
   int lcp_acfc;
+  int tcp_mss_clamp_logged;
 } ppp_session_t;
+
+#define L2TP_DISPATCH_ERROR (-1)
+#define L2TP_DISPATCH_OK 0
+#define L2TP_DISPATCH_REMOTE_CLOSED 1
 
 int l2tp_handshake(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len, l2tp_session_t *s);
 

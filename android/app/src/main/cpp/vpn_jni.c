@@ -20,7 +20,8 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
 
 JNIEXPORT jint JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeRunTunnel(JNIEnv *env, jclass clazz, jint tun_fd,
                                                                                 jstring jserver, jstring juser,
-                                                                                jstring jpassword, jstring jpsk) {
+                                                                                jstring jpassword, jstring jpsk,
+                                                                                jint tun_mtu) {
   (void)clazz;
   jint out = (jint)TUNNEL_EXIT_BAD_ARGS;
   const char *server = (*env)->GetStringUTFChars(env, jserver, NULL);
@@ -31,7 +32,7 @@ JNIEXPORT jint JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeRunTunnel(
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "nativeRunTunnel: null string");
     goto cleanup;
   }
-  out = (jint)tunnel_loop_run(tun_fd, server, user, password, psk);
+  out = (jint)tunnel_loop_run(tun_fd, server, user, password, psk, (int)tun_mtu);
 cleanup:
   if (server) (*env)->ReleaseStringUTFChars(env, jserver, server);
   if (user) (*env)->ReleaseStringUTFChars(env, juser, user);
@@ -42,7 +43,7 @@ cleanup:
 
 JNIEXPORT jint JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeNegotiate(
     JNIEnv *env, jclass clazz, jstring jserver, jstring juser, jstring jpassword, jstring jpsk,
-    jintArray jout_client_ipv4) {
+    jint tun_mtu, jintArray jout_client_ipv4) {
   (void)clazz;
   jint out = (jint)TUNNEL_EXIT_BAD_ARGS;
   const char *server = (*env)->GetStringUTFChars(env, jserver, NULL);
@@ -53,7 +54,7 @@ JNIEXPORT jint JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeNegotiate(
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "nativeNegotiate: null string");
     goto cleanup;
   }
-  out = (jint)tunnel_negotiate(server, user, password, psk);
+  out = (jint)tunnel_negotiate(server, user, password, psk, (int)tun_mtu);
   if (out == (jint)TUNNEL_EXIT_OK && jout_client_ipv4 != NULL) {
     jsize alen = (*env)->GetArrayLength(env, jout_client_ipv4);
     if (alen >= 4) {

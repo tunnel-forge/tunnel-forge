@@ -58,7 +58,13 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
   @override
   void initState() {
     super.initState();
+    _dns.addListener(_onDnsChanged);
     _load();
+  }
+
+  void _onDnsChanged() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _load() async {
@@ -125,6 +131,15 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
       );
       return;
     }
+    final invalidDns = Profile.firstInvalidDnsServer(_dns.text);
+    if (invalidDns != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('DNS server "$invalidDns" is not a valid IPv4 address'),
+        ),
+      );
+      return;
+    }
     final profile = Profile(
       id: widget.profileId,
       displayName: _displayName.text.trim().isEmpty
@@ -132,7 +147,7 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
           : _displayName.text.trim(),
       server: serverTrim,
       user: _user.text,
-      dns: _dns.text.trim().isEmpty ? '8.8.8.8' : _dns.text.trim(),
+      dns: Profile.normalizeDns(_dns.text),
       mtu: Profile.normalizeMtu(mtuParsed),
     );
     try {
@@ -176,6 +191,13 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
     final maxH = MediaQuery.sizeOf(context).height * 0.9;
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     final safeBottom = MediaQuery.paddingOf(context).bottom;
+    final dnsCount = Profile.dnsEntriesFromText(_dns.text).length;
+    final invalidDns = Profile.firstInvalidDnsServer(_dns.text);
+    final dnsHelper = invalidDns != null
+        ? 'Invalid IPv4 DNS: $invalidDns'
+        : dnsCount > 1
+        ? '$dnsCount resolvers configured. Proxy mode falls back in order.'
+        : 'Separate with commas. Order matters.';
 
     if (_loadError != null) {
       return Padding(
@@ -273,12 +295,12 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
                       const SizedBox(height: 12),
                       TextField(
                         controller: _dns,
-                        keyboardType: TextInputType.number,
+                        keyboardType: TextInputType.text,
                         decoration: _deco(
                           context,
-                          label: 'DNS',
-                          hint: '8.8.8.8',
-                        ),
+                          label: 'DNS servers',
+                          hint: Profile.defaultDns,
+                        ).copyWith(helperText: dnsHelper),
                       ),
                       const SizedBox(height: 12),
                       TextField(

@@ -30,10 +30,11 @@
 int util_protect_fd(int fd);
 void engine_set_socket_protection_enabled(int enabled);
 
-int tunnel_loop_run(int tun_fd, const char *server, const char *user, const char *password, const char *psk);
+int tunnel_loop_run(int tun_fd, const char *server, const char *user, const char *password, const char *psk,
+                    int tun_mtu);
 
 /** Phase 1: IKE + L2TP + PPP negotiation (no TUN fd needed). Call before VPN establish(). */
-int tunnel_negotiate(const char *server, const char *user, const char *password, const char *psk);
+int tunnel_negotiate(const char *server, const char *user, const char *password, const char *psk, int tun_mtu);
 
 /** After successful tunnel_negotiate(), copies negotiated PPP client IPv4 (same as IPCP local_ip). */
 void tunnel_negotiated_client_ipv4(uint8_t out[4]);

@@ -61,6 +61,30 @@ void main() {
       expect(p.toJson().containsKey('routingMode'), isFalse);
       expect(p.toJson().containsKey('allowedAppPackages'), isFalse);
     });
+
+    test('normalizes multi-dns entries while preserving order', () {
+      expect(
+        Profile.dnsServersFromText(' 1.1.1.1,8.8.8.8; 1.1.1.1 \n 9.9.9.9 '),
+        ['1.1.1.1', '8.8.8.8', '9.9.9.9'],
+      );
+      expect(
+        Profile.normalizeDns(' 1.1.1.1,8.8.8.8; 1.1.1.1 \n 9.9.9.9 '),
+        '1.1.1.1, 8.8.8.8, 9.9.9.9',
+      );
+    });
+
+    test('falls back to default dns when input is empty', () {
+      expect(Profile.dnsServersFromText('   '), [Profile.defaultDns]);
+      expect(Profile.normalizeDns(''), Profile.defaultDns);
+    });
+
+    test('reports the first invalid dns server token', () {
+      expect(
+        Profile.firstInvalidDnsServer('1.1.1.1, example.com, 9.9.9.9'),
+        'example.com',
+      );
+      expect(Profile.firstInvalidDnsServer('1.1.1.1, 9.9.9.9'), isNull);
+    });
   });
 
   group('ProfileStore', () {

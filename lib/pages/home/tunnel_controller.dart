@@ -186,7 +186,16 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
       _log(
         'Sending connect to ${proxyMode ? 'proxy service' : 'tunnel service'}... attempt=$attemptId',
       );
-      final dns = _dns.text.trim().isEmpty ? '8.8.8.8' : _dns.text.trim();
+      final invalidDns = Profile.firstInvalidDnsServer(_dns.text);
+      if (invalidDns != null) {
+        _log('Connect blocked: invalid DNS server "$invalidDns"');
+        _toast(
+          'DNS server "$invalidDns" is not a valid IPv4 address',
+          error: true,
+        );
+        return;
+      }
+      final dnsServers = Profile.dnsServersFromText(_dns.text);
       final mtu = Profile.mtuFromText(
         _mtu.text,
         fallback: Profile.defaultVpnMtu,
@@ -200,7 +209,7 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
         }
       }
       _log(
-        'Profile: server=$host user=${_user.text.isEmpty ? '(empty)' : _user.text} dns=$dns mtu=$mtu '
+        'Profile: server=$host user=${_user.text.isEmpty ? '(empty)' : _user.text} dns=${dnsServers.join(', ')} mtu=$mtu '
         'psk=${_psk.text.isEmpty ? 'off (cleartext L2TP if server allows)' : 'on'} '
         'mode=${_connectionMode.jsonValue} routing=${_routingMode.jsonValue} allowedApps=${_allowedAppPackages.length} '
         'http=${_proxySettings.httpEnabled ? _proxySettings.httpPort : 'off'} socks=${_proxySettings.socksEnabled ? _proxySettings.socksPort : 'off'} '
@@ -214,7 +223,7 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
         user: _user.text,
         password: _password.text,
         psk: _psk.text,
-        dns: dns,
+        dnsServers: dnsServers,
         mtu: mtu,
         routingMode: _routingMode,
         allowedAppPackages: _allowedAppPackages,

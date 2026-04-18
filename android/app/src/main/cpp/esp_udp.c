@@ -5,6 +5,7 @@
 #include "esp_udp.h"
 
 #include "engine.h"
+#include "nat_t_keepalive.h"
 
 #include <android/log.h>
 #include <arpa/inet.h>
@@ -91,7 +92,7 @@ void esp_decrypt_last_fail_snprint(char *buf, size_t buflen) {
     snprintf(buf, buflen, "unknown(no_detail)");
     break;
   case ESP_FAIL_NAT_KEEPALIVE:
-    snprintf(buf, buflen, "nat_keepalive_4zero");
+    snprintf(buf, buflen, "nat_keepalive_1byte_ff");
     break;
   case ESP_FAIL_SHORT_UDP_PREFIX:
     snprintf(buf, buflen, "short_udp4500_prefix left=%zu in_len=%zu head=%s", s_last_fail.sa, s_last_fail.in_len, hex);
@@ -232,9 +233,8 @@ int esp_try_decrypt(esp_keys_t *k, const uint8_t *in, size_t in_len, uint8_t *ou
     s_last_fail.kind = ESP_FAIL_NONE;
     return 0;
   }
-  /* RFC 3948: 4 zero bytes on UDP/4500 are NAT keepalive, not ESP. */
-  if (k->udp_encap && in_len == 4u && util_read_be32(in) == 0u) {
-    esp_fail_capture(ESP_FAIL_NAT_KEEPALIVE, in_len, in, 4, 0, 0, 0, 0, 0);
+  if (k->udp_encap && nat_t_keepalive_is_probe(in, in_len)) {
+    esp_fail_capture(ESP_FAIL_NAT_KEEPALIVE, in_len, in, in_len, 0, 0, 0, 0, 0);
     return -1;
   }
   const uint8_t *p = in;
@@ -456,6 +456,8 @@ int esp_try_decrypt(esp_keys_t *k, const uint8_t *in, size_t in_len, uint8_t *ou
   s_last_fail.kind = ESP_FAIL_NONE;
   return 0;
 }
+
+int esp_is_nat_keepalive_probe(const uint8_t *in, size_t in_len) { return nat_t_keepalive_is_probe(in, in_len); }
 
 /* Build inner UDP header used by transport-mode ESP payload.
  * Use src=dst=1701 for L2TP control/data inside ESP; outer UDP/4500 still uses the IKE socket

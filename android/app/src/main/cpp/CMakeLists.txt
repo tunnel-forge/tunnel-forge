@@ -23,6 +23,7 @@ add_library(
   vpn_jni.c
   tunnel_loop.c
   packet_endpoint.c
+  nat_t_keepalive.c
   util.c
   util_endian.c
   modp2048_data.c

@@ -114,7 +114,7 @@ class TunnelVpnService : VpnService() {
                 val user = intent.getStringExtra(EXTRA_USER) ?: ""
                 val password = intent.getStringExtra(EXTRA_PASSWORD) ?: ""
                 val psk = intent.getStringExtra(EXTRA_PSK) ?: ""
-                val dns = intent.getStringExtra(EXTRA_DNS) ?: "8.8.8.8"
+                val dnsServers = sanitizeDnsServers(intent.getStringArrayListExtra(EXTRA_DNS_SERVERS), intent.getStringExtra(EXTRA_DNS))
                 val tunMtu = sanitizeMtu(intent.getIntExtra(EXTRA_MTU, DEFAULT_TUN_MTU))
                 val profileName = intent.getStringExtra(EXTRA_PROFILE_NAME)?.trim().orEmpty()
                 val routingMode = intent.getStringExtra(EXTRA_ROUTING_MODE) ?: VpnContract.ROUTING_FULL_TUNNEL
@@ -124,12 +124,12 @@ class TunnelVpnService : VpnService() {
                 VpnTunnelEvents.emitEngineLog(
                     Log.INFO,
                     TAG,
-                    "${prefixAttempt(attemptId)}ACTION_START accepted server=$server userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dns=$dns mtu=$tunMtu routing=$routingMode",
+                    "${prefixAttempt(attemptId)}ACTION_START accepted server=$server userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dns=${dnsServers.joinToString(",")} mtu=$tunMtu routing=$routingMode",
                 )
                 // TUN establish() can block; do not hold up onStartCommand after startForeground.
                 Thread(
                     {
-                        startTunnel(attemptId, server, user, password, psk, dns, tunMtu, routingMode, allowedPackages)
+                        startTunnel(attemptId, server, user, password, psk, dnsServers, tunMtu, routingMode, allowedPackages)
                     },
                     "tun-setup",
                 ).start()
@@ -153,7 +153,7 @@ class TunnelVpnService : VpnService() {
         user: String,
         password: String,
         psk: String,
-        dns: String,
+        dnsServers: List<String>,
         tunMtu: Int,
         routingMode: String,
         allowedPackages: ArrayList<String>?,
@@ -195,13 +195,13 @@ class TunnelVpnService : VpnService() {
             Log.INFO,
             TAG,
             "${prefixAttempt(attemptId)}Starting native negotiation (IKE/L2TP/PPP) for server=$server " +
-                "userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()}",
+                "userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} mtu=$tunMtu",
         )
         try {
             VpnBridge.nativeSetSocketProtectionEnabled(true)
             // Phase 1: negotiate IKE+L2TP+PPP on the real network (no VPN tunnel yet).
             val negotiatedClientIp = IntArray(4)
-            val negResult = VpnBridge.nativeNegotiate(server, user, password, psk, negotiatedClientIp)
+            val negResult = VpnBridge.nativeNegotiate(server, user, password, psk, tunMtu, negotiatedClientIp)
             VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}nativeNegotiate finished with exit code=$negResult")
             if (negResult != 0) {
                 VpnTunnelEvents.emit(VpnContract.TUNNEL_FAILED, tunnelExitDetail(negResult))
@@ -230,7 +230,9 @@ class TunnelVpnService : VpnService() {
                 .setMtu(tunMtu)
                 .addAddress(addressForTun, 32)
                 .addRoute("0.0.0.0", 0)
-                .addDnsServer(dns)
+            for (dnsServer in dnsServers) {
+                builder.addDnsServer(dnsServer)
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 builder.allowFamily(OsConstants.AF_INET)
                 VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}TUN allowFamily(AF_INET) IPv4-only")
@@ -255,7 +257,11 @@ class TunnelVpnService : VpnService() {
             tunInterface = builder.establish()
             val pfd = tunInterface ?: throw IllegalStateException("TUN establish() returned null")
             val tunFd = pfd.fd
-            VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}TUN established fd=$tunFd mtu=$tunMtu dns=$dns")
+            VpnTunnelEvents.emitEngineLog(
+                Log.INFO,
+                TAG,
+                "${prefixAttempt(attemptId)}TUN established fd=$tunFd mtu=$tunMtu dns=${dnsServers.joinToString(",")}",
+            )
             VpnTunnelEvents.emit(VpnContract.TUNNEL_CONNECTED, "TUN interface ready; starting tunnel loop")
             updateForegroundNotification(connectedNotificationText())
 
@@ -438,6 +444,7 @@ class TunnelVpnService : VpnService() {
         const val EXTRA_PASSWORD = "password"
         const val EXTRA_PSK = "psk"
         const val EXTRA_DNS = "dns"
+        const val EXTRA_DNS_SERVERS = "dnsServers"
         const val EXTRA_MTU = "mtu"
         const val EXTRA_PROFILE_NAME = "profileName"
         const val EXTRA_ROUTING_MODE = "routingMode"
@@ -449,6 +456,7 @@ class TunnelVpnService : VpnService() {
 
         /** When [EXTRA_MTU] is absent or invalid; aligns with typical PPP MRU 1280 + 2-byte ACFC prefix. */
         const val DEFAULT_TUN_MTU = 1278
+        const val DEFAULT_DNS_SERVER = "8.8.8.8"
 
         private const val MIN_TUN_MTU = 576
         private const val MAX_TUN_MTU = 1500
@@ -456,6 +464,18 @@ class TunnelVpnService : VpnService() {
         private const val TUN_LOCAL_IPV4 = "10.0.0.2"
 
         fun sanitizeMtu(value: Int): Int = value.coerceIn(MIN_TUN_MTU, MAX_TUN_MTU)
+
+        fun sanitizeDnsServers(raw: List<String>?, legacyDns: String?): List<String> {
+            val out = linkedSetOf<String>()
+            raw.orEmpty().forEach { server ->
+                val ipv4 = server.trim().toIpv4LiteralOrNull()
+                if (ipv4 != null) out.add(ipv4)
+            }
+            val legacy = legacyDns?.trim().orEmpty().toIpv4LiteralOrNull()
+            if (legacy != null) out.add(legacy)
+            if (out.isEmpty()) out.add(DEFAULT_DNS_SERVER)
+            return out.toList()
+        }
 
         @Volatile
         private var instance: TunnelVpnService? = null

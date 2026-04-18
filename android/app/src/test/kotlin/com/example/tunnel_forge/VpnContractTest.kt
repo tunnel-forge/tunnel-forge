@@ -17,6 +17,7 @@ class VpnContractTest {
         assertEquals("password", VpnContract.ARG_PASSWORD)
         assertEquals("psk", VpnContract.ARG_PSK)
         assertEquals("dns", VpnContract.ARG_DNS)
+        assertEquals("dnsServers", VpnContract.ARG_DNS_SERVERS)
         assertEquals("mtu", VpnContract.ARG_MTU)
         assertEquals("profileName", VpnContract.ARG_PROFILE_NAME)
         assertEquals("connectionMode", VpnContract.ARG_CONNECTION_MODE)

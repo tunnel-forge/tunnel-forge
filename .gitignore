@@ -50,3 +50,5 @@ vpn.env
 
 # Local VPN debug logs
 .vpn-debug/
+.codex
+.cursor

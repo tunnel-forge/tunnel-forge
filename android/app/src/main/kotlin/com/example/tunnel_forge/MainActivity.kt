@@ -82,7 +82,8 @@ class MainActivity : FlutterActivity() {
                     val user = args[VpnContract.ARG_USER] as? String ?: ""
                     val password = args[VpnContract.ARG_PASSWORD] as? String ?: ""
                     val psk = args[VpnContract.ARG_PSK] as? String ?: ""
-                    val dns = args[VpnContract.ARG_DNS] as? String ?: "8.8.8.8"
+                    val dnsServers = parseDnsServers(args[VpnContract.ARG_DNS_SERVERS], args[VpnContract.ARG_DNS] as? String)
+                    val dns = dnsServers.first()
                     val mtuRaw = args[VpnContract.ARG_MTU]
                     val mtu = TunnelVpnService.sanitizeMtu(
                         when (mtuRaw) {
@@ -141,7 +142,7 @@ class MainActivity : FlutterActivity() {
                     }
                     Log.i(
                         TAG,
-                        "vpn_call connect start attempt=$attemptId server=$serverTrim userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dns=$dns mtu=$mtu mode=$connectionMode routing=$routingMode allowedApps=${allowedPackages.size}",
+                        "vpn_call connect start attempt=$attemptId server=$serverTrim userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dns=${dnsServers.joinToString(",")} mtu=$mtu mode=$connectionMode routing=$routingMode allowedApps=${allowedPackages.size}",
                     )
                     val intent =
                         if (connectionMode == VpnContract.MODE_PROXY_ONLY) {
@@ -153,6 +154,7 @@ class MainActivity : FlutterActivity() {
                                 putExtra(ProxyTunnelService.EXTRA_PASSWORD, password)
                                 putExtra(ProxyTunnelService.EXTRA_PSK, psk)
                                 putExtra(ProxyTunnelService.EXTRA_DNS, dns)
+                                putStringArrayListExtra(ProxyTunnelService.EXTRA_DNS_SERVERS, ArrayList(dnsServers))
                                 putExtra(ProxyTunnelService.EXTRA_MTU, mtu)
                                 putExtra(ProxyTunnelService.EXTRA_PROFILE_NAME, profileName)
                                 putExtra(ProxyTunnelService.EXTRA_PROXY_HTTP_ENABLED, proxyHttpEnabled)
@@ -169,6 +171,7 @@ class MainActivity : FlutterActivity() {
                                 putExtra(TunnelVpnService.EXTRA_PASSWORD, password)
                                 putExtra(TunnelVpnService.EXTRA_PSK, psk)
                                 putExtra(TunnelVpnService.EXTRA_DNS, dns)
+                                putStringArrayListExtra(TunnelVpnService.EXTRA_DNS_SERVERS, ArrayList(dnsServers))
                                 putExtra(TunnelVpnService.EXTRA_MTU, mtu)
                                 putExtra(TunnelVpnService.EXTRA_PROFILE_NAME, profileName)
                                 putExtra(TunnelVpnService.EXTRA_ROUTING_MODE, routingMode)
@@ -341,6 +344,20 @@ class MainActivity : FlutterActivity() {
                 else -> fallback
             }
         return if (candidate in 1..65535) candidate else fallback
+    }
+
+    private fun parseDnsServers(raw: Any?, legacyDns: String?): List<String> {
+        val out = linkedSetOf<String>()
+        if (raw is List<*>) {
+            for (entry in raw) {
+                val server = (entry as? String)?.trim().orEmpty().toIpv4LiteralOrNull()
+                if (server != null) out.add(server)
+            }
+        }
+        val legacy = legacyDns?.trim().orEmpty().toIpv4LiteralOrNull()
+        if (legacy != null) out.add(legacy)
+        if (out.isEmpty()) out.add(TunnelVpnService.DEFAULT_DNS_SERVER)
+        return out.toList()
     }
 
     private fun hasPostNotificationsPermission(): Boolean {

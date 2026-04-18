@@ -17,6 +17,7 @@ abstract final class VpnContract {
   static const String argPassword = 'password';
   static const String argPsk = 'psk';
   static const String argDns = 'dns';
+  static const String argDnsServers = 'dnsServers';
   static const String argMtu = 'mtu';
   static const String argProfileName = 'profileName';
   static const String argConnectionMode = 'connectionMode';

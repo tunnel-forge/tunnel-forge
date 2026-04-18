@@ -186,23 +186,25 @@ class UserspaceTunnelStackTest {
     fun fastSynAckDuringSynQueueIsNotDropped() {
         lateinit var stack: BridgeUserspaceTunnelStack
         val backend =
-            CapturingBackend { packet ->
-                if (outboundPackets.size == 1) {
-                    val synIpv4 = IpPacketParser.parseIpv4(packet) ?: return@CapturingBackend
-                    val synTcp = IpPacketParser.parseTcp(packet, synIpv4) ?: return@CapturingBackend
-                    stack.processInboundPacketForTesting(
-                        TcpPacketBuilder.buildIpv4TcpPacket(
-                            sourceIp = "93.184.216.34",
-                            destinationIp = "10.0.0.2",
-                            sourcePort = 443,
-                            destinationPort = synTcp.sourcePort,
-                            sequenceNumber = 100,
-                            acknowledgementNumber = synTcp.sequenceNumber + 1,
-                            flags = TcpPacketBuilder.TCP_FLAG_SYN or TcpPacketBuilder.TCP_FLAG_ACK,
-                        ),
-                    )
-                }
-            }
+            CapturingBackend(
+                onQueue = { packet ->
+                    if (outboundPackets.size == 1) {
+                        val synIpv4 = IpPacketParser.parseIpv4(packet) ?: return@CapturingBackend
+                        val synTcp = IpPacketParser.parseTcp(packet, synIpv4) ?: return@CapturingBackend
+                        stack.processInboundPacketForTesting(
+                            TcpPacketBuilder.buildIpv4TcpPacket(
+                                sourceIp = "93.184.216.34",
+                                destinationIp = "10.0.0.2",
+                                sourcePort = 443,
+                                destinationPort = synTcp.sourcePort,
+                                sequenceNumber = 100,
+                                acknowledgementNumber = synTcp.sequenceNumber + 1,
+                                flags = TcpPacketBuilder.TCP_FLAG_SYN or TcpPacketBuilder.TCP_FLAG_ACK,
+                            ),
+                        )
+                    }
+                },
+            )
         stack = BridgeUserspaceTunnelStack(bridge = ProxyPacketBridge(backend = backend), clientIpv4 = "10.0.0.2", logger = { _, _ -> })
         assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
 
@@ -581,7 +583,7 @@ class UserspaceTunnelStackTest {
             BridgeUserspaceTunnelStack(
                 bridge = ProxyPacketBridge(backend = backend),
                 clientIpv4 = "10.0.0.2",
-                dnsServer = "1.1.1.1",
+                dnsServers = listOf("1.1.1.1"),
                 logger = { _, _ -> },
             )
         assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
@@ -630,6 +632,201 @@ class UserspaceTunnelStackTest {
         assertEquals("93.184.216.34", synIpv4.destinationIp)
         assertEquals(443, synTcp.destinationPort)
         assertEquals(TcpPacketBuilder.TCP_FLAG_SYN, synTcp.flags)
+
+        session?.close()
+        stack.stop()
+    }
+
+    @Test
+    fun hostnameSessionFallsBackToSecondaryDnsAfterPrimaryQueueFailure() {
+        val backend =
+            CapturingBackend(
+                queueResult = { _ ->
+                    if (outboundPackets.size == 1) -1 else 0
+                },
+            )
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                dnsServers = listOf("1.1.1.1", "8.8.8.8"),
+                logger = { _, _ -> },
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val ready = CountDownLatch(1)
+        var session: UserspaceTunnelSession? = null
+        var failure: Throwable? = null
+        val worker =
+            Thread {
+                ready.countDown()
+                try {
+                    session = stack.openTcpSession(ProxyConnectRequest(host = "example.com", port = 443, protocol = "http-connect"))
+                } catch (t: Throwable) {
+                    failure = t
+                }
+            }
+        worker.start()
+        ready.await()
+
+        waitForOutboundCount(backend, 2)
+        val firstDnsPacket = backend.outboundPackets[0]
+        val secondDnsPacket = backend.outboundPackets[1]
+        val firstDnsIpv4 = IpPacketParser.parseIpv4(firstDnsPacket)!!
+        val secondDnsIpv4 = IpPacketParser.parseIpv4(secondDnsPacket)!!
+        val secondDnsUdp = IpPacketParser.parseUdp(secondDnsPacket, secondDnsIpv4)!!
+        assertEquals("1.1.1.1", firstDnsIpv4.destinationIp)
+        assertEquals("8.8.8.8", secondDnsIpv4.destinationIp)
+
+        val secondDnsPayload =
+            secondDnsPacket.copyOfRange(
+                secondDnsUdp.payloadOffset,
+                secondDnsUdp.payloadOffset + secondDnsUdp.payloadLength,
+            )
+        stack.processInboundPacketForTesting(
+            buildDnsResponsePacket(
+                txId = readUint16(secondDnsPayload, 0),
+                sourceIp = "8.8.8.8",
+                destinationIp = "10.0.0.2",
+                destinationPort = secondDnsUdp.sourcePort,
+                hostname = "example.com",
+                answerIp = "93.184.216.34",
+            ),
+        )
+
+        worker.join(1000)
+        assertNull(failure)
+        waitForOutboundCount(backend, 3)
+        val synPacket = backend.outboundPackets[2]
+        val synIpv4 = IpPacketParser.parseIpv4(synPacket)!!
+        assertEquals("93.184.216.34", synIpv4.destinationIp)
+
+        session?.close()
+        stack.stop()
+    }
+
+    @Test
+    fun hostnameSessionDoesNotFallbackAfterAuthoritativeDnsNegativeResponse() {
+        val backend = CapturingBackend()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                dnsServers = listOf("1.1.1.1", "8.8.8.8"),
+                logger = { _, _ -> },
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val ready = CountDownLatch(1)
+        var failure: Throwable? = null
+        val worker =
+            Thread {
+                ready.countDown()
+                try {
+                    stack.openTcpSession(ProxyConnectRequest(host = "example.com", port = 443, protocol = "http-connect"))
+                    throw AssertionError("Expected DNS negative response to fail the session")
+                } catch (t: Throwable) {
+                    failure = t
+                }
+            }
+        worker.start()
+        ready.await()
+
+        waitForOutboundCount(backend, 1)
+        val dnsPacket = backend.outboundPackets.first()
+        val dnsIpv4 = IpPacketParser.parseIpv4(dnsPacket)!!
+        val dnsUdp = IpPacketParser.parseUdp(dnsPacket, dnsIpv4)!!
+        val dnsPayload = dnsPacket.copyOfRange(dnsUdp.payloadOffset, dnsUdp.payloadOffset + dnsUdp.payloadLength)
+        stack.processInboundPacketForTesting(
+            buildDnsNegativeResponsePacket(
+                txId = readUint16(dnsPayload, 0),
+                sourceIp = "1.1.1.1",
+                destinationIp = "10.0.0.2",
+                destinationPort = dnsUdp.sourcePort,
+                hostname = "example.com",
+                rcode = 3,
+            ),
+        )
+
+        worker.join(1000)
+        assertTrue(failure is IOException)
+        assertTrue((failure as IOException).message!!.contains("DNS response code 3"))
+        assertEquals(1, backend.outboundPackets.size)
+
+        stack.stop()
+    }
+
+    @Test
+    fun hostnameSessionFallsBackAfterServfailResponse() {
+        val backend = CapturingBackend()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                dnsServers = listOf("1.1.1.1", "8.8.8.8"),
+                logger = { _, _ -> },
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val ready = CountDownLatch(1)
+        var session: UserspaceTunnelSession? = null
+        var failure: Throwable? = null
+        val worker =
+            Thread {
+                ready.countDown()
+                try {
+                    session = stack.openTcpSession(ProxyConnectRequest(host = "example.com", port = 443, protocol = "http-connect"))
+                } catch (t: Throwable) {
+                    failure = t
+                }
+            }
+        worker.start()
+        ready.await()
+
+        waitForOutboundCount(backend, 1)
+        val firstDnsPacket = backend.outboundPackets[0]
+        val firstDnsIpv4 = IpPacketParser.parseIpv4(firstDnsPacket)!!
+        val firstDnsUdp = IpPacketParser.parseUdp(firstDnsPacket, firstDnsIpv4)!!
+        val firstDnsPayload = firstDnsPacket.copyOfRange(firstDnsUdp.payloadOffset, firstDnsUdp.payloadOffset + firstDnsUdp.payloadLength)
+        stack.processInboundPacketForTesting(
+            buildDnsNegativeResponsePacket(
+                txId = readUint16(firstDnsPayload, 0),
+                sourceIp = "1.1.1.1",
+                destinationIp = "10.0.0.2",
+                destinationPort = firstDnsUdp.sourcePort,
+                hostname = "example.com",
+                rcode = 2,
+            ),
+        )
+
+        waitForOutboundCount(backend, 2)
+        val secondDnsPacket = backend.outboundPackets[1]
+        val secondDnsIpv4 = IpPacketParser.parseIpv4(secondDnsPacket)!!
+        val secondDnsUdp = IpPacketParser.parseUdp(secondDnsPacket, secondDnsIpv4)!!
+        assertEquals("8.8.8.8", secondDnsIpv4.destinationIp)
+
+        val secondDnsPayload =
+            secondDnsPacket.copyOfRange(
+                secondDnsUdp.payloadOffset,
+                secondDnsUdp.payloadOffset + secondDnsUdp.payloadLength,
+            )
+        stack.processInboundPacketForTesting(
+            buildDnsResponsePacket(
+                txId = readUint16(secondDnsPayload, 0),
+                sourceIp = "8.8.8.8",
+                destinationIp = "10.0.0.2",
+                destinationPort = secondDnsUdp.sourcePort,
+                hostname = "example.com",
+                answerIp = "93.184.216.34",
+            ),
+        )
+
+        worker.join(1000)
+        assertNull(failure)
+        waitForOutboundCount(backend, 3)
+        val synPacket = backend.outboundPackets[2]
+        val synIpv4 = IpPacketParser.parseIpv4(synPacket)!!
+        assertEquals("93.184.216.34", synIpv4.destinationIp)
 
         session?.close()
         stack.stop()
@@ -885,6 +1082,29 @@ class UserspaceTunnelStackTest {
         )
     }
 
+    private fun buildDnsNegativeResponsePacket(
+        txId: Int,
+        sourceIp: String,
+        destinationIp: String,
+        destinationPort: Int,
+        hostname: String,
+        rcode: Int,
+    ): ByteArray {
+        val question = encodeDnsName(hostname) + byteArrayOf(0x00, 0x01, 0x00, 0x01)
+        val header = ByteArray(12)
+        writeUint16(header, 0, txId)
+        writeUint16(header, 2, 0x8180 or (rcode and 0x0f))
+        writeUint16(header, 4, 1)
+        writeUint16(header, 6, 0)
+        return UdpPacketBuilder.buildIpv4UdpPacket(
+            sourceIp = sourceIp,
+            destinationIp = destinationIp,
+            sourcePort = 53,
+            destinationPort = destinationPort,
+            payload = header + question,
+        )
+    }
+
     private fun buildIcmpFragmentationNeededPacket(
         sourceIp: String,
         destinationIp: String,
@@ -962,6 +1182,7 @@ class UserspaceTunnelStackTest {
 
     private class CapturingBackend(
         private val onQueue: CapturingBackend.(ByteArray) -> Unit = {},
+        private val queueResult: CapturingBackend.(ByteArray) -> Int = { 0 },
     ) : ProxyPacketBridgeBackend {
         val outboundPackets = CopyOnWriteArrayList<ByteArray>()
         val inboundPackets = CopyOnWriteArrayList<ByteArray>()
@@ -971,7 +1192,7 @@ class UserspaceTunnelStackTest {
         override fun queueOutboundPacket(packet: ByteArray): Int {
             outboundPackets.add(packet)
             onQueue(packet)
-            return 0
+            return queueResult(packet)
         }
 
         override fun readInboundPacket(maxLen: Int): ByteArray? = if (inboundPackets.isEmpty()) null else inboundPackets.removeAt(0)

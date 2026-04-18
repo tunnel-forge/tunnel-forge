@@ -41,4 +41,6 @@ void esp_reset_drop_counters(void);
 
 void esp_log_drop_counters(const char *ctx, int reset_after_log);
 
+int esp_is_nat_keepalive_probe(const uint8_t *in, size_t in_len);
+
 #endif

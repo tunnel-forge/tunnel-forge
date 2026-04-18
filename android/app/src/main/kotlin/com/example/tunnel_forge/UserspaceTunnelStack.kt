@@ -43,7 +43,7 @@ data class UserspaceSessionSnapshot(
 class BridgeUserspaceTunnelStack(
     private val bridge: ProxyPacketBridge,
     private val clientIpv4: String = DEFAULT_CLIENT_IPV4,
-    private val dnsServer: String = DEFAULT_DNS_SERVER,
+    private val dnsServers: List<String> = listOf(DEFAULT_DNS_SERVER),
     private val linkMtu: Int = DEFAULT_LINK_MTU,
     private val logger: (Int, String) -> Unit = { level, message ->
         Log.println(level, TAG, message)
@@ -60,7 +60,7 @@ class BridgeUserspaceTunnelStack(
         TunneledDnsResolver(
             bridge = bridge,
             clientIpv4 = clientIpv4,
-            dnsServer = dnsServer,
+            dnsServers = dnsServers,
             logger = logger,
         )
     private val maxTcpPayloadBytes = (linkMtu - IPV4_HEADER_LEN - TCP_HEADER_LEN).coerceAtLeast(1)
@@ -88,7 +88,10 @@ class BridgeUserspaceTunnelStack(
                         logger(Log.WARN, "userspace stack inbound error=${error.javaClass.simpleName}:${error.message}")
                     },
                 )
-            logger(Log.INFO, "userspace stack inbound pump started clientIpv4=$clientIpv4 dns=$dnsServer mtu=$linkMtu mss=$advertisedMss")
+            logger(
+                Log.INFO,
+                "userspace stack inbound pump started clientIpv4=$clientIpv4 dns=${dnsServers.joinToString(",")} mtu=$linkMtu mss=$advertisedMss",
+            )
         }
         return true
     }

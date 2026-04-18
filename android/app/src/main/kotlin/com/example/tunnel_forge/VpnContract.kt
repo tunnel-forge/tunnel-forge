@@ -16,6 +16,7 @@ object VpnContract {
     const val ARG_PASSWORD = "password"
     const val ARG_PSK = "psk"
     const val ARG_DNS = "dns"
+    const val ARG_DNS_SERVERS = "dnsServers"
     const val ARG_MTU = "mtu"
     const val ARG_PROFILE_NAME = "profileName"
     const val ARG_CONNECTION_MODE = "connectionMode"

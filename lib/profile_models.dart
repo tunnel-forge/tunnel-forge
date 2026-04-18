@@ -108,6 +108,7 @@ class Profile {
 
   /// TUN interface MTU (bytes). Default fits common L2TP PPP MRU 1280 with 2-byte ACFC proto prefix.
   static const int defaultVpnMtu = 1278;
+  static const String defaultDns = '8.8.8.8';
 
   static const int minVpnMtu = 576;
   static const int maxVpnMtu = 1500;
@@ -121,6 +122,9 @@ class Profile {
   /// Android VpnService [Builder.setMtu]; clamped [minVpnMtu]–[maxVpnMtu].
   final int mtu;
 
+  List<String> get dnsServers => dnsServersFromText(dns);
+  String? get invalidDnsServer => firstInvalidDnsServer(dns);
+
   static int normalizeMtu(int value) => value.clamp(minVpnMtu, maxVpnMtu);
 
   /// Parses editor / free-form input; invalid or empty [text] returns [fallback].
@@ -129,6 +133,44 @@ class Profile {
     if (v == null) return fallback;
     return normalizeMtu(v);
   }
+
+  static List<String> dnsEntriesFromText(String text) {
+    final out = <String>[];
+    final seen = <String>{};
+    for (final raw in text.split(RegExp(r'[,;\n]+'))) {
+      final token = raw.trim();
+      if (token.isEmpty) continue;
+      if (seen.add(token)) out.add(token);
+    }
+    return out;
+  }
+
+  static bool isValidDnsServer(String value) {
+    final parts = value.trim().split('.');
+    if (parts.length != 4) return false;
+    for (final part in parts) {
+      if (part.isEmpty || !RegExp(r'^\d+$').hasMatch(part)) return false;
+      final octet = int.tryParse(part);
+      if (octet == null || octet < 0 || octet > 255) return false;
+    }
+    return true;
+  }
+
+  static String? firstInvalidDnsServer(String text) {
+    for (final token in dnsEntriesFromText(text)) {
+      if (!isValidDnsServer(token)) return token;
+    }
+    return null;
+  }
+
+  static List<String> dnsServersFromText(String text) {
+    final servers = dnsEntriesFromText(text);
+    if (servers.isEmpty) return const [defaultDns];
+    return servers;
+  }
+
+  static String normalizeDns(String text) =>
+      dnsServersFromText(text).join(', ');
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -169,7 +211,7 @@ class Profile {
       displayName: displayName,
       server: server,
       user: user,
-      dns: dns,
+      dns: dns.trim().isEmpty ? defaultDns : dns.trim(),
       mtu: mtu,
     );
   }

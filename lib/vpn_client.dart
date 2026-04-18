@@ -71,13 +71,16 @@ class VpnClient {
     String user = '',
     String password = '',
     String psk = '',
-    String dns = '8.8.8.8',
+    List<String> dnsServers = const [Profile.defaultDns],
     int mtu = Profile.defaultVpnMtu,
     RoutingMode routingMode = RoutingMode.fullTunnel,
     List<String> allowedAppPackages = const [],
     ProxySettings proxySettings = const ProxySettings(),
   }) {
     final mtuClamped = Profile.normalizeMtu(mtu);
+    final normalizedDnsServers = Profile.dnsServersFromText(
+      dnsServers.join(','),
+    );
     return _channel.invokeMethod<void>(VpnContract.connect, <String, Object?>{
       if (attemptId.isNotEmpty) VpnContract.argAttemptId: attemptId,
       VpnContract.argServer: server,
@@ -86,7 +89,8 @@ class VpnClient {
       VpnContract.argUser: user,
       VpnContract.argPassword: password,
       VpnContract.argPsk: psk,
-      VpnContract.argDns: dns,
+      VpnContract.argDns: normalizedDnsServers.first,
+      VpnContract.argDnsServers: List<String>.from(normalizedDnsServers),
       VpnContract.argMtu: mtuClamped,
       VpnContract.argConnectionMode: connectionMode.jsonValue,
       VpnContract.argRoutingMode: routingMode.jsonValue,

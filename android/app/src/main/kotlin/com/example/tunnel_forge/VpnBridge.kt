@@ -10,7 +10,7 @@ object VpnBridge {
     }
 
     @JvmStatic
-    external fun nativeRunTunnel(tunFd: Int, server: String, user: String, password: String, psk: String): Int
+    external fun nativeRunTunnel(tunFd: Int, server: String, user: String, password: String, psk: String, tunMtu: Int): Int
 
     /**
      * On success, fills [outClientIpv4] with four octets 0–255 (PPP IPCP local IPv4) when non-null and length ≥ 4.
@@ -21,6 +21,7 @@ object VpnBridge {
         user: String,
         password: String,
         psk: String,
+        tunMtu: Int,
         outClientIpv4: IntArray?,
     ): Int
 

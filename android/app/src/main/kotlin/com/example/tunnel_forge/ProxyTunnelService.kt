@@ -58,7 +58,7 @@ class ProxyTunnelService : Service() {
                 val user = intent.getStringExtra(EXTRA_USER) ?: ""
                 val password = intent.getStringExtra(EXTRA_PASSWORD) ?: ""
                 val psk = intent.getStringExtra(EXTRA_PSK) ?: ""
-                val dns = intent.getStringExtra(EXTRA_DNS) ?: DEFAULT_DNS
+                val dnsServers = TunnelVpnService.sanitizeDnsServers(intent.getStringArrayListExtra(EXTRA_DNS_SERVERS), intent.getStringExtra(EXTRA_DNS))
                 val profileName = intent.getStringExtra(EXTRA_PROFILE_NAME)?.trim().orEmpty()
                 val httpEnabled = intent.getBooleanExtra(EXTRA_PROXY_HTTP_ENABLED, true)
                 val socksEnabled = intent.getBooleanExtra(EXTRA_PROXY_SOCKS_ENABLED, true)
@@ -68,7 +68,7 @@ class ProxyTunnelService : Service() {
                 VpnTunnelEvents.emitEngineLog(
                     Log.INFO,
                     TAG,
-                    "${prefixAttempt(attemptId)}ACTION_START accepted server=${server?.trim().orEmpty()} userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dns=$dns mtu=$proxyMtu http=${if (httpEnabled) httpPort else "off"} socks=${if (socksEnabled) socksPort else "off"}",
+                    "${prefixAttempt(attemptId)}ACTION_START accepted server=${server?.trim().orEmpty()} userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dns=${dnsServers.joinToString(",")} mtu=$proxyMtu http=${if (httpEnabled) httpPort else "off"} socks=${if (socksEnabled) socksPort else "off"}",
                 )
                 if (server.isNullOrBlank()) {
                     VpnTunnelEvents.emit(VpnContract.TUNNEL_FAILED, "Invalid proxy arguments from the app.")
@@ -94,7 +94,7 @@ class ProxyTunnelService : Service() {
                             user = user,
                             password = password,
                             psk = psk,
-                            dns = dns,
+                            dnsServers = dnsServers,
                             profileName = profileName,
                             httpEnabled = httpEnabled,
                             httpPort = httpPort,
@@ -118,7 +118,7 @@ class ProxyTunnelService : Service() {
         user: String,
         password: String,
         psk: String,
-        dns: String,
+        dnsServers: List<String>,
         profileName: String,
         httpEnabled: Boolean,
         httpPort: Int,
@@ -137,12 +137,12 @@ class ProxyTunnelService : Service() {
         VpnTunnelEvents.emitEngineLog(
             Log.INFO,
             TAG,
-            "${prefixAttempt(attemptId)}Starting proxy negotiation server=$server dns=$dns mtu=$proxyMtu http=${if (httpEnabled) httpPort else "off"} socks=${if (socksEnabled) socksPort else "off"}",
+            "${prefixAttempt(attemptId)}Starting proxy negotiation server=$server dns=${dnsServers.joinToString(",")} mtu=$proxyMtu http=${if (httpEnabled) httpPort else "off"} socks=${if (socksEnabled) socksPort else "off"}",
         )
         try {
             VpnBridge.nativeSetSocketProtectionEnabled(false)
             val negotiatedClientIp = IntArray(4)
-            val negResult = VpnBridge.nativeNegotiate(server, user, password, psk, negotiatedClientIp)
+            val negResult = VpnBridge.nativeNegotiate(server, user, password, psk, proxyMtu, negotiatedClientIp)
             VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}nativeNegotiate finished with exit code=$negResult")
             if (negResult != 0) {
                 emitTerminalState(VpnContract.TUNNEL_FAILED, tunnelExitDetail(negResult))
@@ -182,7 +182,7 @@ class ProxyTunnelService : Service() {
                 BridgeUserspaceTunnelStack(
                     bridge = bridge,
                     clientIpv4 = negotiatedClientIp.joinToString("."),
-                    dnsServer = dns,
+                    dnsServers = dnsServers,
                     linkMtu = proxyMtu,
                     logger = { level, message ->
                         VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
@@ -227,7 +227,7 @@ class ProxyTunnelService : Service() {
             VpnTunnelEvents.emitEngineLog(
                 Log.INFO,
                 TAG,
-                "${prefixAttempt(attemptId)}proxy ready endpoints=${runtime.endpointSummary()} clientIpv4=${negotiatedClientIp.joinToString(".")} dns=$dns mode=ipv4-hostname-via-dns",
+                "${prefixAttempt(attemptId)}proxy ready endpoints=${runtime.endpointSummary()} clientIpv4=${negotiatedClientIp.joinToString(".")} dns=${dnsServers.joinToString(",")} mode=ipv4-hostname-via-dns",
             )
             connectedEmitted = true
             updateForegroundNotification(runtime.endpointSummary())
@@ -372,6 +372,7 @@ class ProxyTunnelService : Service() {
         const val EXTRA_PASSWORD = "password"
         const val EXTRA_PSK = "psk"
         const val EXTRA_DNS = "dns"
+        const val EXTRA_DNS_SERVERS = "dnsServers"
         const val EXTRA_MTU = "mtu"
         const val EXTRA_PROFILE_NAME = "profileName"
         const val EXTRA_PROXY_HTTP_ENABLED = "proxyHttpEnabled"
@@ -381,7 +382,6 @@ class ProxyTunnelService : Service() {
         const val DEFAULT_HTTP_PORT = 8080
         const val DEFAULT_SOCKS_PORT = 1080
         const val DEFAULT_LINK_MTU = TunnelVpnService.DEFAULT_TUN_MTU
-        private const val DEFAULT_DNS = "8.8.8.8"
         internal const val WORKER_JOIN_TIMEOUT_MS = 5_000L
 
         private const val CHANNEL_ID = "tunnel_forge_proxy"

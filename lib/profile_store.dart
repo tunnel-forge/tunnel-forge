@@ -90,7 +90,7 @@ class ProfileStore {
         displayName: 'Local test',
         server: '192.168.1.104',
         user: 'testuser',
-        dns: '8.8.8.8',
+        dns: Profile.defaultDns,
       ),
       password: 'testpass123',
       psk: 'testpsk123',

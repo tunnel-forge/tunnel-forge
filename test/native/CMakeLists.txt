@@ -24,3 +24,7 @@ add_test(NAME ppp_ipcp COMMAND test_ppp_ipcp)
 
 add_executable(test_ppp_frame test_ppp_frame.c)
 add_test(NAME ppp_frame COMMAND test_ppp_frame)
+
+add_executable(test_nat_t_keepalive test_nat_t_keepalive.c ../../android/app/src/main/cpp/nat_t_keepalive.c)
+target_include_directories(test_nat_t_keepalive PRIVATE ../../android/app/src/main/cpp)
+add_test(NAME nat_t_keepalive COMMAND test_nat_t_keepalive)

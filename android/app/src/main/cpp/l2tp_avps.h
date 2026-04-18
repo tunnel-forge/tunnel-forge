@@ -12,9 +12,12 @@
 #define L2TP_MSG_SCCRQ 1
 #define L2TP_MSG_SCCRP 2
 #define L2TP_MSG_SCCCN 3
+#define L2TP_MSG_STOPCCN 4
+#define L2TP_MSG_HELLO 6
 #define L2TP_MSG_ICRQ 10
 #define L2TP_MSG_ICRP 11
 #define L2TP_MSG_ICCN 12
+#define L2TP_MSG_CDN 14
 
 /** Minimum L2TP control header size (flags/ver, len, tid, sid, ns, nr). */
 #define L2TP_CTRL_HDR 12

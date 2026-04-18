@@ -26,4 +26,7 @@ else
   cc -std=c99 -Wall -Wextra -o "${OUT}/test_ppp_frame" \
     "${ROOT}/test/native/test_ppp_frame.c"
   "${OUT}/test_ppp_frame"
+  cc -std=c99 -Wall -Wextra -o "${OUT}/test_nat_t_keepalive" \
+    "${ROOT}/test/native/test_nat_t_keepalive.c" "${CPP}/nat_t_keepalive.c" -I"${CPP}"
+  "${OUT}/test_nat_t_keepalive"
 fi
