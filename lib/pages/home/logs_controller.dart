@@ -32,15 +32,47 @@ extension _VpnHomePageLogs on _VpnHomePageState {
     });
   }
 
-  String _time() {
-    final t = DateTime.now();
-    return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:${t.second.toString().padLeft(2, '0')}';
+  String get _logsFilterLabel => _logsFilter.label;
+
+  List<LogEntry> get _visibleLogs {
+    final level = _logsFilter.level;
+    if (level == null) return _logBuffer.entries;
+    return _logBuffer.entries.where((entry) => entry.level == level).toList();
   }
 
-  void _log(String line) {
+  void _appendLogEntry(
+    LogLevel level,
+    String message, {
+    LogSource source = LogSource.dart,
+    String tag = 'home',
+  }) {
     if (!mounted) return;
-    _logBuffer.append('${_time()}  $line');
+    _logBuffer.append(
+      LogEntry(
+        timestamp: DateTime.now(),
+        level: level,
+        source: source,
+        tag: tag,
+        message: message,
+      ),
+    );
     _scheduleScrollLogsToEnd();
+  }
+
+  void _logDebug(String message, {LogSource source = LogSource.dart, String tag = 'home'}) {
+    _appendLogEntry(LogLevel.debug, message, source: source, tag: tag);
+  }
+
+  void _logInfo(String message, {LogSource source = LogSource.dart, String tag = 'home'}) {
+    _appendLogEntry(LogLevel.info, message, source: source, tag: tag);
+  }
+
+  void _logWarning(String message, {LogSource source = LogSource.dart, String tag = 'home'}) {
+    _appendLogEntry(LogLevel.warning, message, source: source, tag: tag);
+  }
+
+  void _logError(String message, {LogSource source = LogSource.dart, String tag = 'home'}) {
+    _appendLogEntry(LogLevel.error, message, source: source, tag: tag);
   }
 
   void _toast(String message, {bool error = false}) {
@@ -71,5 +103,10 @@ extension _VpnHomePageLogs on _VpnHomePageState {
     }
     await Clipboard.setData(ClipboardData(text: _logBuffer.joinLines()));
     if (mounted) _toast('Copied ${_logBuffer.length} lines to clipboard');
+  }
+
+  void _setLogsFilter(LogViewerFilter filter) {
+    if (_logsFilter == filter) return;
+    _setHomeState(() => _logsFilter = filter);
   }
 }

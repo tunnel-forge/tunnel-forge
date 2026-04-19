@@ -107,7 +107,7 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
     tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "nonblock failed: errno=%d", errno);
   }
 
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "tunnel poll loop: endpoint=%s fd=%d esp_fd=%d udp_encap=%d",
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "tunnel poll loop: endpoint=%s fd=%d esp_fd=%d udp_encap=%d",
                     endpoint != NULL && endpoint->name != NULL ? endpoint->name : "unknown", endpoint_fd,
                     g_state.ike.esp_fd, g_state.esp.udp_encap ? 1 : 0);
 
@@ -299,7 +299,7 @@ void engine_dp_maybe_log_summary(time_t now) {
   if (now - s_last < 30) return;
   s_last = now;
   tunnel_engine_log(
-      ANDROID_LOG_INFO, LOG_TAG,
+      ANDROID_LOG_DEBUG, LOG_TAG,
       "dataplane 30s tun_rx=%llu encap_ok=%llu encap_fail=%llu esp_rx=%llu esp_plain_ok=%llu esp_plain_fail=%llu tun_ipv4_wr=%llu",
       (unsigned long long)g_dp_tun_rx, (unsigned long long)g_dp_encap_ok, (unsigned long long)g_dp_encap_fail,
       (unsigned long long)g_dp_esp_rx, (unsigned long long)g_dp_esp_plain_ok,

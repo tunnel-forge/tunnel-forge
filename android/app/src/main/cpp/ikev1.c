@@ -56,10 +56,10 @@ static void ike_hex_dump(const char *prefix, const uint8_t *data, size_t len, si
       p += (size_t)w;
       rem -= (size_t)w;
     }
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "%s", line);
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "%s", line);
   }
   if (len > max_show) {
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "%s ... (%zu bytes total, truncated)", prefix, len);
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "%s ... (%zu bytes total, truncated)", prefix, len);
   }
 }
 
@@ -70,7 +70,7 @@ static void ike_log_isakmp_summary(const char *ctx, const uint8_t *in, int inlen
   }
   uint32_t isakmp_len = util_read_be32(in + 24);
   uint32_t mid = util_read_be32(in + 20);
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
  "%s: inlen=%d isakmp_len=%u first_np=%u exch=%u flags=0x%02x msgid=%u icookie=%02x%02x... rcookie=%02x%02x...",
                       ctx, inlen, isakmp_len, in[16], in[18], in[19], mid, in[0], in[1], in[8], in[9]);
 
@@ -101,7 +101,7 @@ static void ike_log_isakmp_summary(const char *ctx, const uint8_t *in, int inlen
                           "%s: NOTIFY doi=%u proto=%u spi_len=%u type=%u (0x%04x) - server may reject proposal/PSK",
                           ctx, doi, proto, spi_sz, ntype, ntype);
     } else {
-      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "%s: payload[%d] type=%u total_len=%u body_len=%zu", ctx, depth,
+      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "%s: payload[%d] type=%u total_len=%u body_len=%zu", ctx, depth,
                           np, (unsigned)plen, blen);
     }
     np = p[0];
@@ -114,7 +114,7 @@ static void ike_log_isakmp_summary(const char *ctx, const uint8_t *in, int inlen
 static void ike_log_endpoint(const char *tag, const struct sockaddr *sa, socklen_t salen) {
   char host[INET_ADDRSTRLEN];
   if (sa->sa_family != AF_INET) {
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "%s: family=%d (not IPv4)", tag, sa->sa_family);
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "%s: family=%d (not IPv4)", tag, sa->sa_family);
     return;
   }
   const struct sockaddr_in *sin = (const struct sockaddr_in *)sa;
@@ -122,7 +122,7 @@ static void ike_log_endpoint(const char *tag, const struct sockaddr *sa, socklen
     tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "%s: inet_ntop failed", tag);
     return;
   }
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "%s: %s:%u", tag, host, (unsigned)ntohs(sin->sin_port));
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "%s: %s:%u", tag, host, (unsigned)ntohs(sin->sin_port));
 }
 
 extern const uint8_t rfc3526_modp2048_p[256];
@@ -233,7 +233,7 @@ static int ike_send_recv(int fd, const struct sockaddr *peer, socklen_t peer_len
     }
     int wait = (attempt < 4) ? retry_ms[attempt] : 5000;
     if (wait > remaining) wait = remaining;
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                         "ike_send_recv: attempt %d/%d wait=%d ms remaining=%d ms", attempt + 1, attempts, wait,
                         remaining);
     struct pollfd pfd = {.fd = fd, .events = POLLIN};
@@ -253,7 +253,7 @@ static int ike_send_recv(int fd, const struct sockaddr *peer, socklen_t peer_len
       tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "ike_send_recv: recv ret=%zd errno=%d", n, errno);
       return -1;
     }
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ike_send_recv: got UDP reply %zd bytes nat_t=%d (attempt %d)", n,
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ike_send_recv: got UDP reply %zd bytes nat_t=%d (attempt %d)", n,
                         prefix4500, attempt + 1);
     if (prefix4500 && n >= 4 && util_read_be32(in) == 0u) {
       memmove(in, in + 4, (size_t)n - 4);
@@ -380,7 +380,7 @@ static int ike_qm3_finish_recv_loop(int fd, const struct sockaddr *peer, socklen
     if (p[18] == IKE_EXCH_QUICK && (p[19] & IKE_FLAG_ENC) && util_read_be32(p + 20) == qm_mid) {
       if (ike_is_duplicate_qm2_retransmit(p1_aes, aeskey, deskey, qm1_tail, p, (int)nl, qm_mid)) {
         tunnel_engine_log(
-            ANDROID_LOG_INFO, LOG_TAG,
+            ANDROID_LOG_DEBUG, LOG_TAG,
             "Quick Mode: server msg2 retransmit while waiting for QM3 ack; resending HASH(3) (resend=%d)",
             resend_count);
         if (resend_count < 16 && ike_send_qm3_payload(fd, peer, peer_len, qm3_pkt, qm3_len, prefix4500) == 0)
@@ -392,7 +392,7 @@ static int ike_qm3_finish_recv_loop(int fd, const struct sockaddr *peer, socklen
     ike_log_isakmp_summary("Quick Mode msg3 unexpected packet while waiting", p, (int)nl);
   }
 
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                       "Quick Mode msg3: finished wait %d ms without Informational (peer often silent; ok)", total_ms);
   return 0;
 }
@@ -1112,7 +1112,7 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   tunnel_log("IKE Main Mode msg1 -> %zu bytes (transport=%s)", o, p1_prefix ? "UDP4500+marker" : "UDP500");
   inlen = ike_send_recv(fd, (struct sockaddr *)&peer_active, peer_active_len, pkt, o, in, sizeof(in), 8000, p1_prefix);
   if (inlen < 28) {
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                         "IKE MM1: no reply on UDP 500, retrying via NAT-T UDP 4500 (RFC 3947 non-ESP marker)");
     close(fd);
     fd = -1;
@@ -2155,37 +2155,37 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   esp->outbound_profile = 0;
   if (s_ike_keymat_variants_log_once == 0) {
     s_ike_keymat_variants_log_once = 1;
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                       "IKE keymat probe: build=kmat-v3 macro=%d active=%s spi_i=%08x spi_r=%08x",
                       active_keymat_variant, keymat_variant, (unsigned)spi_i, (unsigned)spi_r);
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                       "IKE keymat A: out=%02x%02x%02x%02x/%02x%02x%02x%02x in=%02x%02x%02x%02x/%02x%02x%02x%02x",
                       keymat_a_r[0], keymat_a_r[1], keymat_a_r[2], keymat_a_r[3], keymat_a_r[16], keymat_a_r[17],
                       keymat_a_r[18], keymat_a_r[19], keymat_a_i[0], keymat_a_i[1], keymat_a_i[2], keymat_a_i[3],
                       keymat_a_i[16], keymat_a_i[17], keymat_a_i[18], keymat_a_i[19]);
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "IKE keymat A K1/K2 out=%02x%02x%02x%02x/%02x%02x%02x%02x",
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "IKE keymat A K1/K2 out=%02x%02x%02x%02x/%02x%02x%02x%02x",
                       keymat_a_r[0], keymat_a_r[1], keymat_a_r[2], keymat_a_r[3],
                       keymat_a_r[20], keymat_a_r[21], keymat_a_r[22], keymat_a_r[23]);
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                       "IKE keymat B: out=%02x%02x%02x%02x/%02x%02x%02x%02x in=%02x%02x%02x%02x/%02x%02x%02x%02x",
                       keymat_b_r[0], keymat_b_r[1], keymat_b_r[2], keymat_b_r[3], keymat_b_r[16], keymat_b_r[17],
                       keymat_b_r[18], keymat_b_r[19], keymat_b_i[0], keymat_b_i[1], keymat_b_i[2], keymat_b_i[3],
                       keymat_b_i[16], keymat_b_i[17], keymat_b_i[18], keymat_b_i[19]);
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "IKE keymat B K1/K2 out=%02x%02x%02x%02x/%02x%02x%02x%02x",
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "IKE keymat B K1/K2 out=%02x%02x%02x%02x/%02x%02x%02x%02x",
                       keymat_b_r[0], keymat_b_r[1], keymat_b_r[2], keymat_b_r[3],
                       keymat_b_r[20], keymat_b_r[21], keymat_b_r[22], keymat_b_r[23]);
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                       "IKE keymat C: out=%02x%02x%02x%02x/%02x%02x%02x%02x in=%02x%02x%02x%02x/%02x%02x%02x%02x",
                       keymat_c_r[0], keymat_c_r[1], keymat_c_r[2], keymat_c_r[3], keymat_c_r[16], keymat_c_r[17],
                       keymat_c_r[18], keymat_c_r[19], keymat_c_i[0], keymat_c_i[1], keymat_c_i[2], keymat_c_i[3],
                       keymat_c_i[16], keymat_c_i[17], keymat_c_i[18], keymat_c_i[19]);
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "IKE keymat C K1/K2 out=%02x%02x%02x%02x/%02x%02x%02x%02x",
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "IKE keymat C K1/K2 out=%02x%02x%02x%02x/%02x%02x%02x%02x",
                       keymat_c_r[0], keymat_c_r[1], keymat_c_r[2], keymat_c_r[3],
                       keymat_c_r[20], keymat_c_r[21], keymat_c_r[22], keymat_c_r[23]);
   }
 
 #if defined(TUNNEL_FORGE_DEBUG_ESP_KEYMAT) && TUNNEL_FORGE_DEBUG_ESP_KEYMAT
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                     "DEBUG_ESP_KEYMAT: spi_i=%08x spi_r=%08x variant=%s - compare keymat_* to gateway `ip xfrm state` (enc+auth)",
                     (unsigned)spi_i, (unsigned)spi_r, keymat_variant);
   ike_hex_dump("keymat_i out(enc|auth)", keymat_i, 36, 36);
@@ -2193,7 +2193,7 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
 #endif
   if (s_ike_keymap_log_once == 0) {
     s_ike_keymap_log_once = 1;
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                       "IKE keymap one-shot: client_out_spi=%08x client_in_spi=%08x out_enc=%02x%02x%02x%02x out_auth=%02x%02x%02x%02x in_enc=%02x%02x%02x%02x in_auth=%02x%02x%02x%02x",
                       (unsigned)esp->spi_i, (unsigned)esp->spi_r,
                       esp->enc_key[0], esp->enc_key[1], esp->enc_key[2], esp->enc_key[3],
@@ -2219,10 +2219,10 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   mbedtls_ctr_drbg_free(&ctr);
   mbedtls_entropy_free(&entropy);
   tunnel_log("IKE+QM ok spi_i=%08x spi_r=%08x udp_encap=%d", (unsigned)spi_i, (unsigned)spi_r, esp->udp_encap);
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                     "IKE QM SA map: outbound_spi=%08x inbound_spi=%08x profile=%s",
                     (unsigned)esp->spi_i, (unsigned)esp->spi_r, esp->outbound_profile ? "alt-direction" : "primary");
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                       "IKE QM keys: inner_ip_src=%02x%02x%02x%02x inner_ip_dst=%02x%02x%02x%02x (for ESP inner UDP pseudo-hdr)",
                       ip_us[0], ip_us[1], ip_us[2], ip_us[3], ip_peer[0], ip_peer[1], ip_peer[2], ip_peer[3]);
   ike_log_endpoint("IKE QM peer (NAT-T/ESP)", (struct sockaddr *)&peer_active, peer_active_len);

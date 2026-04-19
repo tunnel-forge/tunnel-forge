@@ -66,7 +66,7 @@ class ProxyTunnelService : Service() {
                 val socksPort = sanitizePort(intent.getIntExtra(EXTRA_PROXY_SOCKS_PORT, DEFAULT_SOCKS_PORT), DEFAULT_SOCKS_PORT)
                 val proxyMtu = sanitizeMtu(intent.getIntExtra(EXTRA_MTU, DEFAULT_LINK_MTU))
                 VpnTunnelEvents.emitEngineLog(
-                    Log.INFO,
+                    Log.DEBUG,
                     TAG,
                     "${prefixAttempt(attemptId)}ACTION_START accepted server=${server?.trim().orEmpty()} userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dns=${dnsServers.joinToString(",")} mtu=$proxyMtu http=${if (httpEnabled) httpPort else "off"} socks=${if (socksEnabled) socksPort else "off"}",
                 )
@@ -137,19 +137,19 @@ class ProxyTunnelService : Service() {
         VpnTunnelEvents.emitEngineLog(
             Log.INFO,
             TAG,
-            "${prefixAttempt(attemptId)}Starting proxy negotiation server=$server dns=${dnsServers.joinToString(",")} mtu=$proxyMtu http=${if (httpEnabled) httpPort else "off"} socks=${if (socksEnabled) socksPort else "off"}",
+            "${prefixAttempt(attemptId)}Starting proxy negotiation",
         )
         try {
             VpnBridge.nativeSetSocketProtectionEnabled(false)
             val negotiatedClientIp = IntArray(4)
             val negResult = VpnBridge.nativeNegotiate(server, user, password, psk, proxyMtu, negotiatedClientIp)
-            VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}nativeNegotiate finished with exit code=$negResult")
+            VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}nativeNegotiate finished with exit code=$negResult")
             if (negResult != 0) {
                 emitTerminalState(VpnContract.TUNNEL_FAILED, tunnelExitDetail(negResult))
                 return
             }
             VpnTunnelEvents.emitEngineLog(
-                Log.INFO,
+                Log.DEBUG,
                 TAG,
                 "${prefixAttempt(attemptId)}Negotiated tunnel clientIpv4=${negotiatedClientIp.joinToString(".")}; awaiting proxy dataplane",
             )
@@ -170,7 +170,7 @@ class ProxyTunnelService : Service() {
                         isConnected = { connectedEmitted },
                         emitTerminal = ::emitTerminalState,
                         onLoopCrash = { throwable ->
-                            Log.e(TAG, "${prefixAttempt(attemptId)}nativeStartProxyLoop failed", throwable)
+                            AppLog.e(TAG, "${prefixAttempt(attemptId)}nativeStartProxyLoop failed", throwable)
                         },
                     )
                 },
@@ -188,7 +188,7 @@ class ProxyTunnelService : Service() {
                         VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
                     },
                 )
-            VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}waiting for proxy packet bridge readiness")
+            VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}waiting for proxy packet bridge readiness")
             localStack = stack
             if (!stack.waitUntilReady()) {
                 emitTerminalState(VpnContract.TUNNEL_FAILED, "Local proxy bridge did not become ready")
@@ -199,7 +199,7 @@ class ProxyTunnelService : Service() {
                 loopThread.join(5000)
                 return
             }
-            VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}proxy packet bridge ready; starting listeners")
+            VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}Proxy packet bridge ready")
             val transport = BridgeProxyTransport(stack)
             val runtime = ProxyServerRuntime(
                 config = ProxyRuntimeConfig(
@@ -208,8 +208,8 @@ class ProxyTunnelService : Service() {
                     socksEnabled = socksEnabled,
                     socksPort = socksPort,
                 ),
-                logger = { message ->
-                    VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}$message")
+                levelLogger = { level, message ->
+                    VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
                 },
                 transport = transport,
             )
@@ -227,7 +227,7 @@ class ProxyTunnelService : Service() {
             VpnTunnelEvents.emitEngineLog(
                 Log.INFO,
                 TAG,
-                "${prefixAttempt(attemptId)}proxy ready endpoints=${runtime.endpointSummary()} clientIpv4=${negotiatedClientIp.joinToString(".")} dns=${dnsServers.joinToString(",")} mode=ipv4-hostname-via-dns",
+                "${prefixAttempt(attemptId)}Proxy ready ${runtime.endpointSummary()}",
             )
             connectedEmitted = true
             updateForegroundNotification(runtime.endpointSummary())
@@ -237,12 +237,12 @@ class ProxyTunnelService : Service() {
             )
             loopThread.join()
         } catch (t: Throwable) {
-            Log.e(TAG, "${prefixAttempt(attemptId)}runProxyNegotiation failed", t)
+            AppLog.e(TAG, "${prefixAttempt(attemptId)}runProxyNegotiation failed", t)
             emitTerminalState(VpnContract.TUNNEL_FAILED, t.message ?: "proxy startup failed")
         } finally {
             localStack?.stop()
             localRuntime?.stop()
-            VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}proxy worker finalizing")
+            VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}proxy worker finalizing")
             var shouldStopService = false
             synchronized(sessionLock) {
                 if (worker === currentWorker) {
@@ -280,7 +280,7 @@ class ProxyTunnelService : Service() {
                 }
             }
         if (!active.hasState()) return
-        VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "Stopping previous proxy session reason=$reason")
+        VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "Stopping previous proxy session reason=$reason")
         active.stack?.stop()
         active.runtime?.stop()
         ProxyTunnelServiceStopper.stopPreviousWorker(
@@ -419,7 +419,7 @@ internal object ProxyTunnelServiceStopper {
             if (worker.isAlive) {
                 logger(Log.WARN, "Previous proxy worker did not exit within ${joinTimeoutMs}ms")
             } else {
-                logger(Log.INFO, "Previous proxy worker joined")
+                logger(Log.DEBUG, "Previous proxy worker joined")
             }
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
@@ -440,9 +440,9 @@ internal object ProxyTunnelLoopRunner {
         onLoopCrash: (Throwable) -> Unit,
     ) {
         try {
-            emitEngineLog(Log.INFO, "${prefixAttempt(attemptId)}nativeStartProxyLoop thread running")
+            emitEngineLog(Log.DEBUG, "${prefixAttempt(attemptId)}nativeStartProxyLoop thread running")
             val code = startLoop()
-            emitEngineLog(Log.INFO, "${prefixAttempt(attemptId)}nativeStartProxyLoop exited with code=$code")
+            emitEngineLog(Log.DEBUG, "${prefixAttempt(attemptId)}nativeStartProxyLoop exited with code=$code")
             if (code != 0) {
                 emitTerminal(VpnContract.TUNNEL_FAILED, detailForCode(code))
             } else if (isStopRequested()) {

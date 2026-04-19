@@ -29,9 +29,10 @@ data class ProxyRuntimeConfig(
  */
 class ProxyServerRuntime(
     private val config: ProxyRuntimeConfig,
-    private val logger: (String) -> Unit,
+    private val logger: (String) -> Unit = {},
     private val transport: ProxyTransport = StubProxyTransport(),
     private val connectTimeoutMs: Long = DEFAULT_CONNECT_TIMEOUT_MS,
+    private val levelLogger: ((Int, String) -> Unit)? = null,
 ) {
     private val running = AtomicBoolean(false)
     private val listenerThreads = CopyOnWriteArrayList<Thread>()
@@ -46,7 +47,7 @@ class ProxyServerRuntime(
             throw IllegalArgumentException("HTTP and SOCKS5 ports must differ")
         }
         if (!running.compareAndSet(false, true)) return
-        logger("proxy runtime start http=${if (config.httpEnabled) config.httpPort else "off"} socks=${if (config.socksEnabled) config.socksPort else "off"}")
+        debug("proxy runtime start http=${if (config.httpEnabled) config.httpPort else "off"} socks=${if (config.socksEnabled) config.socksPort else "off"}")
         try {
             if (config.httpEnabled) {
                 startListener("http", config.httpPort, ::handleHttpClient)
@@ -62,7 +63,7 @@ class ProxyServerRuntime(
 
     fun stop() {
         running.set(false)
-        logger("proxy runtime stop listeners=${listenerThreads.size} clients=${clientThreads.size}")
+        debug("proxy runtime stop listeners=${listenerThreads.size} clients=${clientThreads.size}")
         for (socket in serverSockets) {
             closeQuietly(socket)
         }
@@ -93,7 +94,7 @@ class ProxyServerRuntime(
             reuseAddress = true
         }
         serverSockets.add(socket)
-        logger("Listening on $name://$LOOPBACK_HOST:$port")
+        debug("Listening on $name://$LOOPBACK_HOST:$port")
         val thread = Thread(
             {
                 try {
@@ -101,20 +102,20 @@ class ProxyServerRuntime(
                         try {
                             val client = socket.accept()
                             client.soTimeout = CLIENT_SO_TIMEOUT_MS
-                            logger("proxy accept proto=$name from=${client.inetAddress.hostAddress}:${client.port}")
+                            debug("proxy accept proto=$name from=${client.inetAddress.hostAddress}:${client.port}")
                             startClientThread(name, client, handler)
                         } catch (_: SocketException) {
                             break
                         } catch (e: IOException) {
                             if (running.get()) {
-                                logger("$name accept error: ${e.message}")
+                                warn("$name accept error: ${e.message}")
                             }
                             break
                         }
                     }
                 } catch (t: Throwable) {
                     if (running.get()) {
-                        logger("$name listener crash: ${t.javaClass.simpleName}: ${t.message}")
+                        warn("$name listener crash: ${t.javaClass.simpleName}: ${t.message}")
                     }
                 }
             },
@@ -137,12 +138,12 @@ class ProxyServerRuntime(
                             handler(client)
                         } catch (_: EOFException) {
                         } catch (e: IOException) {
-                            logger("$name client error: ${e.message}")
+                            warn("$name client error: ${e.message}")
                         }
                     }
                 } catch (t: Throwable) {
                     if (running.get()) {
-                        logger("$name client crash: ${t.javaClass.simpleName}: ${t.message}")
+                        warn("$name client crash: ${t.javaClass.simpleName}: ${t.message}")
                     }
                 }
             },
@@ -160,29 +161,29 @@ class ProxyServerRuntime(
             val line = readAsciiLine(input) ?: break
             if (line.isEmpty()) break
         }
-        logger("HTTP proxy request received: $firstLine")
+        debug("HTTP proxy request received: $firstLine")
         val parts = firstLine.split(' ')
         if (parts.size < 3) {
-            logger("proxy reject proto=http-connect reason=malformed-request-line line=$firstLine")
+            warn("proxy reject proto=http-connect reason=malformed-request-line line=$firstLine")
             writeHttpError(output, 400, "Bad Request", "Malformed HTTP proxy request line.")
             return
         }
         val method = parts[0].uppercase()
         if (method != "CONNECT") {
-            logger("proxy reject proto=http method=$method reason=unsupported-method")
+            warn("proxy reject proto=http method=$method reason=unsupported-method")
             writeHttpError(output, 501, "Not Implemented", "Only HTTP CONNECT is supported in proxy mode.")
             return
         }
         val target = parseHttpConnectTarget(parts[1])
         if (target == null) {
-            logger("proxy reject proto=http-connect reason=invalid-target raw=${parts[1]}")
+            warn("proxy reject proto=http-connect reason=invalid-target raw=${parts[1]}")
             writeHttpError(output, 400, "Bad Request", "Invalid CONNECT target.")
             return
         }
         val request = ProxyConnectRequest(host = target.first, port = target.second, protocol = "http-connect")
-        logger("proxy request proto=http-connect target=${request.host}:${request.port}")
+        debug("proxy request proto=http-connect target=${request.host}:${request.port}")
         if (request.host.isUnsupportedIpv6Target()) {
-            logger("proxy reject proto=http-connect reason=ipv6-unsupported target=${request.host}:${request.port}")
+            warn("proxy reject proto=http-connect reason=ipv6-unsupported target=${request.host}:${request.port}")
             writeHttpError(output, 501, "Not Implemented", IPV6_UNSUPPORTED_MESSAGE)
             return
         }
@@ -191,7 +192,7 @@ class ProxyServerRuntime(
             transport.openTcpSession(request).use { session ->
                 sessionId = session.descriptor.sessionId
                 session.awaitConnected(connectTimeoutMs)
-                logger("proxy connect ok proto=http-connect sid=${session.descriptor.sessionId} target=${request.host}:${request.port}")
+                debug("proxy connect ok proto=http-connect sid=${session.descriptor.sessionId} target=${request.host}:${request.port}")
                 output.write("HTTP/1.1 200 Connection Established\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
                 output.flush()
                 // Keep a short timeout while parsing the proxy handshake, then return the tunnel socket
@@ -206,7 +207,7 @@ class ProxyServerRuntime(
                 )
             }
         } catch (e: IOException) {
-            logger(
+            warn(
                 "proxy fail proto=http-connect sid=${sessionId?.toString() ?: "pending"} target=${request.host}:${request.port} error=${e.message ?: DEFAULT_TRANSPORT_FAILURE}",
             )
             writeHttpError(output, 503, "Service Unavailable", e.message ?: DEFAULT_TRANSPORT_FAILURE)
@@ -231,11 +232,11 @@ class ProxyServerRuntime(
         val reserved = input.read()
         val atyp = input.read()
         if (reqVersion != 0x05 || reserved != 0x00 || cmd < 0 || atyp < 0) {
-            logger("proxy reject proto=socks5 reason=malformed-request version=$reqVersion cmd=$cmd atyp=$atyp")
+            warn("proxy reject proto=socks5 reason=malformed-request version=$reqVersion cmd=$cmd atyp=$atyp")
             return
         }
         if (cmd != SOCKS_CMD_CONNECT) {
-            logger("proxy reject proto=socks5 reason=unsupported-command cmd=$cmd")
+            warn("proxy reject proto=socks5 reason=unsupported-command cmd=$cmd")
             writeSocksReply(output, SOCKS_REPLY_COMMAND_NOT_SUPPORTED)
             return
         }
@@ -276,11 +277,11 @@ class ProxyServerRuntime(
         val portLo = input.read()
         if (portHi < 0 || portLo < 0) return
         val port = (portHi shl 8) or portLo
-        logger("SOCKS5 CONNECT request received: $host:$port")
+        debug("SOCKS5 CONNECT request received: $host:$port")
         val request = ProxyConnectRequest(host = host, port = port, protocol = "socks5-connect")
-        logger("proxy request proto=socks5-connect target=${request.host}:${request.port}")
+        debug("proxy request proto=socks5-connect target=${request.host}:${request.port}")
         if (request.host.isUnsupportedIpv6Target()) {
-            logger("proxy reject proto=socks5-connect reason=ipv6-unsupported target=${request.host}:${request.port}")
+            warn("proxy reject proto=socks5-connect reason=ipv6-unsupported target=${request.host}:${request.port}")
             writeSocksReply(output, SOCKS_REPLY_HOST_UNREACHABLE)
             return
         }
@@ -289,7 +290,7 @@ class ProxyServerRuntime(
             transport.openTcpSession(request).use { session ->
                 sessionId = session.descriptor.sessionId
                 session.awaitConnected(connectTimeoutMs)
-                logger("proxy connect ok proto=socks5-connect sid=${session.descriptor.sessionId} target=${request.host}:${request.port}")
+                debug("proxy connect ok proto=socks5-connect sid=${session.descriptor.sessionId} target=${request.host}:${request.port}")
                 writeSocksReply(output, SOCKS_REPLY_SUCCEEDED)
                 // Only the SOCKS handshake uses the listener timeout; the tunneled stream should block normally.
                 client.soTimeout = 0
@@ -302,11 +303,19 @@ class ProxyServerRuntime(
                 )
             }
         } catch (e: IOException) {
-            logger(
+            warn(
                 "proxy fail proto=socks5-connect sid=${sessionId?.toString() ?: "pending"} target=${request.host}:${request.port} error=${e.message ?: DEFAULT_TRANSPORT_FAILURE}",
             )
             writeSocksReply(output, SOCKS_REPLY_GENERAL_FAILURE)
         }
+    }
+
+    private fun debug(message: String) = log(Log.DEBUG, message)
+
+    private fun warn(message: String) = log(Log.WARN, message)
+
+    private fun log(level: Int, message: String) {
+        levelLogger?.invoke(level, message) ?: logger(message)
     }
 
     private fun writeHttpError(output: BufferedOutputStream, code: Int, status: String, message: String) {

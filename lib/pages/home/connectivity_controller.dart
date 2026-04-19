@@ -22,7 +22,7 @@ extension _VpnHomePageConnectivity on _VpnHomePageState {
     _setHomeState(() {
       _connectivityBadgeState = ConnectivityBadgeState.checking;
     });
-    _log('Connectivity check: $url');
+    _logDebug('Connectivity check: $url', tag: 'connectivity');
 
     final result = await _connectivityChecker.ping(url);
     if (!mounted) return;
@@ -32,9 +32,10 @@ extension _VpnHomePageConnectivity on _VpnHomePageState {
         _connectivityBadgeState = ConnectivityBadgeState.success;
         _connectivityLatencyMs = result.latencyMs;
       });
-      _log(
+      _logInfo(
         'Connectivity OK: ${result.latencyMs} ms'
         '${result.statusCode == null ? '' : ' status=${result.statusCode}'}',
+        tag: 'connectivity',
       );
       return;
     }
@@ -43,10 +44,11 @@ extension _VpnHomePageConnectivity on _VpnHomePageState {
       _connectivityBadgeState = ConnectivityBadgeState.failure;
       _connectivityLatencyMs = null;
     });
-    _log(
+    _logWarning(
       'Connectivity failed'
       '${result.statusCode == null ? '' : ' status=${result.statusCode}'}'
       '${result.error == null || result.error!.isEmpty ? '' : ': ${result.error}'}',
+      tag: 'connectivity',
     );
   }
 }

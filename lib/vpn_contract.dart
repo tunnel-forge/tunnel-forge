@@ -50,6 +50,7 @@ abstract final class VpnContract {
   static const String onEngineLog = 'onEngineLog';
 
   static const String argEngineLogLevel = 'engineLogLevel';
+  static const String argEngineLogSource = 'engineLogSource';
   static const String argEngineLogTag = 'engineLogTag';
   static const String argEngineLogMessage = 'engineLogMessage';
 }

@@ -40,6 +40,7 @@ extension _VpnHomePageUi on _VpnHomePageState {
             canStartConnection: _hasActiveProfile,
             connectButtonLabel: _connectButtonLabel,
             onPrimary: _primaryAction,
+            onUnavailablePrimaryTap: _handleMissingProfileTap,
             connectivityBadgeState: _connectivityBadgeState,
             connectivityBadgeLabel: _connectivityBadgeLabel,
             onConnectivityTap: _runConnectivityCheck,
@@ -51,13 +52,15 @@ extension _VpnHomePageUi on _VpnHomePageState {
         return ListenableBuilder(
           listenable: _logBuffer,
           builder: (context, _) => LogsPanel(
-            logs: _logBuffer.lines,
+            logs: _visibleLogs,
             scrollController: _logsScroll,
             colorScheme: cs,
             textTheme: textTheme,
             stickToBottom: _logsStickToBottom,
             onJumpToLatest: _jumpLogsToBottom,
             wordWrap: _logsWordWrap,
+            hasAnyLogs: _logBuffer.entries.isNotEmpty,
+            filterLabel: _logsFilterLabel,
           ),
         );
       default:
@@ -154,6 +157,52 @@ extension _VpnHomePageUi on _VpnHomePageState {
                 children: switch (_navIndex) {
                   0 => <Widget>[],
                   1 => [
+                    PopupMenuButton<LogViewerFilter>(
+                      tooltip: 'Filter level',
+                      initialValue: _logsFilter,
+                      onSelected: _setLogsFilter,
+                      itemBuilder: (context) => const [
+                        PopupMenuItem<LogViewerFilter>(
+                          value: LogViewerFilter.all,
+                          child: Text('All'),
+                        ),
+                        PopupMenuItem<LogViewerFilter>(
+                          value: LogViewerFilter.debug,
+                          child: Text('DEBUG'),
+                        ),
+                        PopupMenuItem<LogViewerFilter>(
+                          value: LogViewerFilter.info,
+                          child: Text('INFO'),
+                        ),
+                        PopupMenuItem<LogViewerFilter>(
+                          value: LogViewerFilter.warning,
+                          child: Text('WARNING'),
+                        ),
+                        PopupMenuItem<LogViewerFilter>(
+                          value: LogViewerFilter.error,
+                          child: Text('ERROR'),
+                        ),
+                      ],
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 8,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.filter_list_rounded, size: 20),
+                            const SizedBox(width: 6),
+                            Text(
+                              _logsFilterLabel,
+                              style: textTheme.labelMedium?.copyWith(
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                     IconButton(
                       tooltip: _logsWordWrap
                           ? 'Turn off word wrap (wide lines scroll sideways)'

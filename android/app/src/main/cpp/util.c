@@ -224,5 +224,5 @@ void tunnel_log(const char *fmt, ...) {
   va_start(ap, fmt);
   vsnprintf(buf, sizeof(buf), fmt, ap);
   va_end(ap);
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "%s", buf);
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "%s", buf);
 }

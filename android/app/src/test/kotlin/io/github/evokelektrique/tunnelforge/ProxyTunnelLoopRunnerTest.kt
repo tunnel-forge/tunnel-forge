@@ -24,7 +24,7 @@ class ProxyTunnelLoopRunnerTest {
             onLoopCrash = { crashes += it },
         )
 
-        assertTrue(logs.any { it == "${Log.INFO}:attempt=attempt-1 nativeStartProxyLoop thread running" })
+        assertTrue(logs.any { it == "${Log.DEBUG}:attempt=attempt-1 nativeStartProxyLoop thread running" })
         assertEquals(listOf("${VpnContract.TUNNEL_FAILED}:boom"), terminalEvents)
         assertEquals(1, crashes.size)
         assertTrue(crashes.single() is IllegalStateException)

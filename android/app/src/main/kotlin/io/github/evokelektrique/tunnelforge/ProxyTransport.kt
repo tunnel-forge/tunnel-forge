@@ -53,7 +53,7 @@ class BridgeProxyTransport(
 ) : ProxyTransport {
     override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
         val session = stack.openTcpSession(request)
-        logInfo("proxy transport open sid=${session.descriptor.sessionId} target=${request.host}:${request.port}")
+        logDebug("proxy transport open sid=${session.descriptor.sessionId} target=${request.host}:${request.port}")
         return object : ProxyTransportSession {
             override val descriptor: ProxySessionDescriptor = session.descriptor
 
@@ -66,7 +66,7 @@ class BridgeProxyTransport(
             }
 
             override fun close() {
-                logInfo("proxy transport close sid=${descriptor.sessionId}")
+                logDebug("proxy transport close sid=${descriptor.sessionId}")
                 session.close()
             }
         }
@@ -75,9 +75,9 @@ class BridgeProxyTransport(
     private companion object {
         private const val TAG = "BridgeProxyTransport"
 
-        private fun logInfo(message: String) {
+        private fun logDebug(message: String) {
             try {
-                Log.i(TAG, message)
+                AppLog.d(TAG, message)
             } catch (_: RuntimeException) {
                 // Unit tests run without Android logging runtime.
             }

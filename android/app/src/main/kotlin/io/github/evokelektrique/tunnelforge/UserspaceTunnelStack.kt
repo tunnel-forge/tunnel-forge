@@ -46,7 +46,7 @@ class BridgeUserspaceTunnelStack(
     private val dnsServers: List<String> = listOf(DEFAULT_DNS_SERVER),
     private val linkMtu: Int = DEFAULT_LINK_MTU,
     private val logger: (Int, String) -> Unit = { level, message ->
-        Log.println(level, TAG, message)
+        AppLog.println(level, TAG, message)
     },
     private val failureReason: String = DEFAULT_FAILURE_REASON,
     private val connectTimeoutMs: Long = DEFAULT_CONNECT_TIMEOUT_MS,
@@ -73,7 +73,7 @@ class BridgeUserspaceTunnelStack(
     private var running = false
 
     override fun waitUntilReady(timeoutMs: Long, pollIntervalMs: Long): Boolean {
-        logger(Log.INFO, "userspace stack waitUntilReady timeoutMs=$timeoutMs pollIntervalMs=$pollIntervalMs")
+        logger(Log.DEBUG, "userspace stack waitUntilReady timeoutMs=$timeoutMs pollIntervalMs=$pollIntervalMs")
         if (!bridge.waitUntilActive(timeoutMs = timeoutMs, pollIntervalMs = pollIntervalMs)) {
             logger(Log.WARN, "userspace stack bridge did not become active within timeout")
             return false
@@ -89,7 +89,7 @@ class BridgeUserspaceTunnelStack(
                     },
                 )
             logger(
-                Log.INFO,
+                Log.DEBUG,
                 "userspace stack inbound pump started clientIpv4=$clientIpv4 dns=${dnsServers.joinToString(",")} mtu=$linkMtu mss=$advertisedMss",
             )
         }
@@ -106,7 +106,7 @@ class BridgeUserspaceTunnelStack(
                 request = request,
                 openedAtMs = System.currentTimeMillis(),
             )
-        logger(Log.INFO, "proxy session open sid=${descriptor.sessionId} target=${request.host}:${request.port}")
+        logger(Log.DEBUG, "proxy session open sid=${descriptor.sessionId} target=${request.host}:${request.port}")
         sessions[descriptor.sessionId] =
             UserspaceSessionSnapshot(
                 descriptor = descriptor,
@@ -144,7 +144,7 @@ class BridgeUserspaceTunnelStack(
 
     override fun stop() {
         running = false
-        logger(Log.INFO, "userspace stack stop sessions=${sessions.size} runtimes=${tcpRuntimeBySessionId.size} attachments=${clientAttachments.size}")
+        logger(Log.DEBUG, "userspace stack stop sessions=${sessions.size} runtimes=${tcpRuntimeBySessionId.size} attachments=${clientAttachments.size}")
         tcpRuntimeBySessionId.values.forEach { it.signalRuntimeFailure("Proxy packet bridge stopped.") }
         sessions.clear()
         tcpRuntimeBySessionId.clear()
@@ -260,7 +260,7 @@ class BridgeUserspaceTunnelStack(
             clientAttachments.remove(runtime.sessionId)?.close()
             val message = "Observed TCP RST from ${ipv4.sourceIp}:${tcp.sourcePort}"
             runtime.signalRuntimeFailure(message)
-            logger(Log.INFO, "proxy tcp fail sid=${runtime.sessionId} reason=rst-in")
+            logger(Log.WARN, "proxy tcp fail sid=${runtime.sessionId} reason=rst-in")
             updateSessionState(runtime.sessionId, UserspaceSessionState.failed, message)
             return
         }
@@ -283,7 +283,7 @@ class BridgeUserspaceTunnelStack(
                 }
             if (bridge.queueOutboundPacket(ackPacket)) {
                 runtime.markEstablished(ipv4.sourceIp, tcp.sequenceNumber + 1)
-                logger(Log.INFO, "proxy tcp established sid=${runtime.sessionId}")
+                logger(Log.DEBUG, "proxy tcp established sid=${runtime.sessionId}")
                 updateSessionState(
                     runtime.sessionId,
                     UserspaceSessionState.established,
@@ -302,7 +302,7 @@ class BridgeUserspaceTunnelStack(
             val expectedSequence = runtime.withLock { remoteSequenceNumber }
             if (tcp.sequenceNumber < expectedSequence) {
                 queuePureAck(runtime, expectedSequence)
-                logger(Log.INFO, "proxy tcp reack sid=${runtime.sessionId} reason=duplicate ack=$expectedSequence")
+                logger(Log.DEBUG, "proxy tcp reack sid=${runtime.sessionId} reason=duplicate ack=$expectedSequence")
                 updateSessionState(
                     runtime.sessionId,
                     UserspaceSessionState.established,
@@ -312,7 +312,7 @@ class BridgeUserspaceTunnelStack(
             }
             if (tcp.sequenceNumber > expectedSequence) {
                 queuePureAck(runtime, expectedSequence)
-                logger(Log.INFO, "proxy tcp reack sid=${runtime.sessionId} reason=out-of-order ack=$expectedSequence")
+                logger(Log.DEBUG, "proxy tcp reack sid=${runtime.sessionId} reason=out-of-order ack=$expectedSequence")
                 updateSessionState(
                     runtime.sessionId,
                     UserspaceSessionState.established,
@@ -340,7 +340,7 @@ class BridgeUserspaceTunnelStack(
                     updateSessionState(runtime.sessionId, UserspaceSessionState.failed, message)
                     return
                 }
-                logger(Log.INFO, "proxy tcp in sid=${runtime.sessionId} bytes=${tcp.payloadLength}")
+                logger(Log.DEBUG, "proxy tcp in sid=${runtime.sessionId} bytes=${tcp.payloadLength}")
                 updateSessionState(
                     runtime.sessionId,
                     UserspaceSessionState.established,
@@ -365,7 +365,7 @@ class BridgeUserspaceTunnelStack(
         if (finConsumesByte != 0) {
             clientAttachments[runtime.sessionId]?.shutdownOutput()
             runtime.markRemoteClosed()
-            logger(Log.INFO, "proxy tcp close sid=${runtime.sessionId} reason=fin-in")
+            logger(Log.DEBUG, "proxy tcp close sid=${runtime.sessionId} reason=fin-in")
             updateSessionState(
                 runtime.sessionId,
                 UserspaceSessionState.established,
@@ -376,7 +376,7 @@ class BridgeUserspaceTunnelStack(
 
     private fun resolveRemoteIpv4(descriptor: ProxySessionDescriptor): String {
         descriptor.request.host.toIpv4LiteralOrNull()?.let {
-            logger(Log.INFO, "proxy resolve sid=${descriptor.sessionId} host=${descriptor.request.host} mode=literal ip=$it")
+            logger(Log.DEBUG, "proxy resolve sid=${descriptor.sessionId} host=${descriptor.request.host} mode=literal ip=$it")
             return it
         }
         if (descriptor.request.host.contains(':')) {
@@ -388,7 +388,7 @@ class BridgeUserspaceTunnelStack(
             "Resolving ${descriptor.request.host} through tunneled DNS",
         )
         val resolved = dnsResolver.resolve(descriptor.request.host)
-        logger(Log.INFO, "proxy resolve sid=${descriptor.sessionId} host=${descriptor.request.host} mode=dns ip=$resolved")
+        logger(Log.DEBUG, "proxy resolve sid=${descriptor.sessionId} host=${descriptor.request.host} mode=dns ip=$resolved")
         return resolved
     }
 
@@ -427,7 +427,7 @@ class BridgeUserspaceTunnelStack(
             updateSessionState(descriptor.sessionId, UserspaceSessionState.failed, "Failed to queue TCP SYN into proxy packet bridge")
             throw IOException("Failed to queue outbound TCP SYN into proxy packet bridge.")
         }
-        logger(Log.INFO, "proxy tcp syn sid=${descriptor.sessionId} sport=$localPort daddr=$remoteIp:${descriptor.request.port} mss=$advertisedMss")
+        logger(Log.DEBUG, "proxy tcp syn sid=${descriptor.sessionId} sport=$localPort daddr=$remoteIp:${descriptor.request.port} mss=$advertisedMss")
     }
 
     private fun updateSessionState(sessionId: Int, state: UserspaceSessionState, event: String) {
@@ -439,9 +439,9 @@ class BridgeUserspaceTunnelStack(
     private fun pumpSessionTraffic(sessionId: Int, client: ProxyClientConnection) {
         clientAttachments[sessionId] = ClientAttachment(client)
         val runtime = tcpRuntimeBySessionId[sessionId] ?: throw IOException("TCP session runtime closed before activation.")
-        logger(Log.INFO, "proxy session attach sid=$sessionId localPort=${runtime.localPort} remote=${runtime.remoteIp}:${runtime.remotePort}")
+        logger(Log.DEBUG, "proxy session attach sid=$sessionId localPort=${runtime.localPort} remote=${runtime.remoteIp}:${runtime.remotePort}")
         awaitSessionEstablished(sessionId, connectTimeoutMs)
-        logger(Log.INFO, "proxy session active sid=$sessionId localPort=${runtime.localPort} remote=${runtime.remoteIp}:${runtime.remotePort}")
+        logger(Log.DEBUG, "proxy session active sid=$sessionId localPort=${runtime.localPort} remote=${runtime.remoteIp}:${runtime.remotePort}")
 
         val input = client.input
         val buffer = ByteArray(maxTcpPayloadBytes)
@@ -473,7 +473,7 @@ class BridgeUserspaceTunnelStack(
             runtime.withLock {
                 nextSendSequenceNumber += read
             }
-            logger(Log.INFO, "proxy tcp out sid=$sessionId bytes=$read")
+            logger(Log.DEBUG, "proxy tcp out sid=$sessionId bytes=$read")
             updateSessionState(sessionId, UserspaceSessionState.established, "Queued outbound TCP payload len=$read")
         }
 
@@ -502,7 +502,7 @@ class BridgeUserspaceTunnelStack(
         runtime.withLock {
             nextSendSequenceNumber += 1
         }
-        logger(Log.INFO, "proxy tcp close sid=$sessionId reason=fin-out")
+        logger(Log.DEBUG, "proxy tcp close sid=$sessionId reason=fin-out")
         updateSessionState(sessionId, UserspaceSessionState.established, "Queued outbound TCP FIN; awaiting remote close")
 
         when (runtime.awaitRemoteCloseOrFailure()) {

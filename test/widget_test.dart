@@ -57,6 +57,7 @@ void main() {
     String label = 'Ready',
     ConnectivityBadgeState connectivityBadgeState = ConnectivityBadgeState.idle,
     String connectivityBadgeLabel = 'Tap to check',
+    VoidCallback? onUnavailablePrimaryTap,
     VoidCallback? onConnectivityTap,
   }) async {
     final theme = appTheme(brightness);
@@ -76,6 +77,7 @@ void main() {
               canStartConnection: canStartConnection,
               connectButtonLabel: label,
               onPrimary: () {},
+              onUnavailablePrimaryTap: onUnavailablePrimaryTap ?? () {},
               connectivityBadgeState: connectivityBadgeState,
               connectivityBadgeLabel: connectivityBadgeLabel,
               onConnectivityTap: onConnectivityTap ?? () {},
@@ -158,6 +160,7 @@ void main() {
                   canStartConnection: true,
                   connectButtonLabel: 'Ready',
                   onPrimary: () {},
+                  onUnavailablePrimaryTap: () {},
                   connectivityBadgeState: ConnectivityBadgeState.idle,
                   connectivityBadgeLabel: 'Tap to check',
                   onConnectivityTap: () {},
@@ -272,17 +275,28 @@ void main() {
   testWidgets('ConnectionPanel disables connect when no active profile', (
     WidgetTester tester,
   ) async {
+    var disabledTapCount = 0;
     await pumpConnectionPanel(
       tester,
       canStartConnection: false,
       label: 'Select profile',
+      onUnavailablePrimaryTap: () => disabledTapCount++,
     );
 
     final button = tester.widget<FilledButton>(
       find.byKey(const Key('vpn_connect')),
     );
     expect(button.onPressed, isNull);
+    expect(
+      buttonBackground(tester, disabled: true),
+      AppPalette.lightSurfaceHighest,
+    );
     expect(statusText(tester), 'Select profile');
+
+    await tester.tap(find.byKey(const Key('vpn_connect_disabled_tap_target')));
+    await tester.pump();
+
+    expect(disabledTapCount, 1);
   });
 
   testWidgets('Connect runs prepare then connect; awaits TUN status', (
@@ -394,7 +408,18 @@ void main() {
   testWidgets('successful connect auto-runs connectivity check once', (
     WidgetTester tester,
   ) async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({
+      ProfileStore.prefsKeyProfilesJson: jsonEncode([
+        {
+          'id': 'widget_test_connectivity',
+          'displayName': 'Connectivity Test',
+          'server': 'vpn.test.example',
+          'user': '',
+          'dns': '8.8.8.8',
+        },
+      ]),
+      ProfileStore.prefsKeyLastProfileId: 'widget_test_connectivity',
+    });
     final methods = <String>[];
     final checker = FakeConnectivityChecker();
     installVpnChannelMock(methods);
@@ -424,6 +449,62 @@ void main() {
 
     expect(checker.urls, [ConnectivityCheckSettings.defaultUrl]);
     expect(connectivityStatusText(tester), '84 ms');
+  });
+
+  testWidgets('logs default to all levels and allow exact filtering', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final methods = <String>[];
+    installVpnChannelMock(methods);
+    addTearDown(uninstallVpnChannelMock);
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await simulateHostEngineLog(
+      tester,
+      priority: 4,
+      source: 'kotlin',
+      tag: 'MainActivity',
+      message: 'info message',
+    );
+    await simulateHostEngineLog(
+      tester,
+      priority: 5,
+      source: 'native',
+      tag: 'tunnel_engine',
+      message: 'warn message',
+    );
+
+    await tester.tap(find.text('Logs'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.textContaining('info message'), findsOneWidget);
+    expect(find.textContaining('warn message'), findsOneWidget);
+    expect(find.text('Filter: All'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Filter level'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('WARNING').last);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('info message'), findsNothing);
+    expect(find.textContaining('warn message'), findsOneWidget);
+    expect(find.text('Filter: WARNING'), findsOneWidget);
   });
 
   testWidgets('VPN tab shows profile picker tile', (WidgetTester tester) async {
@@ -491,6 +572,20 @@ void main() {
       find.byKey(const Key('vpn_connect')),
     );
     expect(button.onPressed, isNull);
+    expect(
+      find.byKey(const Key('vpn_connect_disabled_tap_target')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const Key('vpn_connect_disabled_tap_target')));
+    await tester.pump();
+
+    expect(
+      find.text(
+        'Create a profile first. You will need a server, username, and tunnel settings before connecting.',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('proxy-only skips VPN prepare and sends connect', (

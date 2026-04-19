@@ -56,7 +56,7 @@ static void ppp_log_rx_summary(const uint8_t *p, size_t len, const char *stage) 
   uint16_t proto = util_read_be16(p);
   uint8_t code = p[2];
   uint8_t id = p[3];
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp rx stage=%s proto=0x%04x code=%u id=%u len=%zu", stage,
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp rx stage=%s proto=0x%04x code=%u id=%u len=%zu", stage,
                     (unsigned)proto, (unsigned)code, (unsigned)id, len);
 }
 
@@ -116,7 +116,7 @@ static int recv_ppp(int esp_fd, esp_keys_t *esp, l2tp_session_t *l2tp, uint8_t *
     }
     if (ppp_len > cap) return -1;
     memcpy(out, ppp_ptr, ppp_len);
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp recv payload ok len=%zu", ppp_len);
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp recv payload ok len=%zu", ppp_len);
     return (int)ppp_len;
   }
 }
@@ -317,7 +317,7 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
   int lcp_auth_in_cr = 1;
   int plen = lcp_build_cr(pkt, sizeof(pkt), id, auth, cr_mru, 1, lcp_accm_in_cr, lcp_auth_in_cr);
   if (plen < 0) return -1;
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp lcp: send Configure-Request id=%u auth=%s mru=%u", (unsigned)id,
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp lcp: send Configure-Request id=%u auth=%s mru=%u", (unsigned)id,
                     ppp_auth_name(auth), (unsigned)cr_mru);
   if (send_ppp(esp_fd, esp, peer, peer_len, l2tp, pkt, (size_t)plen) < 0) {
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "ppp lcp: send Configure-Request failed id=%u", (unsigned)id);
@@ -346,7 +346,7 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
       if (!lcp_peer_framing_seen) {
         lcp_peer_framing_seen = 1;
         lcp_out_include_ac = (n >= 2 && in[0] == 0xff && in[1] == 0x03) ? 1 : 0;
-        tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp lcp peer raw addr_ctl=%d in0=%02x in1=%02x", lcp_out_include_ac,
+        tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp lcp peer raw addr_ctl=%d in0=%02x in1=%02x", lcp_out_include_ac,
                           n > 0 ? in[0] : 0, n > 1 ? in[1] : 0);
       }
       if (!peer_cr_hex_done) {
@@ -354,7 +354,7 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
         char hx[80];
         size_t lim = len < 22u ? len : 22u;
         for (size_t zi = 0; zi < lim; zi++) snprintf(hx + zi * 3, 4, "%02x ", p[zi]);
-        tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp lcp peer-cr first-bytes len=%zu lim=%zu: %s", len, lim, hx);
+        tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp lcp peer-cr first-bytes len=%zu lim=%zu: %s", len, lim, hx);
       }
       uint8_t ackbuf[256];
       uint16_t lcp_len = util_read_be16(p + 4);
@@ -377,7 +377,7 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
             plen = lcp_build_cr(pkt, sizeof(pkt), id, auth, cr_mru, lcp_out_include_ac, lcp_accm_in_cr, lcp_auth_in_cr);
             if (plen < 0) return -1;
             pending_resend_cr_after_ack = 1;
-            tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+            tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                               "ppp lcp: align auth to peer want=%s peer_mru=%u keep_mru=%u new Configure-Request id=%u auth_in_cr=%d",
                               ppp_auth_name(auth), (unsigned)peer_mru, (unsigned)cr_mru, (unsigned)id,
                               lcp_auth_in_cr);
@@ -395,7 +395,7 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
       if (pending_resend_cr_after_ack) {
         pending_resend_cr_after_ack = 0;
         if (send_ppp(esp_fd, esp, peer, peer_len, l2tp, pkt, (size_t)plen) < 0) return -1;
-        tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp lcp: sent aligned Configure-Request id=%u bytes=%d",
+        tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp lcp: sent aligned Configure-Request id=%u bytes=%d",
                           (unsigned)id, plen);
       }
       continue;
@@ -419,7 +419,7 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
         int removed_auth = 0;
         lcp_apply_conf_reject(p + 2u, (size_t)lcp_len, &lcp_accm_in_cr, &lcp_auth_in_cr, &removed_accm, &removed_auth);
         if (removed_accm || removed_auth) {
-          tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+          tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                             "ppp lcp: Configure-Reject removed opts accm=%d auth=%d (next CR accm=%d auth=%d)",
                             removed_accm, removed_auth, lcp_accm_in_cr, lcp_auth_in_cr);
         }
@@ -427,7 +427,7 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
       id++;
       plen = lcp_build_cr(pkt, sizeof(pkt), id, auth, cr_mru, lcp_out_include_ac, lcp_accm_in_cr, lcp_auth_in_cr);
       if (plen < 0) return -1;
-      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp lcp: resend after Configure-Reject id=%u bytes=%d",
+      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp lcp: resend after Configure-Reject id=%u bytes=%d",
                         (unsigned)id, plen);
       if (send_ppp(esp_fd, esp, peer, peer_len, l2tp, pkt, (size_t)plen) < 0) return -1;
       continue;
@@ -446,7 +446,7 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
       id++;
       plen = lcp_build_cr(pkt, sizeof(pkt), id, auth, cr_mru, lcp_out_include_ac, lcp_accm_in_cr, lcp_auth_in_cr);
       if (plen < 0) return -1;
-      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp lcp: received NAK, resend Configure-Request id=%u auth=%s",
+      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp lcp: received NAK, resend Configure-Request id=%u auth=%s",
                         (unsigned)id, ppp_auth_name(auth));
       if (send_ppp(esp_fd, esp, peer, peer_len, l2tp, pkt, (size_t)plen) < 0) return -1;
     }
@@ -455,7 +455,7 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "ppp: LCP timeout");
     return -1;
   }
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp lcp: acked final auth=%s acfc=%d mru=%u", ppp_auth_name(auth),
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp lcp: acked final auth=%s acfc=%d mru=%u", ppp_auth_name(auth),
                     ppp != NULL ? ppp->lcp_acfc : -1, (unsigned)cr_mru);
   *auth_out = auth;
   return 0;
@@ -494,7 +494,7 @@ static int chap_md5_response(const uint8_t chap_id, const char *password, const 
 static int ppp_auth_mschapv2(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
                              l2tp_session_t *l2tp, const char *user, const char *password) {
   uint8_t in[4096];
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp auth: start mschapv2");
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp auth: start mschapv2");
   for (int i = 0; i < 16; i++) {
     int n = recv_ppp(esp_fd, esp, l2tp, in, sizeof(in), 5000);
     if (n < 10) continue;
@@ -555,7 +555,7 @@ static int ppp_auth_mschapv2(int esp_fd, esp_keys_t *esp, const struct sockaddr 
 static int ppp_auth_chap_md5(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
                              l2tp_session_t *l2tp, const char *user, const char *password) {
   uint8_t in[4096];
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp auth: start chap-md5");
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp auth: start chap-md5");
   for (int i = 0; i < 16; i++) {
     int n = recv_ppp(esp_fd, esp, l2tp, in, sizeof(in), 5000);
     if (n < 10) continue;
@@ -633,7 +633,7 @@ static int ppp_auth_pap(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer
   memcpy(pap + o, password, pwlen);
   o += pwlen;
   util_write_be16(pap + lenpos, (uint16_t)(o - codepos));
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp auth: start pap");
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp auth: start pap");
   if (send_ppp(esp_fd, esp, peer, peer_len, l2tp, pap, o) < 0) return -1;
 
   uint8_t in[4096];
@@ -726,7 +726,7 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
   uint8_t pkt[64];
   int plen = ipcp_build_cr(pkt, sizeof(pkt), id, req_ip, ipcp_out_include_ac, include_ip_opt);
   if (plen < 0) return -1;
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp ipcp: send Configure-Request id=%u ip=%u.%u.%u.%u", (unsigned)id,
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp: send Configure-Request id=%u ip=%u.%u.%u.%u", (unsigned)id,
                     (unsigned)req_ip[0], (unsigned)req_ip[1], (unsigned)req_ip[2], (unsigned)req_ip[3]);
   if (send_ppp(esp_fd, esp, peer, peer_len, l2tp, pkt, (size_t)plen) < 0) return -1;
 
@@ -753,12 +753,12 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
       if (!ipcp_peer_framing_seen) {
         ipcp_peer_framing_seen = 1;
         ipcp_out_include_ac = (n >= 2 && in[0] == 0xff && in[1] == 0x03) ? 1 : 0;
-        tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp ipcp peer framing addr_ctl=%d", ipcp_out_include_ac);
+        tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp peer framing addr_ctl=%d", ipcp_out_include_ac);
       }
       uint8_t peer_gw[4];
       if (ipcp_opts_first_ip3(ipcp_msg, ipcplen, peer_gw) == 0) {
         memcpy(ppp->peer_ip, peer_gw, 4);
-        tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp ipcp: peer Configure-Request IP=%u.%u.%u.%u",
+        tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp: peer Configure-Request IP=%u.%u.%u.%u",
                           (unsigned)peer_gw[0], (unsigned)peer_gw[1], (unsigned)peer_gw[2], (unsigned)peer_gw[3]);
       }
       uint8_t ackbuf[256];
@@ -769,7 +769,7 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
       memcpy(ackbuf, in, total_ack);
       if (util_read_be16(ackbuf + prefix) != PROTO_IPCP) continue;
       ackbuf[prefix + 2u] = 2;
-      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp ipcp: sending Configure-Ack for peer id=%u", (unsigned)rid);
+      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp: sending Configure-Ack for peer id=%u", (unsigned)rid);
       if (send_ppp(esp_fd, esp, peer, peer_len, l2tp, ackbuf, total_ack) < 0) return -1;
       continue;
     }
@@ -785,7 +785,7 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
         ppp->local_ip[3] = 2;
       }
       ppp->have_ip = 1;
-      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp ipcp: Configure-Ack id=%u local=%u.%u.%u.%u", (unsigned)id,
+      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp: Configure-Ack id=%u local=%u.%u.%u.%u", (unsigned)id,
                         (unsigned)ppp->local_ip[0], (unsigned)ppp->local_ip[1], (unsigned)ppp->local_ip[2],
                         (unsigned)ppp->local_ip[3]);
       got_ack = 1;
@@ -794,7 +794,7 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
 
     if (code == 3 && rid == id) {
       if (ipcp_opts_first_ip3(ipcp_msg, ipcplen, req_ip) == 0) {
-        tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp ipcp: Configure-Nak id=%u suggested=%u.%u.%u.%u",
+        tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp: Configure-Nak id=%u suggested=%u.%u.%u.%u",
                           (unsigned)rid, (unsigned)req_ip[0], (unsigned)req_ip[1], (unsigned)req_ip[2],
                           (unsigned)req_ip[3]);
       } else {
@@ -965,7 +965,7 @@ int ppp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, sock
   memset(ppp, 0, sizeof(*ppp));
   ppp->link_mtu = ppp_sanitize_link_mtu(tun_mtu);
   ppp->tcp_mss = ppp_tcp_mss_for_link_mtu(ppp->link_mtu);
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp negotiate: start link_mtu=%u advertised_mru=%u tcp_mss=%u",
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp negotiate: start link_mtu=%u advertised_mru=%u tcp_mss=%u",
                     (unsigned)ppp->link_mtu, (unsigned)ppp->link_mtu, (unsigned)ppp->tcp_mss);
   ppp_auth_kind_t auth = PPP_AUTH_PAP;
   if (ppp_lcp_negotiate(esp_fd, esp, peer, peer_len, l2tp, &auth, ppp) != 0) {
@@ -1023,7 +1023,7 @@ int ppp_encapsulate_and_send(int esp_fd, esp_keys_t *esp, const struct sockaddr 
     if (ppp_clamp_tcp_syn_mss(inner_ip, len, ppp->tcp_mss, &old_mss, &new_mss) > 0 &&
         !ppp->tcp_mss_clamp_logged) {
       ppp->tcp_mss_clamp_logged = 1;
-      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                         "ppp tcp syn mss clamp old=%u new=%u link_mtu=%u", (unsigned)old_mss,
                         (unsigned)new_mss, (unsigned)ppp->link_mtu);
     }
@@ -1131,7 +1131,7 @@ int ppp_dispatch_ppp_frame(int esp_fd, esp_keys_t *esp, const struct sockaddr *p
       if (ppp_send_lcp_protocol_reject(esp_fd, esp, peer, peer_len, l2tp, ppp, PROTO_IPV6CP, p, len) >= 0) {
         if (!s_ipv6cp_info_once) {
           s_ipv6cp_info_once = 1;
-          tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "IPv6CP: sent LCP Protocol-Reject (IPv4-only link)");
+          tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "IPv6CP: sent LCP Protocol-Reject (IPv4-only link)");
         }
       }
     }

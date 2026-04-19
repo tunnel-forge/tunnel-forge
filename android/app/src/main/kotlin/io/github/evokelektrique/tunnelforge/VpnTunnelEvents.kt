@@ -61,11 +61,17 @@ object VpnTunnelEvents {
     }
 
     /** Kotlin host: same payload shape as JNI [emitEngineLogFromNative]. */
-    fun emitEngineLog(priority: Int, tag: String, message: String) {
+    fun emitEngineLog(
+        priority: Int,
+        tag: String,
+        message: String,
+        source: String = VpnContract.LOG_SOURCE_KOTLIN,
+    ) {
         invokeOnMain(
             VpnContract.ON_ENGINE_LOG,
             mapOf(
                 VpnContract.ARG_ENGINE_LOG_LEVEL to priority,
+                VpnContract.ARG_ENGINE_LOG_SOURCE to source,
                 VpnContract.ARG_ENGINE_LOG_TAG to tag,
                 VpnContract.ARG_ENGINE_LOG_MESSAGE to message,
             ),
@@ -75,7 +81,7 @@ object VpnTunnelEvents {
     @Keep
     @JvmStatic
     fun emitEngineLogFromNative(priority: Int, tag: String, message: String) {
-        emitEngineLog(priority, tag, message)
+        emitEngineLog(priority, tag, message, source = VpnContract.LOG_SOURCE_NATIVE)
     }
 
     private const val TAG = "VpnTunnelEvents"

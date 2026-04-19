@@ -106,7 +106,7 @@ class ProxyPacketBridge(
         private const val TAG = "ProxyPacketBridge"
 
         fun logDroppedInboundPacket(length: Int) {
-            Log.d(TAG, "Dropped inbound proxy bridge packet len=$length because no userspace stack is attached")
+            AppLog.d(TAG, "Dropped inbound proxy bridge packet len=$length because no userspace stack is attached")
         }
     }
 }

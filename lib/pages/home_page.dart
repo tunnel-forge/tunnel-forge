@@ -8,6 +8,7 @@ import '../connectivity_checker.dart';
 import '../profile_editor_sheet.dart';
 import '../profile_models.dart';
 import '../profile_picker_sheet.dart';
+import '../utils/log_entry.dart';
 import '../profile_store.dart';
 import '../utils/log_buffer.dart';
 import '../vpn_client.dart';
@@ -72,6 +73,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
   final _logBuffer = LogBuffer();
   bool _logsStickToBottom = true;
   bool _logsWordWrap = true;
+  LogViewerFilter _logsFilter = LogViewerFilter.all;
 
   bool _busy = false;
   bool _tunnelUp = false;

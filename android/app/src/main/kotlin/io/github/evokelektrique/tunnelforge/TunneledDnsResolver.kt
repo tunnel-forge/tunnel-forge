@@ -33,7 +33,7 @@ internal class TunneledDnsResolver(
         for ((index, dnsServerIp) in dnsServerIpv4s.withIndex()) {
             when (val outcome = queryServer(queryHost, dnsServerIp)) {
                 is QueryOutcome.Success -> {
-                    logger(Log.INFO, "proxy dns resolved host=$queryHost ip=${outcome.resolvedIpv4} server=$dnsServerIp")
+                    logger(Log.DEBUG, "proxy dns resolved host=$queryHost ip=${outcome.resolvedIpv4} server=$dnsServerIp")
                     return outcome.resolvedIpv4
                 }
                 is QueryOutcome.TerminalFailure -> {
@@ -65,7 +65,7 @@ internal class TunneledDnsResolver(
         val payload = packet.copyOfRange(udp.payloadOffset, udp.payloadOffset + udp.payloadLength)
         val response = parseResponse(payload, query.txId, query.host) ?: return true
         if (response.answerIpv4 != null) {
-            logger(Log.INFO, "proxy dns answer host=${query.host} ip=${response.answerIpv4} txid=${query.txId}")
+            logger(Log.DEBUG, "proxy dns answer host=${query.host} ip=${response.answerIpv4} txid=${query.txId}")
             query.completeSuccess(response.answerIpv4)
         } else {
             query.completeFailure(
@@ -80,7 +80,7 @@ internal class TunneledDnsResolver(
         val sourcePort = allocateSourcePort()
         val txId = nextQueryId.getAndIncrement() and 0xffff
         val query = PendingDnsQuery(txId = txId, sourcePort = sourcePort, host = host, serverIp = dnsServerIp)
-        logger(Log.INFO, "proxy dns start host=$host server=$dnsServerIp txid=$txId sport=$sourcePort")
+        logger(Log.DEBUG, "proxy dns start host=$host server=$dnsServerIp txid=$txId sport=$sourcePort")
         val payload = buildQueryPayload(txId, host)
         val packet =
             UdpPacketBuilder.buildIpv4UdpPacket(
@@ -96,7 +96,7 @@ internal class TunneledDnsResolver(
                 if (!bridge.queueOutboundPacket(packet)) {
                     return QueryOutcome.RetryableFailure("Failed to queue tunneled DNS query for $host.")
                 }
-                logger(Log.INFO, "proxy dns query host=$host server=$dnsServerIp sport=$sourcePort attempt=${attempt + 1}")
+                logger(Log.DEBUG, "proxy dns query host=$host server=$dnsServerIp sport=$sourcePort attempt=${attempt + 1}")
                 if (query.await(RESPONSE_WAIT_MS)) break
             }
             query.resolvedIpv4?.let { resolved -> return QueryOutcome.Success(resolved) }
