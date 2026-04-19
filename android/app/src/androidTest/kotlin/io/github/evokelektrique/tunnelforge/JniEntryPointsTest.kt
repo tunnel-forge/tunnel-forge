@@ -1,15 +1,16 @@
 package io.github.evokelektrique.tunnelforge
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.lang.reflect.Modifier
 
 /**
- * JNI peers must stay visible to reflection with the names native code expects.
- * Widget/integration tests mock the VPN channel, so they never exercise this path.
- * Release shrinking is covered by `android/app/proguard-rules.pro` and `flutter build apk`, not this debug APK.
+ * Widget/integration tests mock the VPN channel, so they never exercise JNI. These calls stay on
+ * low-risk native entrypoints and should fail immediately if library loading or RegisterNatives is broken.
  */
 @RunWith(AndroidJUnit4::class)
 class JniEntryPointsTest {
@@ -24,17 +25,13 @@ class JniEntryPointsTest {
         assertTrue(Modifier.isStatic(protect.modifiers))
         protect.isAccessible = true
         assertTrue(protect.invoke(null, -1) is Boolean)
+    }
 
-        val run =
-            Class.forName("io.github.evokelektrique.tunnelforge.VpnBridge").getDeclaredMethod(
-                "nativeRunTunnel",
-                Int::class.javaPrimitiveType,
-                String::class.java,
-                String::class.java,
-                String::class.java,
-                String::class.java,
-            )
-        assertTrue(Modifier.isStatic(run.modifiers))
-        assertTrue(Modifier.isNative(run.modifiers))
+    @Test
+    fun nativeBridgeMethodsAreRegisteredAndCallable() {
+        VpnBridge.nativeSetSocketProtectionEnabled(false)
+        assertFalse(VpnBridge.nativeIsProxyPacketBridgeActive())
+        assertNull(VpnBridge.nativeReadProxyInboundPacket(0))
+        VpnBridge.nativeStopTunnel()
     }
 }

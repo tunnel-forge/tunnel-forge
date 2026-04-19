@@ -102,7 +102,7 @@ jobs:
           } > local.properties
 
       - name: Build release APK
-        run: flutter build apk --release --split-per-abi
+        run: flutter build apk --release --split-per-abi --target-platform android-arm64,android-x64
 
       - name: Prepare release asset
         run: |

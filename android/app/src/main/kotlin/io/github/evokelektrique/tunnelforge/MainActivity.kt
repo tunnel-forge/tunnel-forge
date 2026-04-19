@@ -2,6 +2,7 @@ package io.github.evokelektrique.tunnelforge
 
 import android.Manifest
 import android.app.Activity
+import android.app.ForegroundServiceStartNotAllowedException
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -195,9 +196,7 @@ class MainActivity : FlutterActivity() {
                         )
                         return@setMethodCallHandler
                     }
-                    startForegroundWorkerService(intent)
-                    Log.i(TAG, "vpn_call connect dispatched action=ACTION_START attempt=$attemptId")
-                    result.success(null)
+                    dispatchConnectIntent(intent, result, "vpn_call connect")
                 }
                 VpnContract.DISCONNECT -> {
                     Log.i(TAG, "vpn_call disconnect dispatched action=ACTION_STOP")
@@ -260,9 +259,7 @@ class MainActivity : FlutterActivity() {
             pending.error("internal", "Missing pending VPN connect intent", null)
             return
         }
-        startForegroundWorkerService(connectIntent)
-        Log.i(TAG, "vpn_call connect dispatched action=ACTION_START after notification grant")
-        pending.success(null)
+        dispatchConnectIntent(connectIntent, pending, "vpn_call connect after notification grant")
     }
 
     /**
@@ -332,6 +329,37 @@ class MainActivity : FlutterActivity() {
             startForegroundService(intent)
         } else {
             startService(intent)
+        }
+    }
+
+    private fun dispatchConnectIntent(intent: Intent, result: MethodChannel.Result, logPrefix: String) {
+        val action = intent.action ?: "(missing)"
+        val attemptId = intent.getStringExtra(TunnelVpnService.EXTRA_ATTEMPT_ID).orEmpty()
+        try {
+            startForegroundWorkerService(intent)
+            Log.i(TAG, "$logPrefix dispatched action=$action attempt=$attemptId")
+            result.success(null)
+        } catch (e: ForegroundServiceStartNotAllowedException) {
+            Log.e(TAG, "$logPrefix failed foreground_service_start_not_allowed action=$action attempt=$attemptId", e)
+            result.error(
+                "start_service_failed",
+                "Android blocked starting the foreground service: ${e.message ?: "unknown error"}",
+                null,
+            )
+        } catch (e: SecurityException) {
+            Log.e(TAG, "$logPrefix failed security_exception action=$action attempt=$attemptId", e)
+            result.error(
+                "start_service_failed",
+                "Android rejected starting the service: ${e.message ?: "missing permission"}",
+                null,
+            )
+        } catch (e: RuntimeException) {
+            Log.e(TAG, "$logPrefix failed runtime_exception action=$action attempt=$attemptId", e)
+            result.error(
+                "start_service_failed",
+                "Could not start the tunnel service: ${e.message ?: e.javaClass.simpleName}",
+                null,
+            )
         }
     }
 

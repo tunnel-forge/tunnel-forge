@@ -1,4 +1,4 @@
-# JNI: native code resolves these by name (libtunnel_engine.so).
+# JNI: RegisterNatives binds VpnBridge explicitly; native helpers still resolve these Kotlin peers.
 -keep class io.github.evokelektrique.tunnelforge.TunnelVpnService {
     public static boolean protectSocketFd(int);
 }
