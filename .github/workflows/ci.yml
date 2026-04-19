@@ -57,8 +57,16 @@ jobs:
       - name: Analyze
         run: flutter analyze
 
-      - name: Run unit and widget tests
-        run: flutter test
+      - name: Run unit and widget tests with coverage
+        run: flutter test --coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage/lcov.info
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
   native-tests:
     name: native-tests
@@ -119,6 +127,15 @@ jobs:
       - name: Run Android JVM tests
         working-directory: android
         run: ./gradlew --stacktrace testDebugUnitTest
+
+      - name: Upload Android test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: android/app/build/test-results/testDebugUnitTest/*.xml
+          report-type: test_results
+          disable-search: true
 
       - name: Upload Android unit test reports
         if: failure()
