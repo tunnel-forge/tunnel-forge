@@ -10,20 +10,23 @@
 </p>
 
 <p align="center">
-  <a href="https://flutter.dev">
+  <a href="https://flutter.dev" style="text-decoration: none;">
     <img alt="Flutter" src="https://img.shields.io/badge/Flutter-App-02569B?logo=flutter&logoColor=white">
   </a>
-  <a href="https://dart.dev">
+  <a href="https://dart.dev" style="text-decoration: none;">
     <img alt="Dart 3.11+" src="https://img.shields.io/badge/Dart-3.11%2B-0175C2?logo=dart&logoColor=white">
   </a>
-  <a href="https://developer.android.com/develop/connectivity/vpn">
+  <a href="https://developer.android.com/develop/connectivity/vpn" style="text-decoration: none;">
     <img alt="Android VpnService" src="https://img.shields.io/badge/Android-VpnService-3DDC84?logo=android&logoColor=white">
   </a>
-  <a href="#highlights">
+  <a href="#highlights" style="text-decoration: none;">
     <img alt="Modes VPN and Proxy" src="https://img.shields.io/badge/Modes-VPN%20%2B%20Proxy-111827">
   </a>
-  <a href="#testing">
+  <a href="#testing" style="text-decoration: none;">
     <img alt="Tests Flutter and Native" src="https://img.shields.io/badge/Tests-Flutter%20%2B%20Native-0F766E">
+  </a>
+  <a href="https://github.com/evokelektrique/tunnel_forge/releases" style="text-decoration: none;">
+    <img alt="Downloads" src="https://img.shields.io/github/downloads/evokelektrique/tunnel_forge/total?label=Downloads">
   </a>
 </p>
 
