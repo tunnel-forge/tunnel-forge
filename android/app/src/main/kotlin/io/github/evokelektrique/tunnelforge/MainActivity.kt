@@ -339,31 +339,29 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun dispatchConnectIntent(intent: Intent, result: MethodChannel.Result, logPrefix: String) {
-        val action = intent.action ?: "(missing)"
-        val attemptId = intent.getStringExtra(TunnelVpnService.EXTRA_ATTEMPT_ID).orEmpty()
         try {
             startForegroundWorkerService(intent)
-            AppLog.d(TAG, "$logPrefix dispatched action=$action attempt=$attemptId")
+            AppLog.d(TAG, "$logPrefix dispatched")
             result.success(null)
         } catch (e: ForegroundServiceStartNotAllowedException) {
-            AppLog.e(TAG, "$logPrefix failed foreground_service_start_not_allowed action=$action attempt=$attemptId", e)
+            AppLog.e(TAG, "$logPrefix failed foreground_service_start_not_allowed", e)
             result.error(
                 "start_service_failed",
-                "Android blocked starting the foreground service: ${e.message ?: "unknown error"}",
+                "Android blocked starting the foreground service.",
                 null,
             )
         } catch (e: SecurityException) {
-            AppLog.e(TAG, "$logPrefix failed security_exception action=$action attempt=$attemptId", e)
+            AppLog.e(TAG, "$logPrefix failed security_exception", e)
             result.error(
                 "start_service_failed",
-                "Android rejected starting the service: ${e.message ?: "missing permission"}",
+                "Android rejected starting the service.",
                 null,
             )
         } catch (e: RuntimeException) {
-            AppLog.e(TAG, "$logPrefix failed runtime_exception action=$action attempt=$attemptId", e)
+            AppLog.e(TAG, "$logPrefix failed runtime_exception", e)
             result.error(
                 "start_service_failed",
-                "Could not start the tunnel service: ${e.message ?: e.javaClass.simpleName}",
+                "Could not start the tunnel service.",
                 null,
             )
         }

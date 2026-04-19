@@ -28,13 +28,13 @@ static int ipcp_build_cr(uint8_t *out, size_t cap, uint8_t id, const uint8_t ip[
                          int include_ip_opt) {
   size_t o = 0;
   if (include_address_control) {
-    if (cap < 32u) return -1;
+    if (cap < 8u) return -1;
     out[o++] = 0xff;
     out[o++] = 0x03;
     util_write_be16(out + o, PROTO_IPCP);
     o += 2u;
   } else {
-    if (cap < 28u) return -1;
+    if (cap < 6u) return -1;
     util_write_be16(out + o, PROTO_IPCP);
     o += 2u;
   }
@@ -69,6 +69,20 @@ static int test_cr_contains_ip3(void) {
   return 0;
 }
 
+static int test_small_cap_rejects_ip_option(void) {
+  uint8_t buf[32];
+  uint8_t ip[4] = {10, 20, 30, 40};
+
+  if (ipcp_build_cr(buf, 13u, 1, ip, 1, 1) != -1) return 1;
+  if (ipcp_build_cr(buf, 11u, 1, ip, 0, 1) != -1) return 2;
+  if (ipcp_build_cr(buf, 7u, 1, ip, 1, 0) != -1) return 3;
+  if (ipcp_build_cr(buf, 5u, 1, ip, 0, 0) != -1) return 4;
+  if (ipcp_build_cr(buf, 14u, 1, ip, 1, 1) <= 0) return 5;
+  if (ipcp_build_cr(buf, 12u, 1, ip, 0, 1) <= 0) return 6;
+
+  return 0;
+}
+
 static int test_nak_updates_req_ip(void) {
   const uint8_t nak[] = {
       0x03, 0x01, 0x00, 0x0a, 0x03, 0x06, 10, 20, 30, 40,
@@ -99,6 +113,11 @@ int main(void) {
   int rc = test_cr_contains_ip3();
   if (rc != 0) {
     fprintf(stderr, "test_cr_contains_ip3 failed: %d\n", rc);
+    return 1;
+  }
+  rc = test_small_cap_rejects_ip_option();
+  if (rc != 0) {
+    fprintf(stderr, "test_small_cap_rejects_ip_option failed: %d\n", rc);
     return 1;
   }
   rc = test_nak_updates_req_ip();

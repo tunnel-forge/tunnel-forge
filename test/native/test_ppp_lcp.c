@@ -16,13 +16,13 @@ static int lcp_build_cr(uint8_t *out, size_t cap, uint8_t id, ppp_auth_kind_t au
                         int include_accm, int include_auth) {
   size_t o = 0;
   if (include_address_control) {
-    if (cap < 40u) return -1;
+    if (cap < 12u) return -1;
     out[o++] = 0xff;
     out[o++] = 0x03;
     util_write_be16(out + o, PROTO_LCP);
     o += 2u;
   } else {
-    if (cap < 36u) return -1;
+    if (cap < 10u) return -1;
     util_write_be16(out + o, PROTO_LCP);
     o += 2u;
   }
@@ -187,6 +187,22 @@ static int test_reject_unrelated_option_keeps_accm_and_auth(void) {
   return 0;
 }
 
+static int test_small_caps_reject_truncated_lcp_frames(void) {
+  uint8_t cr[32];
+
+  if (lcp_build_cr(cr, 11u, 1, PPP_AUTH_PAP, 1500, 1, 0, 0) != -1) return 1;
+  if (lcp_build_cr(cr, 9u, 1, PPP_AUTH_PAP, 1500, 0, 0, 0) != -1) return 2;
+  if (lcp_build_cr(cr, 17u, 1, PPP_AUTH_PAP, 1500, 1, 1, 0) != -1) return 3;
+  if (lcp_build_cr(cr, 15u, 1, PPP_AUTH_PAP, 1500, 0, 1, 0) != -1) return 4;
+  if (lcp_build_cr(cr, 15u, 1, PPP_AUTH_PAP, 1500, 1, 0, 1) != -1) return 5;
+  if (lcp_build_cr(cr, 16u, 1, PPP_AUTH_MSCHAPV2, 1500, 1, 0, 1) != -1) return 6;
+  if (lcp_build_cr(cr, 15u, 1, PPP_AUTH_CHAP_MD5, 1500, 1, 0, 1) != -1) return 7;
+  if (lcp_build_cr(cr, 23u, 1, PPP_AUTH_MSCHAPV2, 1500, 1, 1, 1) <= 0) return 8;
+  if (lcp_build_cr(cr, 21u, 1, PPP_AUTH_MSCHAPV2, 1500, 0, 1, 1) <= 0) return 9;
+
+  return 0;
+}
+
 int main(void) {
   int rc = test_selected_mru_is_preserved();
   if (rc != 0) {
@@ -201,6 +217,11 @@ int main(void) {
   rc = test_reject_unrelated_option_keeps_accm_and_auth();
   if (rc != 0) {
     fprintf(stderr, "test_reject_unrelated_option_keeps_accm_and_auth failed: %d\n", rc);
+    return 1;
+  }
+  rc = test_small_caps_reject_truncated_lcp_frames();
+  if (rc != 0) {
+    fprintf(stderr, "test_small_caps_reject_truncated_lcp_frames failed: %d\n", rc);
     return 1;
   }
   puts("test_ppp_lcp: ok");

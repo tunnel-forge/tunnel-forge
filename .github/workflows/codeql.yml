@@ -54,7 +54,7 @@ jobs:
 
       - name: Set up Flutter
         if: matrix.build-mode == 'manual'
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
@@ -62,7 +62,7 @@ jobs:
 
       - name: Set up Gradle
         if: matrix.build-mode == 'manual'
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
