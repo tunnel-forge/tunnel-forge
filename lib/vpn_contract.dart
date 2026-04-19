@@ -3,7 +3,7 @@
 /// Dart calls [prepareVpn], [connect], and [disconnect]. The service may invoke
 /// [onTunnelState] and [onEngineLog] on the same channel. Native code must use these exact strings.
 abstract final class VpnContract {
-  static const String channel = 'com.example.tunnel_forge/vpn';
+  static const String channel = 'io.github.evokelektrique.tunnelforge/vpn';
 
   static const String prepareVpn = 'prepareVpn';
   static const String connect = 'connect';

@@ -1,8 +1,8 @@
 # JNI: native code resolves these by name (libtunnel_engine.so).
--keep class com.example.tunnel_forge.TunnelVpnService {
+-keep class io.github.evokelektrique.tunnelforge.TunnelVpnService {
     public static boolean protectSocketFd(int);
 }
--keep class com.example.tunnel_forge.VpnBridge { *; }
--keep class com.example.tunnel_forge.VpnTunnelEvents {
+-keep class io.github.evokelektrique.tunnelforge.VpnBridge { *; }
+-keep class io.github.evokelektrique.tunnelforge.VpnTunnelEvents {
     public static void emitEngineLogFromNative(int, java.lang.String, java.lang.String);
 }

@@ -10,7 +10,7 @@ void main() {
 
   group('VpnContract', () {
     test('channel', () {
-      expect(VpnContract.channel, 'com.example.tunnel_forge/vpn');
+      expect(VpnContract.channel, 'io.github.evokelektrique.tunnelforge/vpn');
     });
   });
 

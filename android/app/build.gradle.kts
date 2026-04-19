@@ -9,7 +9,7 @@ plugins {
 android {
     val innerUdpNoChecksum = providers.gradleProperty("tunnelForgeInnerUdpNoChecksum").orNull
     val keymatVariant = providers.gradleProperty("tunnelForgeKeymatVariant").orNull
-    namespace = "com.example.tunnel_forge"
+    namespace = "io.github.evokelektrique.tunnelforge"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -19,7 +19,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.tunnel_forge"
+        applicationId = "io.github.evokelektrique.tunnelforge"
         minSdk = 31
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -88,4 +88,3 @@ kotlin {
         jvmTarget.set(JvmTarget.JVM_17)
     }
 }
-
