@@ -31,10 +31,11 @@
   <a href="#overview">Overview</a> •
   <a href="#highlights">Highlights</a> •
   <a href="#requirements">Requirements</a> •
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#testing">Testing</a> •
-  <a href="#local-vpn-server">Local VPN Server</a> •
-  <a href="#debugging">Debugging</a>
+  <a href="#development">Development</a> •
+  <a href="#debugging">Debugging</a> •
+  <a href="#versioning">Versioning</a> •
+  <a href="#feedback">Feedback</a> •
+  <a href="#licensing">Licensing</a>
 </p>
 
 ## Overview
@@ -58,14 +59,16 @@ in Flutter, while the tunnel and proxy pieces live in the Android layer.
 - Android SDK for Flutter Android builds
 - Android `minSdk 31` or newer for the app target
 
-## Quick Start
+## Development
+
+### Quick Start
 
 ```sh
 flutter pub get
 flutter run
 ```
 
-## Testing
+### Testing
 
 Run Flutter tests:
 
@@ -112,3 +115,29 @@ Libreswan and container logs:
 sh tool/vpn_debug.sh pluto-logs --container ipsec-vpn-server
 docker exec -it ipsec-vpn-server tail -f /var/log/auth.log
 ```
+
+## Versioning
+
+The app version is stored in `pubspec.yaml` as `x.y.z+build`.
+
+- `x.y.z` is the user-facing version
+- `build` is the internal build number
+
+Use the helper script to inspect or bump it:
+
+```sh
+tool/version.sh show
+tool/version.sh bump patch
+tool/version.sh bump build
+tool/version.sh set 0.1.1+2
+```
+
+## Feedback
+
+Use GitHub Issues for bugs, regressions, or feature requests. When reporting a connection problem,
+include the profile mode, Android version, device model, and any relevant output from
+`tool/vpn_debug.sh`.
+
+## Licensing
+
+This project is licensed under `GPL-3.0-only`. See [LICENSE](LICENSE).
