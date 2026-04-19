@@ -13,9 +13,11 @@ class SettingsPanel extends StatefulWidget {
     required this.routingMode,
     required this.allowedAppPackages,
     required this.proxySettings,
+    required this.connectivityCheckSettings,
     required this.onConnectionModeChanged,
     required this.onRoutingModeChanged,
     required this.onProxySettingsChanged,
+    required this.onConnectivityCheckSettingsChanged,
     required this.onChooseApps,
     required this.routingLocked,
     required this.colorScheme,
@@ -28,9 +30,12 @@ class SettingsPanel extends StatefulWidget {
   final RoutingMode routingMode;
   final List<String> allowedAppPackages;
   final ProxySettings proxySettings;
+  final ConnectivityCheckSettings connectivityCheckSettings;
   final ValueChanged<ConnectionMode> onConnectionModeChanged;
   final ValueChanged<RoutingMode> onRoutingModeChanged;
   final ValueChanged<ProxySettings> onProxySettingsChanged;
+  final ValueChanged<ConnectivityCheckSettings>
+  onConnectivityCheckSettingsChanged;
   final VoidCallback onChooseApps;
   final bool routingLocked;
   final ColorScheme colorScheme;
@@ -41,8 +46,29 @@ class SettingsPanel extends StatefulWidget {
 }
 
 class _SettingsPanelState extends State<SettingsPanel> {
+  static const EdgeInsets _kCardTilePadding = EdgeInsets.fromLTRB(
+    16,
+    12,
+    16,
+    12,
+  );
+  static const EdgeInsets _kCardFieldPadding = EdgeInsets.fromLTRB(
+    16,
+    12,
+    16,
+    20,
+  );
+  static const EdgeInsets _kCardContentPadding = EdgeInsets.fromLTRB(
+    16,
+    16,
+    16,
+    20,
+  );
+
   late final TextEditingController _httpPortController;
   late final TextEditingController _socksPortController;
+  late final TextEditingController _connectivityUrlController;
+  String? _connectivityUrlError;
 
   @override
   void initState() {
@@ -52,6 +78,9 @@ class _SettingsPanelState extends State<SettingsPanel> {
     );
     _socksPortController = TextEditingController(
       text: '${widget.proxySettings.socksPort}',
+    );
+    _connectivityUrlController = TextEditingController(
+      text: widget.connectivityCheckSettings.url,
     );
   }
 
@@ -70,12 +99,23 @@ class _SettingsPanelState extends State<SettingsPanel> {
         _socksPortController.text = nextText;
       }
     }
+    if (oldWidget.connectivityCheckSettings.url !=
+        widget.connectivityCheckSettings.url) {
+      final nextText = widget.connectivityCheckSettings.url;
+      if (_connectivityUrlController.text != nextText) {
+        _connectivityUrlController.text = nextText;
+      }
+      if (_connectivityUrlError != null) {
+        _connectivityUrlError = null;
+      }
+    }
   }
 
   @override
   void dispose() {
     _httpPortController.dispose();
     _socksPortController.dispose();
+    _connectivityUrlController.dispose();
     super.dispose();
   }
 
@@ -94,12 +134,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: [
         if (widget.themeMode != null && widget.onThemeModeChanged != null) ...[
-          Text(
-            'Appearance',
-            style: widget.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          _sectionTitle('Appearance'),
           const SizedBox(height: 8),
           SegmentedButton<ThemeMode>(
             segments: const [
@@ -127,12 +162,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
           ),
           const SizedBox(height: 22),
         ],
-        Text(
-          'Connection mode',
-          style: widget.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        _sectionTitle('Connection mode'),
         const SizedBox(height: 8),
         SegmentedButton<ConnectionMode>(
           segments: const [
@@ -157,12 +187,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
         ),
         const SizedBox(height: 22),
         if (!proxyMode) ...[
-          Text(
-            'Traffic routing',
-            style: widget.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          _sectionTitle('Traffic routing'),
           const SizedBox(height: 8),
           Card(
             margin: EdgeInsets.zero,
@@ -171,14 +196,13 @@ class _SettingsPanelState extends State<SettingsPanel> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 SwitchListTile(
-                  title: const Text('VPN for all apps'),
-                  subtitle: Text(
+                  contentPadding: _kCardTilePadding,
+                  title: _cardTitle('VPN for all apps'),
+                  subtitle: _cardText(
                     allAppsVpn
-                        ? 'Recommended: route device traffic through the VPN.'
-                        : 'Only selected apps use the VPN.',
-                    style: widget.textTheme.bodySmall?.copyWith(
-                      color: widget.colorScheme.onSurfaceVariant,
-                    ),
+                        ? 'Route all device traffic through the VPN.'
+                        : 'Only the apps you choose will use the VPN.',
+                    color: widget.colorScheme.onSurfaceVariant,
                   ),
                   value: allAppsVpn,
                   onChanged: widget.routingLocked
@@ -193,18 +217,17 @@ class _SettingsPanelState extends State<SettingsPanel> {
                   const Divider(height: 1),
                   ListTile(
                     enabled: !widget.routingLocked,
+                    contentPadding: _kCardTilePadding,
                     leading: Icon(
                       Icons.tune,
                       color: widget.colorScheme.onSurfaceVariant,
                     ),
-                    title: const Text('Select apps'),
-                    subtitle: Text(
+                    title: _cardTitle('Select apps'),
+                    subtitle: _cardText(
                       perAppSubtitle,
-                      style: widget.textTheme.bodySmall?.copyWith(
-                        color: widget.allowedAppPackages.isEmpty
-                            ? widget.colorScheme.error
-                            : widget.colorScheme.onSurfaceVariant,
-                      ),
+                      color: widget.allowedAppPackages.isEmpty
+                          ? widget.colorScheme.error
+                          : widget.colorScheme.onSurfaceVariant,
                     ),
                     trailing: Icon(
                       Icons.chevron_right,
@@ -217,12 +240,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
             ),
           ),
         ] else ...[
-          Text(
-            'Proxy settings',
-            style: widget.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          _sectionTitle('Proxy settings'),
           const SizedBox(height: 8),
           Card(
             margin: EdgeInsets.zero,
@@ -230,13 +248,11 @@ class _SettingsPanelState extends State<SettingsPanel> {
             child: Column(
               children: [
                 SwitchListTile(
-                  contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                  title: const Text('HTTP proxy'),
-                  subtitle: Text(
+                  contentPadding: _kCardTilePadding,
+                  title: _cardTitle('HTTP proxy'),
+                  subtitle: _cardText(
                     'Apps that support manual HTTP proxy settings can use 127.0.0.1:${widget.proxySettings.httpPort}',
-                    style: widget.textTheme.bodySmall?.copyWith(
-                      color: widget.colorScheme.onSurfaceVariant,
-                    ),
+                    color: widget.colorScheme.onSurfaceVariant,
                   ),
                   value: widget.proxySettings.httpEnabled,
                   onChanged: widget.routingLocked
@@ -246,7 +262,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                         ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
+                  padding: _kCardFieldPadding,
                   child: TextFormField(
                     key: const Key('proxy_http_port_field'),
                     controller: _httpPortController,
@@ -267,13 +283,11 @@ class _SettingsPanelState extends State<SettingsPanel> {
                 ),
                 const Divider(height: 1),
                 SwitchListTile(
-                  contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                  title: const Text('SOCKS5 proxy'),
-                  subtitle: Text(
+                  contentPadding: _kCardTilePadding,
+                  title: _cardTitle('SOCKS5 proxy'),
+                  subtitle: _cardText(
                     'Apps that support SOCKS5 can use 127.0.0.1:${widget.proxySettings.socksPort}',
-                    style: widget.textTheme.bodySmall?.copyWith(
-                      color: widget.colorScheme.onSurfaceVariant,
-                    ),
+                    color: widget.colorScheme.onSurfaceVariant,
                   ),
                   value: widget.proxySettings.socksEnabled,
                   onChanged: widget.routingLocked
@@ -283,7 +297,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                         ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
+                  padding: _kCardFieldPadding,
                   child: TextFormField(
                     key: const Key('proxy_socks_port_field'),
                     controller: _socksPortController,
@@ -309,9 +323,10 @@ class _SettingsPanelState extends State<SettingsPanel> {
           Card(
             margin: EdgeInsets.zero,
             child: ListTile(
+              contentPadding: _kCardTilePadding,
               leading: Icon(Icons.info_outline, color: semanticColors.info),
-              title: const Text('Proxy endpoints'),
-              subtitle: Text(
+              title: _cardTitle('Proxy endpoints'),
+              subtitle: _cardText(
                 [
                   if (widget.proxySettings.httpEnabled)
                     'HTTP: 127.0.0.1:${widget.proxySettings.httpPort}',
@@ -325,7 +340,72 @@ class _SettingsPanelState extends State<SettingsPanel> {
             ),
           ),
         ],
+        const SizedBox(height: 22),
+        _sectionTitle('Connectivity check'),
+        const SizedBox(height: 8),
+        Card(
+          margin: EdgeInsets.zero,
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: _kCardContentPadding,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _cardTitle('Status check URL'),
+                _cardText(
+                  'Set the address used for the status check after you connect. Tap the badge again anytime while connected to refresh it.',
+                  color: widget.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  key: const Key('connectivity_url_field'),
+                  controller: _connectivityUrlController,
+                  keyboardType: TextInputType.url,
+                  decoration: InputDecoration(
+                    labelText: 'Connectivity URL',
+                    hintText: ConnectivityCheckSettings.defaultUrl,
+                    errorText: _connectivityUrlError,
+                  ),
+                  onChanged: (value) {
+                    final error = ConnectivityCheckSettings.validateUrl(value);
+                    if (_connectivityUrlError != error) {
+                      setState(() => _connectivityUrlError = error);
+                    }
+                    if (error != null) return;
+                    widget.onConnectivityCheckSettingsChanged(
+                      widget.connectivityCheckSettings.copyWith(url: value),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
+    );
+  }
+
+  Widget _sectionTitle(String text) {
+    return Text(
+      text,
+      style: widget.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+    );
+  }
+
+  Widget _cardTitle(String text) {
+    return Text(
+      text,
+      style: widget.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+    );
+  }
+
+  Widget _cardText(String text, {Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Text(
+        text,
+        style: widget.textTheme.bodySmall?.copyWith(color: color),
+      ),
     );
   }
 }

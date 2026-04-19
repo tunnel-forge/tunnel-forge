@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'connectivity_checker.dart';
 import 'pages/home_page.dart';
 import 'profile_store.dart';
 import 'theme.dart';
@@ -52,9 +53,14 @@ ThemeMode _themeModeFromStorage(String? raw) {
 }
 
 class TunnelForgeApp extends StatefulWidget {
-  const TunnelForgeApp({super.key, this.profileStore});
+  const TunnelForgeApp({
+    super.key,
+    this.profileStore,
+    this.connectivityChecker,
+  });
 
   final ProfileStore? profileStore;
+  final ConnectivityChecker? connectivityChecker;
 
   @override
   State<TunnelForgeApp> createState() => _TunnelForgeAppState();
@@ -94,6 +100,7 @@ class _TunnelForgeAppState extends State<TunnelForgeApp> {
         themeMode: _themeMode,
         onThemeModeChanged: _setThemeMode,
         profileStore: widget.profileStore,
+        connectivityChecker: widget.connectivityChecker,
       ),
     );
   }

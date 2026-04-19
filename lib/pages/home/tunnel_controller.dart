@@ -61,6 +61,7 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
           'Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: ${proxyMode ? 'proxy ready' : 'TUN is up'}: $detail',
         );
         _toast(proxyMode ? 'Proxy ready' : 'VPN connected');
+        unawaited(_runConnectivityCheck());
         break;
       case VpnTunnelState.failed:
         _cancelAwaitTimer();
@@ -122,12 +123,18 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
           ? 'Proxy ready'
           : 'Connected';
     }
-    return 'Connect';
+    if (!_hasActiveProfile) return 'Select profile';
+    return 'Ready';
   }
 
   Future<void> _primaryAction() async {
     if (_busy || (_awaitingTunnel && !_tunnelUp)) return;
     if (_tunnelUp) return _disconnect();
+    if (!_hasActiveProfile) {
+      _toast('Select a saved profile first', error: true);
+      _log('Connect blocked: no active profile');
+      return;
+    }
     return _connectWithAutoPrepare();
   }
 

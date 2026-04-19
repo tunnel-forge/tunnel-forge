@@ -144,5 +144,21 @@ void main() {
       expect(proxy.socksEnabled, isTrue);
       expect(proxy.socksPort, 11080);
     });
+
+    test('persists global connectivity check settings', () async {
+      expect(
+        (await store.loadConnectivityCheckSettings()).url,
+        ConnectivityCheckSettings.defaultUrl,
+      );
+
+      await store.saveConnectivityCheckSettings(
+        const ConnectivityCheckSettings(url: 'https://example.com/health'),
+      );
+
+      expect(
+        (await store.loadConnectivityCheckSettings()).url,
+        'https://example.com/health',
+      );
+    });
   });
 }

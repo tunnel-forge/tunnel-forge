@@ -60,6 +60,7 @@ class ProfileStore {
   static const prefsKeyProxyHttpPort = 'proxy_http_port_v1';
   static const prefsKeyProxySocksEnabled = 'proxy_socks_enabled_v1';
   static const prefsKeyProxySocksPort = 'proxy_socks_port_v1';
+  static const prefsKeyConnectivityCheckUrl = 'connectivity_check_url_v1';
 
   final SharedPreferences? _prefsOverride;
   final SecretStore _secrets;
@@ -153,6 +154,26 @@ class ProfileStore {
         settings.socksPort,
         fallback: ProxySettings.defaultSocksPort,
       ),
+    );
+  }
+
+  Future<ConnectivityCheckSettings> loadConnectivityCheckSettings() async {
+    final p = await _prefs();
+    return ConnectivityCheckSettings(
+      url: ConnectivityCheckSettings.normalizeUrl(
+        p.getString(prefsKeyConnectivityCheckUrl) ??
+            ConnectivityCheckSettings.defaultUrl,
+      ),
+    );
+  }
+
+  Future<void> saveConnectivityCheckSettings(
+    ConnectivityCheckSettings settings,
+  ) async {
+    final p = await _prefs();
+    await p.setString(
+      prefsKeyConnectivityCheckUrl,
+      ConnectivityCheckSettings.normalizeUrl(settings.url),
     );
   }
 

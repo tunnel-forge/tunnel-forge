@@ -37,8 +37,12 @@ extension _VpnHomePageUi on _VpnHomePageState {
             busy: _busy,
             tunnelUp: _tunnelUp,
             awaitingTunnel: _awaitingTunnel,
+            canStartConnection: _hasActiveProfile,
             connectButtonLabel: _connectButtonLabel,
             onPrimary: _primaryAction,
+            connectivityBadgeState: _connectivityBadgeState,
+            connectivityBadgeLabel: _connectivityBadgeLabel,
+            onConnectivityTap: _runConnectivityCheck,
             colorScheme: cs,
             textTheme: textTheme,
           ),
@@ -64,12 +68,16 @@ extension _VpnHomePageUi on _VpnHomePageState {
           routingMode: _routingMode,
           allowedAppPackages: _allowedAppPackages,
           proxySettings: _proxySettings,
+          connectivityCheckSettings: _connectivityCheckSettings,
           onConnectionModeChanged: (mode) {
             _setConnectionMode(mode);
           },
           onRoutingModeChanged: (m) => _setHomeState(() => _routingMode = m),
           onProxySettingsChanged: (settings) {
             _setProxySettings(settings);
+          },
+          onConnectivityCheckSettingsChanged: (settings) {
+            _setConnectivityCheckSettings(settings);
           },
           onChooseApps: _pickAppsForVpn,
           routingLocked:
@@ -83,11 +91,7 @@ extension _VpnHomePageUi on _VpnHomePageState {
   Widget _buildHomeScaffold(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final effectiveProfileId =
-        _activeProfileId != null &&
-            _profiles.any((p) => p.id == _activeProfileId)
-        ? _activeProfileId
-        : null;
+    final effectiveProfileId = _hasActiveProfile ? _activeProfileId : null;
     final appBarTitle = switch (_navIndex) {
       0 => 'Tunnel Forge',
       1 => 'Logs',

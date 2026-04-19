@@ -77,6 +77,37 @@ class ProxySettings {
   }
 }
 
+/// Global endpoint used by the connectivity badge for direct reachability checks.
+class ConnectivityCheckSettings {
+  const ConnectivityCheckSettings({this.url = defaultUrl});
+
+  static const String defaultUrl = 'http://www.gstatic.com/generate_204';
+
+  final String url;
+
+  static String normalizeUrl(String text) {
+    final trimmed = text.trim();
+    return trimmed.isEmpty ? defaultUrl : trimmed;
+  }
+
+  static String? validateUrl(String text) {
+    final normalized = normalizeUrl(text);
+    final uri = Uri.tryParse(normalized);
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
+      return 'Enter a valid absolute HTTP or HTTPS URL';
+    }
+    final scheme = uri.scheme.toLowerCase();
+    if (scheme != 'http' && scheme != 'https') {
+      return 'Only HTTP and HTTPS URLs are supported';
+    }
+    return null;
+  }
+
+  ConnectivityCheckSettings copyWith({String? url}) {
+    return ConnectivityCheckSettings(url: normalizeUrl(url ?? this.url));
+  }
+}
+
 /// One launchable app row from [VpnClient.listVpnCandidateApps].
 class CandidateApp {
   const CandidateApp({required this.packageName, required this.label});

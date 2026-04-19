@@ -1,16 +1,37 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:tunnel_forge/connectivity_checker.dart';
 import 'package:tunnel_forge/main.dart';
+import 'package:tunnel_forge/profile_models.dart';
 import 'package:tunnel_forge/profile_store.dart';
 import 'package:tunnel_forge/theme.dart';
 import 'package:tunnel_forge/vpn_contract.dart';
 import 'package:tunnel_forge/widgets/connection_panel.dart';
 
+import '../integration_test/support/host_to_dart_channel.dart';
 import '../integration_test/support/vpn_channel_mock.dart';
+
+class FakeConnectivityChecker implements ConnectivityChecker {
+  final List<String> urls = <String>[];
+  ConnectivityPingResult nextResult = ConnectivityPingResult.success(
+    latencyMs: 84,
+    statusCode: 204,
+  );
+  Completer<ConnectivityPingResult>? completer;
+
+  @override
+  Future<ConnectivityPingResult> ping(String url) {
+    urls.add(url);
+    final pending = completer;
+    if (pending != null) return pending.future;
+    return Future<ConnectivityPingResult>.value(nextResult);
+  }
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -19,13 +40,24 @@ void main() {
     return tester.widget<Text>(find.byKey(const Key('vpn_status'))).data ?? '';
   }
 
+  String connectivityStatusText(WidgetTester tester) {
+    return tester
+            .widget<Text>(find.byKey(const Key('connectivity_status')))
+            .data ??
+        '';
+  }
+
   Future<void> pumpConnectionPanel(
     WidgetTester tester, {
     Brightness brightness = Brightness.light,
     bool busy = false,
     bool tunnelUp = false,
     bool awaitingTunnel = false,
-    String label = 'Connect',
+    bool canStartConnection = true,
+    String label = 'Ready',
+    ConnectivityBadgeState connectivityBadgeState = ConnectivityBadgeState.idle,
+    String connectivityBadgeLabel = 'Tap to check',
+    VoidCallback? onConnectivityTap,
   }) async {
     final theme = appTheme(brightness);
     await tester.pumpWidget(
@@ -41,8 +73,12 @@ void main() {
               busy: busy,
               tunnelUp: tunnelUp,
               awaitingTunnel: awaitingTunnel,
+              canStartConnection: canStartConnection,
               connectButtonLabel: label,
               onPrimary: () {},
+              connectivityBadgeState: connectivityBadgeState,
+              connectivityBadgeLabel: connectivityBadgeLabel,
+              onConnectivityTap: onConnectivityTap ?? () {},
               colorScheme: theme.colorScheme,
               textTheme: theme.textTheme,
             ),
@@ -119,8 +155,12 @@ void main() {
                   busy: false,
                   tunnelUp: false,
                   awaitingTunnel: false,
-                  connectButtonLabel: 'Connect',
+                  canStartConnection: true,
+                  connectButtonLabel: 'Ready',
                   onPrimary: () {},
+                  connectivityBadgeState: ConnectivityBadgeState.idle,
+                  connectivityBadgeLabel: 'Tap to check',
+                  onConnectivityTap: () {},
                   colorScheme: theme.colorScheme,
                   textTheme: theme.textTheme,
                 ),
@@ -146,7 +186,7 @@ void main() {
       );
       expect(buttonBackground(tester), AppPalette.lightConnectIdle);
       expect(lightStatus.style?.color, AppPalette.lightOnSurfaceVariant);
-      expect(find.text('Connect'), findsOneWidget);
+      expect(find.text('Ready'), findsOneWidget);
 
       await pumpConnectionPanel(tester, brightness: Brightness.dark);
       final darkStatus = tester.widget<Text>(
@@ -154,7 +194,7 @@ void main() {
       );
       expect(buttonBackground(tester), AppPalette.darkConnectIdle);
       expect(darkStatus.style?.color, AppPalette.darkOnSurfaceVariant);
-      expect(find.text('Connect'), findsOneWidget);
+      expect(find.text('Ready'), findsOneWidget);
     },
   );
 
@@ -191,6 +231,59 @@ void main() {
       expect(find.text('Connected'), findsOneWidget);
     },
   );
+
+  testWidgets('ConnectionPanel shows compact connectivity badge states', (
+    WidgetTester tester,
+  ) async {
+    await pumpConnectionPanel(tester);
+    expect(find.byKey(const Key('connectivity_status')), findsNothing);
+    expect(find.byKey(const Key('connectivity_status_spinner')), findsNothing);
+    expect(find.byKey(const Key('connectivity_status_dot')), findsNothing);
+
+    await pumpConnectionPanel(
+      tester,
+      tunnelUp: true,
+      connectivityBadgeState: ConnectivityBadgeState.checking,
+      connectivityBadgeLabel: 'Checking...',
+    );
+    expect(connectivityStatusText(tester), 'Checking...');
+    expect(
+      find.byKey(const Key('connectivity_status_spinner')),
+      findsOneWidget,
+    );
+
+    await pumpConnectionPanel(
+      tester,
+      tunnelUp: true,
+      connectivityBadgeState: ConnectivityBadgeState.success,
+      connectivityBadgeLabel: '84 ms',
+    );
+    expect(connectivityStatusText(tester), '84 ms');
+
+    await pumpConnectionPanel(
+      tester,
+      tunnelUp: true,
+      connectivityBadgeState: ConnectivityBadgeState.failure,
+      connectivityBadgeLabel: 'Unreachable',
+    );
+    expect(connectivityStatusText(tester), 'Unreachable');
+  });
+
+  testWidgets('ConnectionPanel disables connect when no active profile', (
+    WidgetTester tester,
+  ) async {
+    await pumpConnectionPanel(
+      tester,
+      canStartConnection: false,
+      label: 'Select profile',
+    );
+
+    final button = tester.widget<FilledButton>(
+      find.byKey(const Key('vpn_connect')),
+    );
+    expect(button.onPressed, isNull);
+    expect(statusText(tester), 'Select profile');
+  });
 
   testWidgets('Connect runs prepare then connect; awaits TUN status', (
     WidgetTester tester,
@@ -240,7 +333,97 @@ void main() {
     await tester.pump(const Duration(seconds: 60));
     await tester.pump();
 
-    expect(statusText(tester), 'Connect');
+    expect(statusText(tester), 'Ready');
+  });
+
+  testWidgets('tapping merged status badge while connected updates latency', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final methods = <String>[];
+    final checker = FakeConnectivityChecker();
+    installVpnChannelMock(methods);
+    addTearDown(uninstallVpnChannelMock);
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+        connectivityChecker: checker,
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(find.byKey(const Key('connectivity_status')), findsNothing);
+
+    await simulateHostTunnelState(tester, VpnTunnelState.connected, 'tun0');
+    await tester.pump();
+
+    expect(connectivityStatusText(tester), '84 ms');
+    checker.completer = Completer<ConnectivityPingResult>();
+
+    await tester.tap(find.byKey(const Key('vpn_status_badge')));
+    await tester.pump();
+
+    expect(connectivityStatusText(tester), 'Checking...');
+    expect(
+      find.byKey(const Key('connectivity_status_spinner')),
+      findsOneWidget,
+    );
+    expect(checker.urls, [
+      ConnectivityCheckSettings.defaultUrl,
+      ConnectivityCheckSettings.defaultUrl,
+    ]);
+
+    checker.completer!.complete(
+      ConnectivityPingResult.success(latencyMs: 91, statusCode: 204),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(connectivityStatusText(tester), '91 ms');
+  });
+
+  testWidgets('successful connect auto-runs connectivity check once', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final methods = <String>[];
+    final checker = FakeConnectivityChecker();
+    installVpnChannelMock(methods);
+    addTearDown(uninstallVpnChannelMock);
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+        connectivityChecker: checker,
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await tester.tap(find.byKey(const Key('vpn_connect')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    await simulateHostTunnelState(tester, VpnTunnelState.connected, 'tun0');
+    await tester.pump();
+
+    expect(checker.urls, [ConnectivityCheckSettings.defaultUrl]);
+    expect(connectivityStatusText(tester), '84 ms');
   });
 
   testWidgets('VPN tab shows profile picker tile', (WidgetTester tester) async {
@@ -303,6 +486,11 @@ void main() {
 
     expect(find.text('No saved profile'), findsOneWidget);
     expect(find.text('Create your first profile'), findsOneWidget);
+    expect(statusText(tester), 'Select profile');
+    final button = tester.widget<FilledButton>(
+      find.byKey(const Key('vpn_connect')),
+    );
+    expect(button.onPressed, isNull);
   });
 
   testWidgets('proxy-only skips VPN prepare and sends connect', (
