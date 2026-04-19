@@ -2,20 +2,22 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'log_entry.dart';
+
 /// Append-only log lines with a hard cap; notifies listeners once per microtask burst.
 class LogBuffer extends ChangeNotifier {
   static const int _maxLines = 10000;
-  final List<String> _lines = <String>[];
+  final List<LogEntry> _entries = <LogEntry>[];
   bool _notifyScheduled = false;
 
-  int get length => _lines.length;
-  bool get isEmpty => _lines.isEmpty;
-  List<String> get lines => List<String>.unmodifiable(_lines);
+  int get length => _entries.length;
+  bool get isEmpty => _entries.isEmpty;
+  List<LogEntry> get entries => List<LogEntry>.unmodifiable(_entries);
 
-  void append(String line) {
-    _lines.add(line);
-    if (_lines.length > _maxLines) {
-      _lines.removeRange(0, _lines.length - _maxLines);
+  void append(LogEntry entry) {
+    _entries.add(entry);
+    if (_entries.length > _maxLines) {
+      _entries.removeRange(0, _entries.length - _maxLines);
     }
     _scheduleNotify();
   }
@@ -30,10 +32,10 @@ class LogBuffer extends ChangeNotifier {
   }
 
   void clear() {
-    if (_lines.isEmpty) return;
-    _lines.clear();
+    if (_entries.isEmpty) return;
+    _entries.clear();
     notifyListeners();
   }
 
-  String joinLines() => _lines.join('\n');
+  String joinLines() => _entries.map((entry) => entry.toPlainText()).join('\n');
 }

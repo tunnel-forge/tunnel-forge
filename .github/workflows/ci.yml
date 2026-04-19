@@ -42,7 +42,7 @@ jobs:
           java-version: "21"
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
@@ -57,8 +57,16 @@ jobs:
       - name: Analyze
         run: flutter analyze
 
-      - name: Run unit and widget tests
-        run: flutter test
+      - name: Run unit and widget tests with coverage
+        run: flutter test --coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage/lcov.info
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
   native-tests:
     name: native-tests
@@ -88,14 +96,14 @@ jobs:
           java-version: "17"
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
 
       - name: Get dependencies
         run: flutter pub get
@@ -119,6 +127,15 @@ jobs:
       - name: Run Android JVM tests
         working-directory: android
         run: ./gradlew --stacktrace testDebugUnitTest
+
+      - name: Upload Android test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1.2.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: android/app/build/test-results/testDebugUnitTest/*.xml
+          report-type: test_results
+          disable-search: true
 
       - name: Upload Android unit test reports
         if: failure()
@@ -151,14 +168,14 @@ jobs:
           java-version: "17"
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
 
       - name: Get dependencies
         run: flutter pub get

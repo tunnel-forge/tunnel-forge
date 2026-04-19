@@ -2,6 +2,15 @@ part of '../home_page.dart';
 
 /// Connect/disconnect, attempt IDs, Android state callbacks, and 60s ready timeout.
 extension _VpnHomePageTunnel on _VpnHomePageState {
+  String get _missingProfileToastMessage => _profiles.isEmpty
+      ? 'Create a profile first. You will need a server, username, and tunnel settings before connecting.'
+      : 'Choose one of your saved profiles before connecting.';
+
+  void _handleMissingProfileTap() {
+    _toast(_missingProfileToastMessage, error: true);
+    _logWarning('Connect blocked: no active profile', tag: 'tunnel');
+  }
+
   void _cancelAwaitTimer() {
     _awaitTimer?.cancel();
     _awaitTimer = null;
@@ -14,19 +23,14 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
     return '${ms.toRadixString(36)}-${r.toRadixString(36).padLeft(4, '0')}';
   }
 
-  static String _androidLogLetter(int p) {
-    if (p <= 2) return 'V';
-    if (p == 3) return 'D';
-    if (p == 4) return 'I';
-    if (p == 5) return 'W';
-    if (p == 6) return 'E';
-    if (p >= 7) return 'F';
-    return '?';
-  }
-
-  void _onEngineLogFromHost(int level, String tag, String message) {
+  void _onEngineLogFromHost(
+    LogLevel level,
+    LogSource source,
+    String tag,
+    String message,
+  ) {
     if (!mounted) return;
-    _log('[${_androidLogLetter(level)}/$tag] $message');
+    _appendLogEntry(level, message, source: source, tag: tag);
   }
 
   void _onTunnelFromHost(String state, String detail) {
@@ -39,15 +43,19 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
           ? null
           : DateTime.now().difference(startedAt);
       final attempt = _activeAttemptId;
-      _log(
+      _logWarning(
         'Late Android event after timeout: state=$state${attempt == null ? '' : ' attempt=$attempt'}${elapsed == null ? '' : ' after_ms=${elapsed.inMilliseconds}'}',
+        source: LogSource.kotlin,
+        tag: 'TunnelState',
       );
       _timedOutThisAttempt = false;
     }
     switch (state) {
       case VpnTunnelState.connecting:
-        _log(
+        _logInfo(
           'Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: $detail',
+          source: LogSource.kotlin,
+          tag: 'TunnelState',
         );
         if (_awaitingTunnel && !_tunnelUp) _scheduleAwaitTimeout();
         break;
@@ -57,10 +65,13 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
           _awaitingTunnel = false;
           _tunnelUp = true;
         });
-        _log(
+        _logInfo(
           'Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: ${proxyMode ? 'proxy ready' : 'TUN is up'}: $detail',
+          source: LogSource.kotlin,
+          tag: 'TunnelState',
         );
         _toast(proxyMode ? 'Proxy ready' : 'VPN connected');
+        unawaited(_runConnectivityCheck());
         break;
       case VpnTunnelState.failed:
         _cancelAwaitTimer();
@@ -68,8 +79,10 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
           _awaitingTunnel = false;
           _tunnelUp = false;
         });
-        _log(
+        _logError(
           'Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: tunnel failed: $detail',
+          source: LogSource.kotlin,
+          tag: 'TunnelState',
         );
         _toast(
           detail.isEmpty ? 'Couldn\'t establish the tunnel' : detail,
@@ -82,13 +95,17 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
           _awaitingTunnel = false;
           _tunnelUp = false;
         });
-        _log(
+        _logInfo(
           'Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: tunnel stopped: $detail',
+          source: LogSource.kotlin,
+          tag: 'TunnelState',
         );
         break;
       default:
-        _log(
+        _logDebug(
           'Android${_activeAttemptId == null ? '' : ' attempt=${_activeAttemptId!}'}: $state${detail.isEmpty ? '' : ': $detail'}',
+          source: LogSource.kotlin,
+          tag: 'TunnelState',
         );
     }
   }
@@ -105,8 +122,9 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
             ? null
             : DateTime.now().difference(startedAt);
         final attempt = _activeAttemptId;
-        _log(
+        _logWarning(
           'Timeout waiting for ${_connectionMode == ConnectionMode.proxyOnly ? 'proxy service' : 'VPN interface'} from Android${attempt == null ? '' : ' attempt=$attempt'}${elapsed == null ? '' : ' elapsed_ms=${elapsed.inMilliseconds}'}',
+          tag: 'tunnel',
         );
         _toast('Still connecting. Check logs or try again.', error: true);
       }
@@ -122,12 +140,17 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
           ? 'Proxy ready'
           : 'Connected';
     }
-    return 'Connect';
+    if (!_hasActiveProfile) return 'Select profile';
+    return 'Ready';
   }
 
   Future<void> _primaryAction() async {
     if (_busy || (_awaitingTunnel && !_tunnelUp)) return;
     if (_tunnelUp) return _disconnect();
+    if (!_hasActiveProfile) {
+      _handleMissingProfileTap();
+      return;
+    }
     return _connectWithAutoPrepare();
   }
 
@@ -136,19 +159,25 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
     final host = _server.text.trim();
     if (!proxyMode && host.isEmpty) {
       _toast('Enter a server hostname or address', error: true);
-      _log('Connect blocked: empty server');
+      _logWarning('Connect blocked: empty server', tag: 'tunnel');
       return;
     }
     if (proxyMode && _activeProfileId == null) {
       _toast('Select a saved profile to start local proxy', error: true);
-      _log('Connect blocked: proxy mode requires a saved profile');
+      _logWarning(
+        'Connect blocked: proxy mode requires a saved profile',
+        tag: 'tunnel',
+      );
       return;
     }
     if (proxyMode &&
         !_proxySettings.httpEnabled &&
         !_proxySettings.socksEnabled) {
       _toast('Enable HTTP or SOCKS5 before connecting', error: true);
-      _log('Connect blocked: proxy mode has no enabled listeners');
+      _logWarning(
+        'Connect blocked: proxy mode has no enabled listeners',
+        tag: 'tunnel',
+      );
       return;
     }
     if (!proxyMode &&
@@ -158,7 +187,10 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
         'Turn on "VPN for all apps", or open "Choose apps" and select at least one app.',
         error: true,
       );
-      _log('Connect blocked: per-app mode with empty allow-list');
+      _logWarning(
+        'Connect blocked: per-app mode with empty allow-list',
+        tag: 'tunnel',
+      );
       return;
     }
 
@@ -170,26 +202,37 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
 
     try {
       if (!proxyMode) {
-        _log('Requesting VPN permission (if needed)... attempt=$attemptId');
+        _logDebug(
+          'Requesting VPN permission (if needed)... attempt=$attemptId',
+          tag: 'tunnel',
+        );
         final ok = await _client.prepareVpn();
         if (!ok) {
-          _log('VPN permission denied or cancelled attempt=$attemptId');
+          _logWarning(
+            'VPN permission denied or cancelled attempt=$attemptId',
+            tag: 'tunnel',
+          );
           _toast('VPN permission is required', error: true);
           return;
         }
-        _log('VPN permission OK attempt=$attemptId');
+        _logDebug('VPN permission OK attempt=$attemptId', tag: 'tunnel');
       } else {
-        _log(
+        _logDebug(
           'Starting local proxy mode without Android VPN permission... attempt=$attemptId',
+          tag: 'tunnel',
         );
       }
 
-      _log(
+      _logDebug(
         'Sending connect to ${proxyMode ? 'proxy service' : 'tunnel service'}... attempt=$attemptId',
+        tag: 'tunnel',
       );
       final invalidDns = Profile.firstInvalidDnsServer(_dns.text);
       if (invalidDns != null) {
-        _log('Connect blocked: invalid DNS server "$invalidDns"');
+        _logWarning(
+          'Connect blocked: invalid DNS server "$invalidDns"',
+          tag: 'tunnel',
+        );
         _toast(
           'DNS server "$invalidDns" is not a valid IPv4 address',
           error: true,
@@ -209,12 +252,13 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
           break;
         }
       }
-      _log(
+      _logDebug(
         'Profile: server=$host user=${_user.text.isEmpty ? '(empty)' : _user.text} dns=${dnsServers.join(', ')} mtu=$mtu '
         'psk=${_psk.text.isEmpty ? 'off (cleartext L2TP if server allows)' : 'on'} '
         'mode=${_connectionMode.jsonValue} routing=${_routingMode.jsonValue} allowedApps=${_allowedAppPackages.length} '
         'http=${_proxySettings.httpEnabled ? _proxySettings.httpPort : 'off'} socks=${_proxySettings.socksEnabled ? _proxySettings.socksPort : 'off'} '
         'attempt=$attemptId',
+        tag: 'tunnel',
       );
       await _client.connect(
         attemptId: attemptId,
@@ -230,8 +274,9 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
         allowedAppPackages: _allowedAppPackages,
         proxySettings: _proxySettings,
       );
-      _log(
+      _logDebug(
         'Connect acknowledged; waiting for ${proxyMode ? 'proxy readiness' : 'TUN'} from Android... attempt=$attemptId',
+        tag: 'tunnel',
       );
       if (!mounted) return;
       _setHomeState(() {
@@ -241,7 +286,10 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
       _scheduleAwaitTimeout();
       _toast(proxyMode ? 'Starting proxy...' : 'Connecting...');
     } on PlatformException catch (e) {
-      _log('Platform error: ${e.code} ${e.message ?? ''} attempt=$attemptId');
+      _logError(
+        'Platform error: ${e.code} ${e.message ?? ''} attempt=$attemptId',
+        tag: 'tunnel',
+      );
       _toast(e.message ?? e.code, error: true);
     } finally {
       _setHomeStateIfMounted(() => _busy = false);
@@ -250,13 +298,19 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
 
   Future<void> _disconnect() async {
     _setHomeState(() => _busy = true);
-    _log('Disconnect requested...');
+    _logDebug('Disconnect requested...', tag: 'tunnel');
     try {
       await _client.disconnect();
-      _log('Disconnect dispatched; waiting for Android stopped event...');
+      _logDebug(
+        'Disconnect dispatched; waiting for Android stopped event...',
+        tag: 'tunnel',
+      );
       _cancelAwaitTimer();
     } on PlatformException catch (e) {
-      _log('Disconnect error: ${e.code} ${e.message ?? ''}');
+      _logError(
+        'Disconnect error: ${e.code} ${e.message ?? ''}',
+        tag: 'tunnel',
+      );
       _toast(e.message ?? e.code, error: true);
     } finally {
       _setHomeStateIfMounted(() => _busy = false);

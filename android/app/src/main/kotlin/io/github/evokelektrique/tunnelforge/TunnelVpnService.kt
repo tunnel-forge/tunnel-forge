@@ -31,7 +31,7 @@ class TunnelVpnService : VpnService() {
             try {
                 stopSelf()
             } catch (e: Exception) {
-                Log.e(TAG, "stopSelf after tunnel", e)
+                AppLog.e(TAG, "stopSelf after tunnel", e)
             }
         }
 
@@ -60,17 +60,17 @@ class TunnelVpnService : VpnService() {
             when {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && resolved is Inet4Address -> {
                     builder.excludeRoute(IpPrefix(resolved, 32))
-                    Log.i(TAG, "excludeRoute IPv4/32 for VPN server ${resolved.hostAddress}")
+                    AppLog.d(TAG, "excludeRoute IPv4/32 for VPN server ${resolved.hostAddress}")
                 }
                 resolved is Inet4Address ->
-                    Log.i(
+                    AppLog.d(
                         TAG,
                         "excludeRoute requires API 33+; using socket protect() only (device API ${Build.VERSION.SDK_INT})",
                     )
-                else -> Log.w(TAG, "VPN server is not IPv4; excludeRoute not applied")
+                else -> AppLog.w(TAG, "VPN server is not IPv4; excludeRoute not applied")
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Could not resolve VPN server for excludeRoute: ${e.message}")
+            AppLog.w(TAG, "Could not resolve VPN server for excludeRoute: ${e.message}")
         }
     }
 
@@ -104,7 +104,7 @@ class TunnelVpnService : VpnService() {
                 val attemptId = intent.getStringExtra(EXTRA_ATTEMPT_ID) ?: ""
                 val server = intent.getStringExtra(EXTRA_SERVER)
                 if (server.isNullOrEmpty()) {
-                    Log.e(TAG, "${prefixAttempt(attemptId)}ACTION_START missing server")
+                    AppLog.e(TAG, "${prefixAttempt(attemptId)}ACTION_START missing server")
                     VpnTunnelEvents.emitEngineLog(Log.ERROR, TAG, "${prefixAttempt(attemptId)}ACTION_START rejected: missing server")
                     VpnTunnelEvents.emit(VpnContract.TUNNEL_FAILED, "Invalid tunnel arguments from the app.")
                     stopForeground(STOP_FOREGROUND_REMOVE)
@@ -122,7 +122,7 @@ class TunnelVpnService : VpnService() {
                 activeServer = server
                 activeProfileName = profileName.ifEmpty { null }
                 VpnTunnelEvents.emitEngineLog(
-                    Log.INFO,
+                    Log.DEBUG,
                     TAG,
                     "${prefixAttempt(attemptId)}ACTION_START accepted server=$server userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dns=${dnsServers.joinToString(",")} mtu=$tunMtu routing=$routingMode",
                 )
@@ -137,7 +137,7 @@ class TunnelVpnService : VpnService() {
             }
             else -> {
                 if (intent?.action != null) {
-                    Log.w(TAG, "Unknown action: ${intent.action}")
+                    AppLog.w(TAG, "Unknown action: ${intent.action}")
                 }
                 if (!running.get()) {
                     stopSelf()
@@ -160,7 +160,7 @@ class TunnelVpnService : VpnService() {
     ) {
         cancelPendingStopSelf()
         if (running.getAndSet(true)) {
-            Log.w(TAG, "${prefixAttempt(attemptId)}Tunnel already running")
+            AppLog.w(TAG, "${prefixAttempt(attemptId)}Tunnel already running")
             return
         }
 
@@ -194,15 +194,14 @@ class TunnelVpnService : VpnService() {
         VpnTunnelEvents.emitEngineLog(
             Log.INFO,
             TAG,
-            "${prefixAttempt(attemptId)}Starting native negotiation (IKE/L2TP/PPP) for server=$server " +
-                "userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} mtu=$tunMtu",
+            "${prefixAttempt(attemptId)}Starting native negotiation (IKE/L2TP/PPP)",
         )
         try {
             VpnBridge.nativeSetSocketProtectionEnabled(true)
             // Phase 1: negotiate IKE+L2TP+PPP on the real network (no VPN tunnel yet).
             val negotiatedClientIp = IntArray(4)
             val negResult = VpnBridge.nativeNegotiate(server, user, password, psk, tunMtu, negotiatedClientIp)
-            VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}nativeNegotiate finished with exit code=$negResult")
+            VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}nativeNegotiate finished with exit code=$negResult")
             if (negResult != 0) {
                 VpnTunnelEvents.emit(VpnContract.TUNNEL_FAILED, tunnelExitDetail(negResult))
                 running.set(false)
@@ -213,7 +212,7 @@ class TunnelVpnService : VpnService() {
             }
 
             // Phase 2: establish TUN interface now that negotiation succeeded.
-            VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}Starting TUN establish()")
+            VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}Starting TUN establish()")
             val tunIpv4 =
                 "${negotiatedClientIp[0]}.${negotiatedClientIp[1]}.${negotiatedClientIp[2]}.${negotiatedClientIp[3]}"
             val useIpcpAddress =
@@ -221,7 +220,7 @@ class TunnelVpnService : VpnService() {
                     negotiatedClientIp.any { it != 0 }
             val addressForTun = if (useIpcpAddress) tunIpv4 else TUN_LOCAL_IPV4
             VpnTunnelEvents.emitEngineLog(
-                Log.INFO,
+                Log.DEBUG,
                 TAG,
                 "${prefixAttempt(attemptId)}TUN addAddress=$addressForTun (IPCP=$tunIpv4 useIpcp=$useIpcpAddress)",
             )
@@ -235,12 +234,12 @@ class TunnelVpnService : VpnService() {
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 builder.allowFamily(OsConstants.AF_INET)
-                VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}TUN allowFamily(AF_INET) IPv4-only")
+                VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}TUN allowFamily(AF_INET) IPv4-only")
             }
             applyExcludeRouteForVpnServer(builder, server)
             if (routingMode == VpnContract.ROUTING_PER_APP_ALLOW_LIST) {
                 VpnTunnelEvents.emitEngineLog(
-                    Log.INFO,
+                    Log.DEBUG,
                     TAG,
                     "${prefixAttempt(attemptId)}TUN per-app allow-list packages=${perAppPkgs.size}",
                 )
@@ -252,7 +251,7 @@ class TunnelVpnService : VpnService() {
                     }
                 }
             } else {
-                VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}TUN full-device routing")
+                VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}TUN full-device routing")
             }
             tunInterface = builder.establish()
             val pfd = tunInterface ?: throw IllegalStateException("TUN establish() returned null")
@@ -260,7 +259,7 @@ class TunnelVpnService : VpnService() {
             VpnTunnelEvents.emitEngineLog(
                 Log.INFO,
                 TAG,
-                "${prefixAttempt(attemptId)}TUN established fd=$tunFd mtu=$tunMtu dns=${dnsServers.joinToString(",")}",
+                "${prefixAttempt(attemptId)}TUN established",
             )
             VpnTunnelEvents.emit(VpnContract.TUNNEL_CONNECTED, "TUN interface ready; starting tunnel loop")
             updateForegroundNotification(connectedNotificationText())
@@ -269,16 +268,16 @@ class TunnelVpnService : VpnService() {
             engineThread = Thread(
                 {
                     try {
-                        VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}nativeStartLoop(tunFd=$tunFd) thread running")
+                        VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}nativeStartLoop(tunFd=$tunFd) thread running")
                         val code = VpnBridge.nativeStartLoop(tunFd)
-                        VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}nativeStartLoop exited with code=$code")
+                        VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}nativeStartLoop exited with code=$code")
                         if (code != 0) {
                             VpnTunnelEvents.emit(VpnContract.TUNNEL_FAILED, tunnelExitDetail(code))
                         } else {
                             VpnTunnelEvents.emit(VpnContract.TUNNEL_STOPPED, "Tunnel closed normally")
                         }
                     } catch (t: Throwable) {
-                        Log.e(TAG, "${prefixAttempt(attemptId)}nativeStartLoop failed", t)
+                        AppLog.e(TAG, "${prefixAttempt(attemptId)}nativeStartLoop failed", t)
                         VpnTunnelEvents.emit(VpnContract.TUNNEL_FAILED, t.message ?: "nativeStartLoop crashed")
                     } finally {
                         mainHandler.post {
@@ -289,7 +288,7 @@ class TunnelVpnService : VpnService() {
                 "tunnel-engine",
             ).also { it.start() }
         } catch (e: Exception) {
-            Log.e(TAG, "${prefixAttempt(attemptId)}startTunnel", e)
+            AppLog.e(TAG, "${prefixAttempt(attemptId)}startTunnel", e)
             VpnTunnelEvents.emitEngineLog(Log.ERROR, TAG, "${prefixAttempt(attemptId)}startTunnel exception=${e.javaClass.simpleName}:${e.message}")
             VpnTunnelEvents.emit(VpnContract.TUNNEL_FAILED, e.message ?: "startTunnel failed")
             running.set(false)
@@ -311,7 +310,7 @@ class TunnelVpnService : VpnService() {
         try {
             VpnBridge.nativeStopTunnel()
         } catch (e: Exception) {
-            Log.w(TAG, "nativeStopTunnel", e)
+            AppLog.w(TAG, "nativeStopTunnel", e)
         }
         try {
             engineThread?.join(8000)
@@ -340,7 +339,7 @@ class TunnelVpnService : VpnService() {
         try {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } catch (e: Exception) {
-            Log.e(TAG, "stopForeground after tunnel", e)
+            AppLog.e(TAG, "stopForeground after tunnel", e)
         }
         activeServer = ""
         activeProfileName = null
@@ -454,8 +453,8 @@ class TunnelVpnService : VpnService() {
         private const val NOTIFICATION_ID = 7101
         private const val REQUEST_CODE_DISCONNECT = 7102
 
-        /** When [EXTRA_MTU] is absent or invalid; aligns with typical PPP MRU 1280 + 2-byte ACFC prefix. */
-        const val DEFAULT_TUN_MTU = 1278
+        /** When [EXTRA_MTU] is absent or invalid. */
+        const val DEFAULT_TUN_MTU = 1450
         const val DEFAULT_DNS_SERVER = "8.8.8.8"
 
         private const val MIN_TUN_MTU = 576
@@ -486,7 +485,7 @@ class TunnelVpnService : VpnService() {
             return try {
                 svc.protect(fd)
             } catch (e: Exception) {
-                Log.e(TAG, "protect failed for fd=$fd", e)
+                AppLog.e(TAG, "protect failed for fd=$fd", e)
                 false
             }
         }

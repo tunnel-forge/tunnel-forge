@@ -194,7 +194,7 @@ static esp_drop_stats_t s_esp_drop_stats;
 void esp_reset_drop_counters(void) { memset(&s_esp_drop_stats, 0, sizeof(s_esp_drop_stats)); }
 
 void esp_log_drop_counters(const char *ctx, int reset_after_log) {
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                     "esp drop counters [%s]: spi=%llu seq0=%llu replay_old=%llu replay_dup=%llu hmac=%llu "
                     "aes=%llu short=%llu nh=%llu pad_len=%llu pad_byte=%llu udp_len=%llu l2tp_len=%llu",
                     ctx ? ctx : "n/a", (unsigned long long)s_esp_drop_stats.spi_mismatch,
@@ -591,7 +591,7 @@ int esp_encrypt_send(int fd, esp_keys_t *k, const struct sockaddr *peer, socklen
   ssize_t sent = sendto(fd, buf, off, 0, peer, peer_len);
   if (s_esp_keymap_profile_once == 0) {
     s_esp_keymap_profile_once = 1;
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                       "esp key profile one-shot: out_spi=%08x in_spi=%08x out_enc=%02x%02x%02x%02x out_auth=%02x%02x%02x%02x in_enc=%02x%02x%02x%02x in_auth=%02x%02x%02x%02x",
                       (unsigned)k->spi_i, (unsigned)k->spi_r,
                       k->enc_key[0], k->enc_key[1], k->enc_key[2], k->enc_key[3],
@@ -601,7 +601,7 @@ int esp_encrypt_send(int fd, esp_keys_t *k, const struct sockaddr *peer, socklen
   }
   if (s_esp_send_profile_logs < 8) {
     s_esp_send_profile_logs++;
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                       "esp send profile: spi_i=%08x seq=%u udp_encap=%d enc_len=%zu auth_len=%zu inner_udp_csum=0x%04x "
                       "outer_len=%zu mode=%s",
                       (unsigned)k->spi_i, (unsigned)seq_i, k->udp_encap ? 1 : 0, k->enc_key_len, k->auth_key_len,

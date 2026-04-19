@@ -37,8 +37,13 @@ extension _VpnHomePageUi on _VpnHomePageState {
             busy: _busy,
             tunnelUp: _tunnelUp,
             awaitingTunnel: _awaitingTunnel,
+            canStartConnection: _hasActiveProfile,
             connectButtonLabel: _connectButtonLabel,
             onPrimary: _primaryAction,
+            onUnavailablePrimaryTap: _handleMissingProfileTap,
+            connectivityBadgeState: _connectivityBadgeState,
+            connectivityBadgeLabel: _connectivityBadgeLabel,
+            onConnectivityTap: _runConnectivityCheck,
             colorScheme: cs,
             textTheme: textTheme,
           ),
@@ -47,13 +52,15 @@ extension _VpnHomePageUi on _VpnHomePageState {
         return ListenableBuilder(
           listenable: _logBuffer,
           builder: (context, _) => LogsPanel(
-            logs: _logBuffer.lines,
+            logs: _visibleLogs,
             scrollController: _logsScroll,
             colorScheme: cs,
             textTheme: textTheme,
             stickToBottom: _logsStickToBottom,
             onJumpToLatest: _jumpLogsToBottom,
             wordWrap: _logsWordWrap,
+            hasAnyLogs: _logBuffer.entries.isNotEmpty,
+            levelLabel: _logsLevelLabel,
           ),
         );
       default:
@@ -64,12 +71,16 @@ extension _VpnHomePageUi on _VpnHomePageState {
           routingMode: _routingMode,
           allowedAppPackages: _allowedAppPackages,
           proxySettings: _proxySettings,
+          connectivityCheckSettings: _connectivityCheckSettings,
           onConnectionModeChanged: (mode) {
             _setConnectionMode(mode);
           },
           onRoutingModeChanged: (m) => _setHomeState(() => _routingMode = m),
           onProxySettingsChanged: (settings) {
             _setProxySettings(settings);
+          },
+          onConnectivityCheckSettingsChanged: (settings) {
+            _setConnectivityCheckSettings(settings);
           },
           onChooseApps: _pickAppsForVpn,
           routingLocked:
@@ -83,11 +94,7 @@ extension _VpnHomePageUi on _VpnHomePageState {
   Widget _buildHomeScaffold(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final effectiveProfileId =
-        _activeProfileId != null &&
-            _profiles.any((p) => p.id == _activeProfileId)
-        ? _activeProfileId
-        : null;
+    final effectiveProfileId = _hasActiveProfile ? _activeProfileId : null;
     final appBarTitle = switch (_navIndex) {
       0 => 'Tunnel Forge',
       1 => 'Logs',
@@ -150,6 +157,50 @@ extension _VpnHomePageUi on _VpnHomePageState {
                 children: switch (_navIndex) {
                   0 => <Widget>[],
                   1 => [
+                    PopupMenuButton<LogDisplayLevel>(
+                      tooltip: 'Log level',
+                      initialValue: _logsLevel,
+                      onSelected: (level) {
+                        unawaited(_setLogsLevel(level));
+                      },
+                      itemBuilder: (context) => const [
+                        PopupMenuItem<LogDisplayLevel>(
+                          value: LogDisplayLevel.info,
+                          child: Text('INFO'),
+                        ),
+                        PopupMenuItem<LogDisplayLevel>(
+                          value: LogDisplayLevel.warning,
+                          child: Text('WARNING'),
+                        ),
+                        PopupMenuItem<LogDisplayLevel>(
+                          value: LogDisplayLevel.error,
+                          child: Text('ERROR'),
+                        ),
+                        PopupMenuItem<LogDisplayLevel>(
+                          value: LogDisplayLevel.debug,
+                          child: Text('DEBUG'),
+                        ),
+                      ],
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 8,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.filter_list_rounded, size: 20),
+                            const SizedBox(width: 6),
+                            Text(
+                              _logsLevelLabel,
+                              style: textTheme.labelMedium?.copyWith(
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                     IconButton(
                       tooltip: _logsWordWrap
                           ? 'Turn off word wrap (wide lines scroll sideways)'
@@ -163,13 +214,14 @@ extension _VpnHomePageUi on _VpnHomePageState {
                     ListenableBuilder(
                       listenable: _logBuffer,
                       builder: (context, _) {
+                        final visibleEmpty = _visibleLogs.isEmpty;
                         final empty = _logBuffer.isEmpty;
                         return Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
-                              tooltip: 'Copy all',
-                              onPressed: empty ? null : _copyLogs,
+                              tooltip: 'Copy visible',
+                              onPressed: visibleEmpty ? null : _copyLogs,
                               icon: const Icon(Icons.copy_all_outlined),
                             ),
                             IconButton(

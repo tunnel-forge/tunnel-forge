@@ -59,7 +59,7 @@ typedef struct recv_plain_stats {
 } recv_plain_stats_t;
 
 static void recv_plain_log_stats(const char *ctx, const recv_plain_stats_t *st, int elapsed_ms, int timeout_ms) {
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                     "l2tp recv_plain stats [%s]: rx=%u keepalive=%u ike=%u dec_try_p=%u dec_try_alt=%u dec_ok_p=%u dec_ok_alt=%u dec_fail_p=%u dec_fail_alt=%u elapsed=%d timeout=%d",
                     ctx, st->rx_datagrams, st->skip_keepalive, st->skip_ike, st->decrypt_try_primary,
                     st->decrypt_try_alt, st->decrypt_ok_primary, st->decrypt_ok_alt, st->decrypt_fail_primary,
@@ -132,7 +132,7 @@ static int recv_plain(int esp_fd, esp_keys_t *esp, esp_keys_t *esp_alt, int *use
       uint32_t w0 = util_read_be32(raw);
       uint32_t w1 = n >= 12 ? util_read_be32(raw + 4) : 0u;
       uint32_t w2 = n >= 16 ? util_read_be32(raw + 8) : 0u;
-      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                           "l2tp recv_plain: n=%zd be32[0..8]= %08x %08x %08x (NAT-T/IKE/ESP prefix)", n,
                           (unsigned)w0, (unsigned)w1, (unsigned)w2);
     } else {
@@ -340,14 +340,14 @@ static int recv_ctrl_update_nr(int esp_fd, esp_keys_t *esp, esp_keys_t *esp_alt,
     if (l2tp_ctrl_msg_type(in, (size_t)ilen, out_mt) != 0) {
       // ZLB/ACK control packets may have no Message Type AVP.
       *out_mt = 0;
-      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                         "l2tp ctrl recv: no Message Type AVP (treat as ZLB/ack) ilen=%d flags=0x%04x peer_ns=%u peer_nr=%u local_nr_now=%u",
                         ilen, (unsigned)util_read_be16(in), (unsigned)peer_ns, (unsigned)peer_nr,
                         (unsigned)s->recv_nr_expected);
     } else {
       uint16_t tid_dbg = util_read_be16(in + 4);
       uint16_t sid_dbg = util_read_be16(in + 6);
-      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                         "l2tp ctrl recv: mt=%u ilen=%d flags=0x%04x peer_tid=%u peer_sid=%u peer_ns=%u peer_nr=%u local_nr_now=%u",
                         (unsigned)*out_mt, ilen, (unsigned)util_read_be16(in), (unsigned)tid_dbg, (unsigned)sid_dbg,
                         (unsigned)peer_ns, (unsigned)peer_nr, (unsigned)s->recv_nr_expected);
@@ -365,7 +365,7 @@ static int recv_until_mt(int esp_fd, esp_keys_t *esp, const struct sockaddr *pee
     if (mt == want_mt) return ilen;
     if (mt == 0) {
       // ZLB or control ack with no Message Type AVP.
-      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                         "l2tp ctrl recv: zlb/ack while waiting want=%u iter=%d send_ns=%u recv_nr=%u",
                         (unsigned)want_mt, i, (unsigned)s->send_ns, (unsigned)s->recv_nr_expected);
       continue;
@@ -439,11 +439,11 @@ static int l2tp_handshake_inner(int esp_fd, esp_keys_t *esp, const struct sockad
       if (ilen >= 0) {
         if (used_alt) {
           *esp = esp_alt;
-          tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+          tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                             "l2tp: SCCRP received with fallback profile=%s spi_out=%08x spi_in=%08x",
                             tries[ti].name, (unsigned)esp->spi_i, (unsigned)esp->spi_r);
         } else {
-          tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+          tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                             "l2tp: SCCRP received while fallback active, using primary profile spi_out=%08x spi_in=%08x",
                             (unsigned)esp->spi_i, (unsigned)esp->spi_r);
         }
@@ -478,7 +478,7 @@ static int l2tp_handshake_inner(int esp_fd, esp_keys_t *esp, const struct sockad
   avp_u16(avps, &ao, L2TP_AVP_MSG_TYPE, L2TP_MSG_ICRQ);
   avp_u16(avps, &ao, L2TP_AVP_ASSIGNED_SESSION, local_sid);
   avp_u16(avps, &ao, 15, 1);
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                     "l2tp icrq avps: msg_type=%u assigned_session=%u call_serial=%u call_serial_width=%u",
                     (unsigned)L2TP_MSG_ICRQ, (unsigned)local_sid, 1u, 16u);
   if (send_ctrl(esp_fd, esp, peer, peer_len, s, avps, ao) != 0) return -1;
@@ -617,7 +617,7 @@ static void l2tp_log_ctrl_result_details(uint16_t mt, const uint8_t *data, size_
   error_msg[0] = '\0';
   int details = l2tp_ctrl_result_details(data, len, &result_code, &error_code, error_msg, sizeof(error_msg));
   if (details != 0) return;
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                     "l2tp ctrl result: mt=%u result=%u error=%u msg=%s", (unsigned)mt, (unsigned)result_code,
                     (unsigned)error_code, error_msg[0] != '\0' ? error_msg : "-");
 }
@@ -653,7 +653,7 @@ static int l2tp_dispatch_control(int esp_fd, esp_keys_t *esp, const struct socka
   }
 
   if (mt == L2TP_MSG_HELLO) {
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                       "l2tp ctrl dataplane: HELLO acked peer_ns=%u peer_nr=%u", (unsigned)peer_ns,
                       (unsigned)peer_nr);
     return L2TP_DISPATCH_OK;
@@ -661,13 +661,13 @@ static int l2tp_dispatch_control(int esp_fd, esp_keys_t *esp, const struct socka
 
   if (mt == L2TP_MSG_STOPCCN || mt == L2TP_MSG_CDN) {
     l2tp_log_ctrl_result_details(mt, data, len);
-    tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                       "l2tp ctrl dataplane: remote teardown mt=%u peer_ns=%u peer_nr=%u", (unsigned)mt,
                       (unsigned)peer_ns, (unsigned)peer_nr);
     return L2TP_DISPATCH_REMOTE_CLOSED;
   }
 
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                     "l2tp ctrl dataplane: acked mt=%u peer_ns=%u peer_nr=%u", (unsigned)mt, (unsigned)peer_ns,
                     (unsigned)peer_nr);
   return L2TP_DISPATCH_OK;

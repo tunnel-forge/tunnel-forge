@@ -40,7 +40,7 @@ class ProxyTunnelServiceStopperTest {
 
         assertEquals("native-stop", events.first())
         assertTrue(events.contains("worker-interrupted"))
-        assertTrue(events.any { it == "log:${Log.INFO}:Previous proxy worker joined" })
+        assertTrue(events.any { it == "log:${Log.DEBUG}:Previous proxy worker joined" })
         assertTrue(!worker.isAlive)
     }
 

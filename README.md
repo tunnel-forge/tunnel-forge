@@ -10,20 +10,23 @@
 </p>
 
 <p align="center">
-  <a href="https://flutter.dev">
-    <img alt="Flutter" src="https://img.shields.io/badge/Flutter-App-02569B?logo=flutter&logoColor=white">
+  <a href="https://github.com/evokelektrique/tunnel_forge/actions/workflows/ci.yml" style="text-decoration: none;">
+    <img alt="CI" src="https://img.shields.io/github/actions/workflow/status/evokelektrique/tunnel_forge/ci.yml?branch=main&label=CI">
   </a>
-  <a href="https://dart.dev">
-    <img alt="Dart 3.11+" src="https://img.shields.io/badge/Dart-3.11%2B-0175C2?logo=dart&logoColor=white">
+  <a href="https://codecov.io/github/evokelektrique/tunnel-forge" style="text-decoration: none;">
+    <img alt="Coverage" src="https://codecov.io/github/evokelektrique/tunnel-forge/graph/badge.svg?token=2GKLO165LD">
   </a>
-  <a href="https://developer.android.com/develop/connectivity/vpn">
-    <img alt="Android VpnService" src="https://img.shields.io/badge/Android-VpnService-3DDC84?logo=android&logoColor=white">
+  <a href="https://github.com/evokelektrique/tunnel_forge/actions/workflows/codeql.yml" style="text-decoration: none;">
+    <img alt="CodeQL" src="https://img.shields.io/github/actions/workflow/status/evokelektrique/tunnel_forge/codeql.yml?branch=main&label=CodeQL">
   </a>
-  <a href="#highlights">
-    <img alt="Modes VPN and Proxy" src="https://img.shields.io/badge/Modes-VPN%20%2B%20Proxy-111827">
+  <a href="https://github.com/evokelektrique/tunnel_forge/releases/latest" style="text-decoration: none;">
+    <img alt="Latest Release" src="https://img.shields.io/github/v/release/evokelektrique/tunnel_forge?display_name=tag&label=Release">
   </a>
-  <a href="#testing">
-    <img alt="Tests Flutter and Native" src="https://img.shields.io/badge/Tests-Flutter%20%2B%20Native-0F766E">
+  <a href="https://github.com/evokelektrique/tunnel_forge/releases" style="text-decoration: none;">
+    <img alt="Downloads" src="https://img.shields.io/github/downloads/evokelektrique/tunnel_forge/total?label=Downloads">
+  </a>
+  <a href="https://github.com/evokelektrique/tunnel_forge/blob/main/LICENSE" style="text-decoration: none;">
+    <img alt="License GPL-3.0" src="https://img.shields.io/github/license/evokelektrique/tunnel_forge?label=License">
   </a>
 </p>
 
@@ -74,6 +77,12 @@ Run Flutter tests:
 
 ```sh
 flutter test
+```
+
+Generate a coverage report:
+
+```sh
+flutter test --coverage
 ```
 
 Run Android-native tunnel and runtime tests:

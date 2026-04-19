@@ -8,9 +8,11 @@ abstract final class VpnContract {
   static const String prepareVpn = 'prepareVpn';
   static const String connect = 'connect';
   static const String disconnect = 'disconnect';
+  static const String setLogLevel = 'setLogLevel';
 
   /// Correlates one connect attempt across Dart UI, logs, and Android logcat.
   static const String argAttemptId = 'attemptId';
+  static const String argLogLevel = 'logLevel';
 
   static const String argServer = 'server';
   static const String argUser = 'user';
@@ -50,6 +52,7 @@ abstract final class VpnContract {
   static const String onEngineLog = 'onEngineLog';
 
   static const String argEngineLogLevel = 'engineLogLevel';
+  static const String argEngineLogSource = 'engineLogSource';
   static const String argEngineLogTag = 'engineLogTag';
   static const String argEngineLogMessage = 'engineLogMessage';
 }

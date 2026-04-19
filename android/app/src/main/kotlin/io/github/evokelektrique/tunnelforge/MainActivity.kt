@@ -34,7 +34,7 @@ class MainActivity : FlutterActivity() {
                     try {
                         result.success(installedAppsForVpnPicker())
                     } catch (e: Exception) {
-                        Log.e(TAG, "listVpnCandidateApps failed", e)
+                        AppLog.e(TAG, "listVpnCandidateApps failed", e)
                         result.error("list_apps_failed", e.message, null)
                     }
                 }
@@ -50,33 +50,33 @@ class MainActivity : FlutterActivity() {
                         val png = drawableToPngBytes(drawable, sizePx)
                         result.success(png)
                     } catch (e: Exception) {
-                        Log.w(TAG, "getAppIcon failed for $pkg: ${e.message}")
+                        AppLog.w(TAG, "getAppIcon failed for $pkg: ${e.message}")
                         result.success(null)
                     }
                 }
                 VpnContract.PREPARE_VPN -> {
-                    Log.i(TAG, "vpn_call prepareVpn start")
+                    AppLog.d(TAG, "vpn_call prepareVpn start")
                     val intent = VpnService.prepare(this)
                     if (intent == null) {
-                        Log.i(TAG, "vpn_call prepareVpn result granted=true (already)")
+                        AppLog.d(TAG, "vpn_call prepareVpn result granted=true (already)")
                         result.success(true)
                     } else {
                         vpnPermissionResult = result
-                        Log.i(TAG, "vpn_call prepareVpn result needs_ui=true")
+                        AppLog.d(TAG, "vpn_call prepareVpn result needs_ui=true")
                         startActivityForResult(intent, REQUEST_VPN_PERMISSION)
                     }
                 }
                 VpnContract.CONNECT -> {
                     val args = call.arguments as? Map<*, *>
                     if (args == null) {
-                        Log.e(TAG, "vpn_call connect rejected bad_args (non-map)")
+                        AppLog.e(TAG, "vpn_call connect rejected bad_args (non-map)")
                         result.error("bad_args", "Expected map", null)
                         return@setMethodCallHandler
                     }
                     val attemptId = args[VpnContract.ARG_ATTEMPT_ID] as? String ?: ""
                     val server = args[VpnContract.ARG_SERVER] as? String
                     if (server.isNullOrBlank()) {
-                        Log.e(TAG, "vpn_call connect rejected bad_args (server required) attempt=$attemptId")
+                        AppLog.e(TAG, "vpn_call connect rejected bad_args (server required) attempt=$attemptId")
                         result.error("bad_args", "server required", null)
                         return@setMethodCallHandler
                     }
@@ -125,23 +125,23 @@ class MainActivity : FlutterActivity() {
                     val hasScheme = serverTrim.contains("://")
                     val hasPort = serverTrim.count { it == ':' } == 1 && !serverTrim.contains("::")
                     if (serverTrim != server) {
-                        Log.w(TAG, "vpn_call connect server had leading/trailing whitespace attempt=$attemptId")
+                        AppLog.w(TAG, "vpn_call connect server had leading/trailing whitespace attempt=$attemptId")
                     }
                     if (hasScheme) {
-                        Log.w(TAG, "vpn_call connect server looks like URL; expected host only attempt=$attemptId server=$serverTrim")
+                        AppLog.w(TAG, "vpn_call connect server looks like URL; expected host only attempt=$attemptId server=$serverTrim")
                     }
                     if (hasPort) {
-                        Log.w(TAG, "vpn_call connect server includes port; expected host only attempt=$attemptId server=$serverTrim")
+                        AppLog.w(TAG, "vpn_call connect server includes port; expected host only attempt=$attemptId server=$serverTrim")
                     }
                     if (connectionMode == VpnContract.MODE_VPN_TUNNEL) {
                         val prep = VpnService.prepare(this)
                         if (prep != null) {
-                            Log.e(TAG, "vpn_call connect rejected vpn_permission attempt=$attemptId")
+                            AppLog.e(TAG, "vpn_call connect rejected vpn_permission attempt=$attemptId")
                             result.error("vpn_permission", "VPN permission not granted", null)
                             return@setMethodCallHandler
                         }
                     }
-                    Log.i(
+                    AppLog.d(
                         TAG,
                         "vpn_call connect start attempt=$attemptId server=$serverTrim userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dns=${dnsServers.joinToString(",")} mtu=$mtu mode=$connectionMode routing=$routingMode allowedApps=${allowedPackages.size}",
                     )
@@ -189,7 +189,7 @@ class MainActivity : FlutterActivity() {
                         }
                         notificationPermissionResult = result
                         pendingConnectIntent = intent
-                        Log.i(TAG, "vpn_call connect requesting POST_NOTIFICATIONS attempt=$attemptId")
+                        AppLog.d(TAG, "vpn_call connect requesting POST_NOTIFICATIONS attempt=$attemptId")
                         requestPermissions(
                             arrayOf(Manifest.permission.POST_NOTIFICATIONS),
                             REQUEST_POST_NOTIFICATIONS,
@@ -198,8 +198,14 @@ class MainActivity : FlutterActivity() {
                     }
                     dispatchConnectIntent(intent, result, "vpn_call connect")
                 }
+                VpnContract.SET_LOG_LEVEL -> {
+                    val args = call.arguments as? Map<*, *>
+                    val rawLevel = args?.get(VpnContract.ARG_LOG_LEVEL) as? String
+                    EngineLogPolicy.update(EngineLogLevel.fromWireValue(rawLevel))
+                    result.success(null)
+                }
                 VpnContract.DISCONNECT -> {
-                    Log.i(TAG, "vpn_call disconnect dispatched action=ACTION_STOP")
+                    AppLog.d(TAG, "vpn_call disconnect dispatched action=ACTION_STOP")
                     val intent = Intent(this, TunnelVpnService::class.java).apply {
                         action = TunnelVpnService.ACTION_STOP
                     }
@@ -227,7 +233,7 @@ class MainActivity : FlutterActivity() {
         if (requestCode != REQUEST_VPN_PERMISSION) return
         val pending = vpnPermissionResult ?: return
         vpnPermissionResult = null
-        Log.i(TAG, "vpn_call prepareVpn result_code=$resultCode")
+        AppLog.d(TAG, "vpn_call prepareVpn result_code=$resultCode")
         if (resultCode == Activity.RESULT_OK) {
             pending.success(true)
         } else {
@@ -251,7 +257,7 @@ class MainActivity : FlutterActivity() {
             grantResults.isNotEmpty() &&
                 grantResults[0] == PackageManager.PERMISSION_GRANTED
         if (!granted) {
-            Log.w(TAG, "vpn_call connect rejected notification_permission")
+            AppLog.w(TAG, "vpn_call connect rejected notification_permission")
             pending.error("notification_permission", "Notification permission is required to show VPN status", null)
             return
         }
@@ -333,31 +339,29 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun dispatchConnectIntent(intent: Intent, result: MethodChannel.Result, logPrefix: String) {
-        val action = intent.action ?: "(missing)"
-        val attemptId = intent.getStringExtra(TunnelVpnService.EXTRA_ATTEMPT_ID).orEmpty()
         try {
             startForegroundWorkerService(intent)
-            Log.i(TAG, "$logPrefix dispatched action=$action attempt=$attemptId")
+            AppLog.d(TAG, "$logPrefix dispatched")
             result.success(null)
         } catch (e: ForegroundServiceStartNotAllowedException) {
-            Log.e(TAG, "$logPrefix failed foreground_service_start_not_allowed action=$action attempt=$attemptId", e)
+            AppLog.e(TAG, "$logPrefix failed foreground_service_start_not_allowed", e)
             result.error(
                 "start_service_failed",
-                "Android blocked starting the foreground service: ${e.message ?: "unknown error"}",
+                "Android blocked starting the foreground service.",
                 null,
             )
         } catch (e: SecurityException) {
-            Log.e(TAG, "$logPrefix failed security_exception action=$action attempt=$attemptId", e)
+            AppLog.e(TAG, "$logPrefix failed security_exception", e)
             result.error(
                 "start_service_failed",
-                "Android rejected starting the service: ${e.message ?: "missing permission"}",
+                "Android rejected starting the service.",
                 null,
             )
         } catch (e: RuntimeException) {
-            Log.e(TAG, "$logPrefix failed runtime_exception action=$action attempt=$attemptId", e)
+            AppLog.e(TAG, "$logPrefix failed runtime_exception", e)
             result.error(
                 "start_service_failed",
-                "Could not start the tunnel service: ${e.message ?: e.javaClass.simpleName}",
+                "Could not start the tunnel service.",
                 null,
             )
         }

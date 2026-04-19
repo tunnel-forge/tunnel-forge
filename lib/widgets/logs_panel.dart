@@ -1,11 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Splits `HH:MM:SS  message` lines produced by the home page logger.
-(String time, String body) _splitLogLine(String line) {
-  final idx = line.indexOf('  ');
-  if (idx <= 0) return ('', line);
-  return (line.substring(0, idx), line.substring(idx + 2));
-}
+import '../utils/log_entry.dart';
 
 /// Monospace log viewer with optional horizontal scroll when word wrap is off.
 class LogsPanel extends StatefulWidget {
@@ -18,15 +13,19 @@ class LogsPanel extends StatefulWidget {
     required this.stickToBottom,
     required this.onJumpToLatest,
     required this.wordWrap,
+    required this.hasAnyLogs,
+    required this.levelLabel,
   });
 
-  final List<String> logs;
+  final List<LogEntry> logs;
   final ScrollController scrollController;
   final ColorScheme colorScheme;
   final TextTheme textTheme;
   final bool stickToBottom;
   final VoidCallback onJumpToLatest;
   final bool wordWrap;
+  final bool hasAnyLogs;
+  final String levelLabel;
 
   @override
   State<LogsPanel> createState() => _LogsPanelState();
@@ -45,6 +44,12 @@ class _LogsPanelState extends State<LogsPanel> {
   Widget build(BuildContext context) {
     final logs = widget.logs;
     if (logs.isEmpty) {
+      final title = widget.hasAnyLogs
+          ? 'No logs match this level'
+          : 'No activity yet';
+      final subtitle = widget.hasAnyLogs
+          ? 'Try a different log level to see more entries.'
+          : 'Connection events and diagnostics will appear here.';
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -58,14 +63,14 @@ class _LogsPanelState extends State<LogsPanel> {
               ),
               const SizedBox(height: 12),
               Text(
-                'No activity yet',
+                title,
                 style: widget.textTheme.bodyLarge?.copyWith(
                   color: widget.colorScheme.onSurfaceVariant,
                 ),
               ),
               const SizedBox(height: 6),
               Text(
-                'Connection events and diagnostics will appear here.',
+                subtitle,
                 textAlign: TextAlign.center,
                 style: widget.textTheme.bodySmall?.copyWith(
                   color: widget.colorScheme.onSurfaceVariant,
@@ -91,7 +96,10 @@ class _LogsPanelState extends State<LogsPanel> {
       color: cs.onSurfaceVariant,
       fontWeight: FontWeight.w500,
     );
-    final bodyStyle = mono?.copyWith(color: cs.onSurface);
+    final sourceStyle = mono?.copyWith(
+      color: cs.primary,
+      fontWeight: FontWeight.w600,
+    );
 
     Widget logList({double? height, double? width}) {
       Widget list = ListView.builder(
@@ -101,11 +109,22 @@ class _LogsPanelState extends State<LogsPanel> {
         addAutomaticKeepAlives: false,
         cacheExtent: 900,
         itemBuilder: (context, i) {
-          final line = logs[i];
-          final (time, body) = _splitLogLine(line);
+          final entry = logs[i];
           final stripe = i.isEven
               ? cs.surfaceContainerHighest.withValues(alpha: 0.18)
               : null;
+          final levelStyle = mono?.copyWith(
+            color: switch (entry.level) {
+              LogLevel.debug => cs.tertiary,
+              LogLevel.info => cs.primary,
+              LogLevel.warning => cs.secondary,
+              LogLevel.error => cs.error,
+            },
+            fontWeight: FontWeight.w700,
+          );
+          final messageStyle = mono?.copyWith(
+            color: entry.level == LogLevel.error ? cs.error : cs.onSurface,
+          );
           return RepaintBoundary(
             child: ColoredBox(
               color: stripe ?? Colors.transparent,
@@ -115,11 +134,16 @@ class _LogsPanelState extends State<LogsPanel> {
                   TextSpan(
                     style: mono,
                     children: [
-                      if (time.isNotEmpty)
-                        TextSpan(text: time, style: timeStyle),
-                      if (time.isNotEmpty)
-                        TextSpan(text: '  ', style: timeStyle),
-                      TextSpan(text: body, style: bodyStyle),
+                      TextSpan(text: entry.timeLabel, style: timeStyle),
+                      TextSpan(text: '  '),
+                      TextSpan(
+                        text: '[${entry.level.label}]',
+                        style: levelStyle,
+                      ),
+                      TextSpan(text: '  '),
+                      TextSpan(text: entry.sourceTagLabel, style: sourceStyle),
+                      TextSpan(text: '  '),
+                      TextSpan(text: entry.message, style: messageStyle),
                     ],
                   ),
                   style: mono,
@@ -162,6 +186,30 @@ class _LogsPanelState extends State<LogsPanel> {
     return Stack(
       children: [
         SelectionArea(child: body),
+        Positioned(
+          left: 12,
+          top: 8,
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withValues(alpha: 0.86),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                child: Text(
+                  'Log level: ${widget.levelLabel}',
+                  style: widget.textTheme.labelSmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
         if (!widget.stickToBottom)
           Positioned(
             right: 8,

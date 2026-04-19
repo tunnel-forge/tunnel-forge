@@ -12,6 +12,8 @@ class VpnContractTest {
 
     @Test
     fun connectExtras() {
+        assertEquals("setLogLevel", VpnContract.SET_LOG_LEVEL)
+        assertEquals("logLevel", VpnContract.ARG_LOG_LEVEL)
         assertEquals("server", VpnContract.ARG_SERVER)
         assertEquals("user", VpnContract.ARG_USER)
         assertEquals("password", VpnContract.ARG_PASSWORD)
@@ -47,7 +49,11 @@ class VpnContractTest {
     fun engineLogChannel() {
         assertEquals("onEngineLog", VpnContract.ON_ENGINE_LOG)
         assertEquals("engineLogLevel", VpnContract.ARG_ENGINE_LOG_LEVEL)
+        assertEquals("engineLogSource", VpnContract.ARG_ENGINE_LOG_SOURCE)
         assertEquals("engineLogTag", VpnContract.ARG_ENGINE_LOG_TAG)
         assertEquals("engineLogMessage", VpnContract.ARG_ENGINE_LOG_MESSAGE)
+        assertEquals("dart", VpnContract.LOG_SOURCE_DART)
+        assertEquals("kotlin", VpnContract.LOG_SOURCE_KOTLIN)
+        assertEquals("native", VpnContract.LOG_SOURCE_NATIVE)
     }
 }

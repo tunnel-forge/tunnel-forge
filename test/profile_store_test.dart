@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tunnel_forge/profile_models.dart';
 import 'package:tunnel_forge/profile_store.dart';
+import 'package:tunnel_forge/utils/log_entry.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -121,6 +122,11 @@ void main() {
       expect(row.psk, 'psk1');
     });
 
+    test('starts empty without seeding a default profile', () async {
+      expect(await store.loadProfiles(), isEmpty);
+      expect(await store.loadLastProfileId(), isNull);
+    });
+
     test('persists connection mode and proxy settings', () async {
       await store.saveConnectionMode(ConnectionMode.proxyOnly);
       await store.saveProxySettings(
@@ -138,6 +144,30 @@ void main() {
       expect(proxy.httpPort, 18080);
       expect(proxy.socksEnabled, isTrue);
       expect(proxy.socksPort, 11080);
+    });
+
+    test('persists global connectivity check settings', () async {
+      expect(
+        (await store.loadConnectivityCheckSettings()).url,
+        ConnectivityCheckSettings.defaultUrl,
+      );
+
+      await store.saveConnectivityCheckSettings(
+        const ConnectivityCheckSettings(url: 'https://example.com/health'),
+      );
+
+      expect(
+        (await store.loadConnectivityCheckSettings()).url,
+        'https://example.com/health',
+      );
+    });
+
+    test('defaults log display level to error and persists updates', () async {
+      expect(await store.loadLogDisplayLevel(), LogDisplayLevel.error);
+
+      await store.saveLogDisplayLevel(LogDisplayLevel.debug);
+
+      expect(await store.loadLogDisplayLevel(), LogDisplayLevel.debug);
     });
   });
 }

@@ -1,12 +1,13 @@
 // Profile list JSON in [SharedPreferences]; password and PSK in [SecretStore].
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'profile_models.dart';
+import 'utils/log_entry.dart';
 
 /// Persists sensitive strings (password, PSK) outside [SharedPreferences].
 abstract class SecretStore {
@@ -60,7 +61,8 @@ class ProfileStore {
   static const prefsKeyProxyHttpPort = 'proxy_http_port_v1';
   static const prefsKeyProxySocksEnabled = 'proxy_socks_enabled_v1';
   static const prefsKeyProxySocksPort = 'proxy_socks_port_v1';
-  static const debugDefaultProfileId = 'tunnel_forge_debug_local_test_v1';
+  static const prefsKeyConnectivityCheckUrl = 'connectivity_check_url_v1';
+  static const prefsKeyLogDisplayLevel = 'log_display_level_v1';
 
   final SharedPreferences? _prefsOverride;
   final SecretStore _secrets;
@@ -77,23 +79,6 @@ class ProfileStore {
       List<int>.generate(16, (_) => Random.secure().nextInt(256)),
     );
     return base64UrlEncode(b).replaceAll('=', '');
-  }
-
-  Future<void> ensureDebugDefaultProfileIfEmpty() async {
-    if (!kDebugMode) return;
-    final list = await loadProfiles();
-    if (list.isNotEmpty) return;
-    await upsertProfile(
-      const Profile(
-        id: debugDefaultProfileId,
-        displayName: 'Local test',
-        server: '192.168.1.104',
-        user: 'testuser',
-        dns: Profile.defaultDns,
-      ),
-      password: 'testpass123',
-      psk: 'testpsk123',
-    );
   }
 
   Future<List<Profile>> loadProfiles() async {
@@ -172,6 +157,36 @@ class ProfileStore {
         fallback: ProxySettings.defaultSocksPort,
       ),
     );
+  }
+
+  Future<ConnectivityCheckSettings> loadConnectivityCheckSettings() async {
+    final p = await _prefs();
+    return ConnectivityCheckSettings(
+      url: ConnectivityCheckSettings.normalizeUrl(
+        p.getString(prefsKeyConnectivityCheckUrl) ??
+            ConnectivityCheckSettings.defaultUrl,
+      ),
+    );
+  }
+
+  Future<void> saveConnectivityCheckSettings(
+    ConnectivityCheckSettings settings,
+  ) async {
+    final p = await _prefs();
+    await p.setString(
+      prefsKeyConnectivityCheckUrl,
+      ConnectivityCheckSettings.normalizeUrl(settings.url),
+    );
+  }
+
+  Future<LogDisplayLevel> loadLogDisplayLevel() async {
+    final p = await _prefs();
+    return LogDisplayLevel.fromStorage(p.getString(prefsKeyLogDisplayLevel));
+  }
+
+  Future<void> saveLogDisplayLevel(LogDisplayLevel level) async {
+    final p = await _prefs();
+    await p.setString(prefsKeyLogDisplayLevel, level.storageValue);
   }
 
   Future<void> _saveProfileList(List<Profile> list) async {

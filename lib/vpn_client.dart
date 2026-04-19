@@ -2,6 +2,7 @@
 import 'package:flutter/services.dart';
 
 import 'profile_models.dart';
+import 'utils/log_entry.dart';
 import 'vpn_contract.dart';
 
 /// Host → Dart: [VpnTunnelState] value and a human-readable [detail] string.
@@ -9,7 +10,7 @@ typedef VpnTunnelHostCallback = void Function(String state, String detail);
 
 /// Host → Dart: one engine log line ([VpnContract.argEngineLogLevel] is an Android log priority).
 typedef VpnEngineLogCallback =
-    void Function(int androidLogPriority, String tag, String message);
+    void Function(LogLevel level, LogSource source, String tag, String message);
 
 class VpnClient {
   VpnClient({
@@ -44,10 +45,18 @@ class VpnClient {
           int v => v,
           _ => int.tryParse(levelRaw?.toString() ?? '') ?? 4,
         };
+        final source = LogSource.parse(
+          raw[VpnContract.argEngineLogSource]?.toString(),
+        );
         final tag =
             raw[VpnContract.argEngineLogTag]?.toString() ?? 'tunnel_engine';
         final message = raw[VpnContract.argEngineLogMessage]?.toString() ?? '';
-        _onEngineLog?.call(level, tag, message);
+        _onEngineLog?.call(
+          LogLevel.fromAndroidPriority(level),
+          source,
+          tag,
+          message,
+        );
       }
     }
   }
@@ -151,4 +160,11 @@ class VpnClient {
 
   Future<void> disconnect() =>
       _channel.invokeMethod<void>(VpnContract.disconnect);
+
+  Future<void> setLogLevel(LogDisplayLevel level) {
+    return _channel.invokeMethod<void>(
+      VpnContract.setLogLevel,
+      <String, Object?>{VpnContract.argLogLevel: level.storageValue},
+    );
+  }
 }

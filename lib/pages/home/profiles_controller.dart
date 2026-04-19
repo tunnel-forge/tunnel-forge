@@ -25,11 +25,13 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
       _setHomeState(() => _profilesLoading = true);
     }
     try {
-      await _profileStore.ensureDebugDefaultProfileIfEmpty();
       final list = await _profileStore.loadProfiles();
       final last = await _profileStore.loadLastProfileId();
       final connectionMode = await _profileStore.loadConnectionMode();
       final proxySettings = await _profileStore.loadProxySettings();
+      final connectivityCheckSettings = await _profileStore
+          .loadConnectivityCheckSettings();
+      final logDisplayLevel = await _profileStore.loadLogDisplayLevel();
       if (!mounted) return;
       if (last != null && list.any((e) => e.id == last)) {
         final row = await _profileStore.loadProfileWithSecrets(last);
@@ -41,8 +43,11 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
             _profilesLoading = false;
             _connectionMode = connectionMode;
             _proxySettings = proxySettings;
+            _connectivityCheckSettings = connectivityCheckSettings;
+            _logsLevel = logDisplayLevel;
             _applyProfileToControllers(row.profile, row.password, row.psk);
           });
+          await _client.setLogLevel(logDisplayLevel);
           return;
         }
       }
@@ -52,8 +57,11 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
         _profilesLoading = false;
         _connectionMode = connectionMode;
         _proxySettings = proxySettings;
+        _connectivityCheckSettings = connectivityCheckSettings;
+        _logsLevel = logDisplayLevel;
       });
       _applyNewFormTemplate();
+      await _client.setLogLevel(logDisplayLevel);
     } catch (_) {
       _setHomeStateIfMounted(() => _profilesLoading = false);
     }
@@ -93,6 +101,13 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
   Future<void> _setProxySettings(ProxySettings settings) async {
     _setHomeState(() => _proxySettings = settings);
     await _profileStore.saveProxySettings(settings);
+  }
+
+  Future<void> _setConnectivityCheckSettings(
+    ConnectivityCheckSettings settings,
+  ) async {
+    _setHomeState(() => _connectivityCheckSettings = settings);
+    await _profileStore.saveConnectivityCheckSettings(settings);
   }
 
   Future<Set<String>?> _pickAppsWithInitial(Set<String> initial) {

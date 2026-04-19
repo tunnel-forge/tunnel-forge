@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +7,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:tunnel_forge/main.dart';
+import 'package:tunnel_forge/profile_store.dart';
 import 'package:tunnel_forge/vpn_contract.dart';
 
 import 'support/host_to_dart_channel.dart';
@@ -17,6 +20,21 @@ void main() {
 
   String statusText(WidgetTester tester) {
     return tester.widget<Text>(find.byKey(const Key('vpn_status'))).data ?? '';
+  }
+
+  Map<String, Object> selectedProfilePrefs() {
+    return {
+      ProfileStore.prefsKeyProfilesJson: jsonEncode([
+        {
+          'id': 'integration_test_profile',
+          'displayName': 'Integration Test',
+          'server': 'vpn.test.example',
+          'user': '',
+          'dns': '8.8.8.8',
+        },
+      ]),
+      ProfileStore.prefsKeyLastProfileId: 'integration_test_profile',
+    };
   }
 
   /// Allow deferred profile load and a few animation ticks. Avoid long
@@ -43,7 +61,7 @@ void main() {
   testWidgets('connect flow with mocked native channel', (
     WidgetTester tester,
   ) async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues(selectedProfilePrefs());
     final methods = <String>[];
     installVpnChannelMock(methods);
     addTearDown(uninstallVpnChannelMock);
@@ -54,13 +72,17 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
 
-    expect(methods, [VpnContract.prepareVpn, VpnContract.connect]);
+    expect(methods, [
+      VpnContract.setLogLevel,
+      VpnContract.prepareVpn,
+      VpnContract.connect,
+    ]);
     expect(statusText(tester), contains('Connecting'));
 
     await tester.pump(const Duration(seconds: 60));
     await tester.pump();
 
-    expect(statusText(tester), 'Connect');
+    expect(statusText(tester), 'Ready');
   });
 
   testWidgets('bottom navigation: Logs then VPN', (WidgetTester tester) async {
@@ -77,10 +99,70 @@ void main() {
     expect(find.byKey(const Key('vpn_connect')), findsOneWidget);
   });
 
-  testWidgets('prepareVpn denied surfaces message and does not connect', (
+  testWidgets('logs default to error level and use cumulative filtering', (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
+    installVpnChannelMock(<String>[]);
+    addTearDown(uninstallVpnChannelMock);
+
+    await pumpTunnelForgeApp(tester);
+
+    await simulateHostEngineLog(
+      tester,
+      priority: 4,
+      source: 'kotlin',
+      tag: 'MainActivity',
+      message: 'info message',
+    );
+    await simulateHostEngineLog(
+      tester,
+      priority: 5,
+      source: 'native',
+      tag: 'tunnel_engine',
+      message: 'warn message',
+    );
+    await simulateHostEngineLog(
+      tester,
+      priority: 6,
+      source: 'kotlin',
+      tag: 'TunnelVpnService',
+      message: 'error message',
+    );
+    await simulateHostEngineLog(
+      tester,
+      priority: 3,
+      source: 'kotlin',
+      tag: 'MainActivity',
+      message: 'debug message',
+    );
+
+    await tester.tap(find.text('Logs'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.textContaining('info message'), findsNothing);
+    expect(find.textContaining('warn message'), findsNothing);
+    expect(find.textContaining('error message'), findsOneWidget);
+    expect(find.textContaining('debug message'), findsNothing);
+    expect(find.text('Log level: ERROR'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Log level'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('WARNING').last);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('info message'), findsNothing);
+    expect(find.textContaining('warn message'), findsOneWidget);
+    expect(find.textContaining('error message'), findsOneWidget);
+    expect(find.textContaining('debug message'), findsNothing);
+    expect(find.text('Log level: WARNING'), findsOneWidget);
+  });
+
+  testWidgets('prepareVpn denied surfaces message and does not connect', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(selectedProfilePrefs());
     final methods = <String>[];
     installVpnChannelMock(methods, prepareResult: false);
     addTearDown(uninstallVpnChannelMock);
@@ -91,15 +173,15 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(methods, [VpnContract.prepareVpn]);
+    expect(methods, [VpnContract.setLogLevel, VpnContract.prepareVpn]);
     expect(find.text('VPN permission is required'), findsOneWidget);
-    expect(statusText(tester), 'Connect');
+    expect(statusText(tester), 'Ready');
   });
 
   testWidgets('connect PlatformException is handled', (
     WidgetTester tester,
   ) async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues(selectedProfilePrefs());
     final methods = <String>[];
     installVpnChannelMock(
       methods,
@@ -116,15 +198,19 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(methods, [VpnContract.prepareVpn, VpnContract.connect]);
+    expect(methods, [
+      VpnContract.setLogLevel,
+      VpnContract.prepareVpn,
+      VpnContract.connect,
+    ]);
     expect(find.text('Simulated native failure'), findsOneWidget);
-    expect(statusText(tester), 'Connect');
+    expect(statusText(tester), 'Ready');
   });
 
   testWidgets('host tunnel state connected updates UI', (
     WidgetTester tester,
   ) async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues(selectedProfilePrefs());
     final methods = <String>[];
     installVpnChannelMock(methods);
     addTearDown(uninstallVpnChannelMock);
@@ -140,6 +226,10 @@ void main() {
     await simulateHostTunnelState(tester, VpnTunnelState.connected, 'tun0');
 
     expect(statusText(tester), 'Connected');
-    expect(methods, [VpnContract.prepareVpn, VpnContract.connect]);
+    expect(methods, [
+      VpnContract.setLogLevel,
+      VpnContract.prepareVpn,
+      VpnContract.connect,
+    ]);
   });
 }

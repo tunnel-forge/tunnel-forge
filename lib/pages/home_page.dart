@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app_selector_page.dart';
+import '../connectivity_checker.dart';
 import '../profile_editor_sheet.dart';
 import '../profile_models.dart';
 import '../profile_picker_sheet.dart';
+import '../utils/log_entry.dart';
 import '../profile_store.dart';
 import '../utils/log_buffer.dart';
 import '../vpn_client.dart';
@@ -17,6 +19,7 @@ import '../widgets/settings_panel.dart';
 
 /// Home experience: connect flow, log stream, and settings. Logic lives in `part` extensions under `home/`.
 part 'home/home_scaffold.dart';
+part 'home/connectivity_controller.dart';
 part 'home/logs_controller.dart';
 part 'home/profiles_controller.dart';
 part 'home/tunnel_controller.dart';
@@ -30,11 +33,13 @@ class VpnHomePage extends StatefulWidget {
     this.themeMode,
     this.onThemeModeChanged,
     this.profileStore,
+    this.connectivityChecker,
   });
 
   final ThemeMode? themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
   final ProfileStore? profileStore;
+  final ConnectivityChecker? connectivityChecker;
 
   @override
   State<VpnHomePage> createState() => _VpnHomePageState();
@@ -43,6 +48,7 @@ class VpnHomePage extends StatefulWidget {
 class _VpnHomePageState extends State<VpnHomePage> {
   late final VpnClient _client;
   late final ProfileStore _profileStore;
+  late final ConnectivityChecker _connectivityChecker;
 
   List<Profile> _profiles = [];
   String? _activeProfileId;
@@ -60,11 +66,14 @@ class _VpnHomePageState extends State<VpnHomePage> {
   RoutingMode _routingMode = RoutingMode.fullTunnel;
   List<String> _allowedAppPackages = [];
   ProxySettings _proxySettings = const ProxySettings();
+  ConnectivityCheckSettings _connectivityCheckSettings =
+      const ConnectivityCheckSettings();
 
   int _navIndex = 0;
   final _logBuffer = LogBuffer();
   bool _logsStickToBottom = true;
   bool _logsWordWrap = true;
+  LogDisplayLevel _logsLevel = LogDisplayLevel.error;
 
   bool _busy = false;
   bool _tunnelUp = false;
@@ -73,6 +82,11 @@ class _VpnHomePageState extends State<VpnHomePage> {
   String? _activeAttemptId;
   DateTime? _connectStartedAt;
   bool _timedOutThisAttempt = false;
+  ConnectivityBadgeState _connectivityBadgeState = ConnectivityBadgeState.idle;
+  int? _connectivityLatencyMs;
+  bool get _hasActiveProfile =>
+      _activeProfileId != null &&
+      _profiles.any((p) => p.id == _activeProfileId);
 
   void _setHomeState(VoidCallback update) {
     setState(update);
@@ -87,6 +101,8 @@ class _VpnHomePageState extends State<VpnHomePage> {
   void initState() {
     super.initState();
     _profileStore = widget.profileStore ?? ProfileStore();
+    _connectivityChecker =
+        widget.connectivityChecker ?? DirectConnectivityChecker();
     _logsScroll.addListener(_syncLogsStickToBottom);
     _client = VpnClient(
       onTunnelState: _onTunnelFromHost,

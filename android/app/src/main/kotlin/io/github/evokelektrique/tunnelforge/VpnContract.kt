@@ -7,9 +7,11 @@ object VpnContract {
     const val PREPARE_VPN = "prepareVpn"
     const val CONNECT = "connect"
     const val DISCONNECT = "disconnect"
+    const val SET_LOG_LEVEL = "setLogLevel"
 
     /** Correlation id for one connect attempt (Flutter -> Android). */
     const val ARG_ATTEMPT_ID = "attemptId"
+    const val ARG_LOG_LEVEL = "logLevel"
 
     const val ARG_SERVER = "server"
     const val ARG_USER = "user"
@@ -49,8 +51,13 @@ object VpnContract {
     const val ON_ENGINE_LOG = "onEngineLog"
 
     const val ARG_ENGINE_LOG_LEVEL = "engineLogLevel"
+    const val ARG_ENGINE_LOG_SOURCE = "engineLogSource"
     const val ARG_ENGINE_LOG_TAG = "engineLogTag"
     const val ARG_ENGINE_LOG_MESSAGE = "engineLogMessage"
+
+    const val LOG_SOURCE_DART = "dart"
+    const val LOG_SOURCE_KOTLIN = "kotlin"
+    const val LOG_SOURCE_NATIVE = "native"
 
     const val TUNNEL_CONNECTING = "connecting"
     const val TUNNEL_CONNECTED = "connected"

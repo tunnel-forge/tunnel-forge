@@ -198,6 +198,8 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
         : dnsCount > 1
         ? '$dnsCount resolvers configured. Proxy mode falls back in order.'
         : 'Separate with commas. Order matters.';
+    final mtuHelper =
+        'Range ${Profile.minVpnMtu}-${Profile.maxVpnMtu}. Use ${Profile.defaultVpnMtu} unless you need a smaller MTU.';
 
     if (_loadError != null) {
       return Padding(
@@ -309,9 +311,8 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
                         decoration: _deco(
                           context,
                           label: 'TUN MTU',
-                          hint:
-                              '${Profile.defaultVpnMtu} (typical for PPP MRU 1280)',
-                        ),
+                          hint: 'Default ${Profile.defaultVpnMtu}',
+                        ).copyWith(helperText: mtuHelper),
                       ),
                     ],
                   ),

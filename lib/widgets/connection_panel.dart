@@ -2,7 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 
-enum _ConnectionVisualState { idle, connecting, connected, disconnecting }
+enum _ConnectionVisualState {
+  idle,
+  unavailable,
+  connecting,
+  connected,
+  disconnecting,
+}
+
+enum ConnectivityBadgeState { idle, checking, success, failure }
 
 /// VPN tab: active profile summary and the large connect / disconnect control.
 class ConnectionPanel extends StatelessWidget {
@@ -15,8 +23,13 @@ class ConnectionPanel extends StatelessWidget {
     required this.busy,
     required this.tunnelUp,
     required this.awaitingTunnel,
+    required this.canStartConnection,
     required this.connectButtonLabel,
     required this.onPrimary,
+    required this.onUnavailablePrimaryTap,
+    required this.connectivityBadgeState,
+    required this.connectivityBadgeLabel,
+    required this.onConnectivityTap,
     required this.colorScheme,
     required this.textTheme,
   });
@@ -28,14 +41,20 @@ class ConnectionPanel extends StatelessWidget {
   final bool busy;
   final bool tunnelUp;
   final bool awaitingTunnel;
+  final bool canStartConnection;
   final String connectButtonLabel;
   final VoidCallback onPrimary;
+  final VoidCallback onUnavailablePrimaryTap;
+  final ConnectivityBadgeState connectivityBadgeState;
+  final String connectivityBadgeLabel;
+  final VoidCallback onConnectivityTap;
   final ColorScheme colorScheme;
   final TextTheme textTheme;
 
   @override
   Widget build(BuildContext context) {
     final pickerEnabled = !profilesLoading;
+    final profileMissing = !canStartConnection && !tunnelUp;
     final locked = busy || (awaitingTunnel && !tunnelUp);
     final showProgress = busy || (awaitingTunnel && !tunnelUp);
     final theme = Theme.of(context);
@@ -48,7 +67,9 @@ class ConnectionPanel extends StatelessWidget {
               : _ConnectionVisualState.connected)
         : (showProgress
               ? _ConnectionVisualState.connecting
-              : _ConnectionVisualState.idle);
+              : (profileMissing
+                    ? _ConnectionVisualState.unavailable
+                    : _ConnectionVisualState.idle));
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -134,6 +155,8 @@ class ConnectionPanel extends StatelessWidget {
                   builder: (context) {
                     final buttonBg = switch (visualState) {
                       _ConnectionVisualState.idle => semanticColors.connectIdle,
+                      _ConnectionVisualState.unavailable =>
+                        colorScheme.surfaceContainerHighest,
                       _ConnectionVisualState.connecting =>
                         colorScheme.surfaceContainerHighest,
                       _ConnectionVisualState.connected =>
@@ -144,6 +167,8 @@ class ConnectionPanel extends StatelessWidget {
                     final buttonFg = switch (visualState) {
                       _ConnectionVisualState.idle =>
                         semanticColors.onConnectIdle,
+                      _ConnectionVisualState.unavailable =>
+                        colorScheme.onSurfaceVariant,
                       _ConnectionVisualState.connecting =>
                         colorScheme.onSurfaceVariant,
                       _ConnectionVisualState.connected =>
@@ -153,6 +178,8 @@ class ConnectionPanel extends StatelessWidget {
                     };
                     final statusColor = switch (visualState) {
                       _ConnectionVisualState.idle =>
+                        colorScheme.onSurfaceVariant,
+                      _ConnectionVisualState.unavailable =>
                         colorScheme.onSurfaceVariant,
                       _ConnectionVisualState.connecting =>
                         semanticColors.connecting,
@@ -164,6 +191,8 @@ class ConnectionPanel extends StatelessWidget {
                     final ringColor = switch (visualState) {
                       _ConnectionVisualState.idle =>
                         colorScheme.outline.withValues(alpha: 0.28),
+                      _ConnectionVisualState.unavailable =>
+                        colorScheme.outline.withValues(alpha: 0.28),
                       _ConnectionVisualState.connecting =>
                         semanticColors.connecting.withValues(alpha: 0.30),
                       _ConnectionVisualState.connected =>
@@ -174,6 +203,8 @@ class ConnectionPanel extends StatelessWidget {
                     final statusBadgeBackground = switch (visualState) {
                       _ConnectionVisualState.idle =>
                         colorScheme.surfaceContainerHighest,
+                      _ConnectionVisualState.unavailable =>
+                        colorScheme.surfaceContainerHighest,
                       _ConnectionVisualState.connecting =>
                         semanticColors.connecting.withValues(alpha: 0.16),
                       _ConnectionVisualState.connected =>
@@ -182,6 +213,7 @@ class ConnectionPanel extends StatelessWidget {
                         semanticColors.disconnect.withValues(alpha: 0.16),
                     };
                     final spinnerColor = switch (visualState) {
+                      _ConnectionVisualState.unavailable => buttonFg,
                       _ConnectionVisualState.connecting =>
                         semanticColors.connecting,
                       _ConnectionVisualState.disconnecting =>
@@ -190,6 +222,17 @@ class ConnectionPanel extends StatelessWidget {
                       _ConnectionVisualState.connected =>
                         semanticColors.onDisconnect,
                     };
+                    final connectivityColor = switch (connectivityBadgeState) {
+                      ConnectivityBadgeState.idle =>
+                        colorScheme.onSurfaceVariant,
+                      ConnectivityBadgeState.checking =>
+                        semanticColors.connecting,
+                      ConnectivityBadgeState.success =>
+                        semanticColors.connected,
+                      ConnectivityBadgeState.failure =>
+                        semanticColors.disconnect,
+                    };
+                    final showConnectivity = tunnelUp && !busy;
 
                     return Column(
                       children: [
@@ -203,67 +246,142 @@ class ConnectionPanel extends StatelessWidget {
                               border: Border.all(color: ringColor, width: 1.5),
                             ),
                             alignment: Alignment.center,
-                            child: FilledButton(
-                              key: const Key('vpn_connect'),
-                              onPressed: locked ? null : onPrimary,
-                              style: FilledButton.styleFrom(
-                                shape: const CircleBorder(),
-                                fixedSize: const Size.square(136),
-                                backgroundColor: buttonBg,
-                                foregroundColor: buttonFg,
-                                disabledBackgroundColor: buttonBg,
-                                disabledForegroundColor: buttonFg,
-                                elevation: 0,
-                              ),
-                              child: showProgress
-                                  ? SizedBox(
-                                      width: 32,
-                                      height: 32,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2.6,
-                                        color: spinnerColor,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                FilledButton(
+                                  key: const Key('vpn_connect'),
+                                  onPressed: locked || profileMissing
+                                      ? null
+                                      : onPrimary,
+                                  style: FilledButton.styleFrom(
+                                    shape: const CircleBorder(),
+                                    fixedSize: const Size.square(136),
+                                    backgroundColor: buttonBg,
+                                    foregroundColor: buttonFg,
+                                    disabledBackgroundColor: buttonBg,
+                                    disabledForegroundColor: buttonFg,
+                                    elevation: 0,
+                                  ),
+                                  child: showProgress
+                                      ? SizedBox(
+                                          width: 32,
+                                          height: 32,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2.6,
+                                            color: spinnerColor,
+                                          ),
+                                        )
+                                      : Icon(
+                                          Icons.power_settings_new,
+                                          size: 44,
+                                          color: buttonFg,
+                                        ),
+                                ),
+                                if (profileMissing)
+                                  SizedBox(
+                                    width: 136,
+                                    height: 136,
+                                    child: Material(
+                                      color: Colors.transparent,
+                                      shape: const CircleBorder(),
+                                      child: InkWell(
+                                        key: const Key(
+                                          'vpn_connect_disabled_tap_target',
+                                        ),
+                                        customBorder: const CircleBorder(),
+                                        onTap: onUnavailablePrimaryTap,
                                       ),
-                                    )
-                                  : Icon(
-                                      Icons.power_settings_new,
-                                      size: 44,
-                                      color: buttonFg,
                                     ),
+                                  ),
+                              ],
                             ),
                           ),
                         ),
                         const SizedBox(height: 14),
-                        Container(
+                        Material(
                           key: const Key('vpn_status_badge'),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: statusBadgeBackground,
+                          color: statusBadgeBackground,
+                          borderRadius: BorderRadius.circular(999),
+                          child: InkWell(
+                            onTap: showConnectivity ? onConnectivityTap : null,
                             borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  color: statusColor,
-                                  shape: BoxShape.circle,
-                                ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
                               ),
-                              const SizedBox(width: 8),
-                              Text(
-                                connectButtonLabel,
-                                key: const Key('vpn_status'),
-                                style: textTheme.labelMedium?.copyWith(
-                                  color: statusColor,
-                                  fontWeight: FontWeight.w700,
-                                ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      color: statusColor,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    connectButtonLabel,
+                                    key: const Key('vpn_status'),
+                                    style: textTheme.labelMedium?.copyWith(
+                                      color: statusColor,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  if (showConnectivity) ...[
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                      ),
+                                      child: Container(
+                                        width: 1,
+                                        height: 12,
+                                        color: statusColor.withValues(
+                                          alpha: 0.28,
+                                        ),
+                                      ),
+                                    ),
+                                    if (connectivityBadgeState ==
+                                        ConnectivityBadgeState.checking)
+                                      SizedBox(
+                                        key: const Key(
+                                          'connectivity_status_spinner',
+                                        ),
+                                        width: 12,
+                                        height: 12,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: connectivityColor,
+                                        ),
+                                      )
+                                    else
+                                      Container(
+                                        key: const Key(
+                                          'connectivity_status_dot',
+                                        ),
+                                        width: 8,
+                                        height: 8,
+                                        decoration: BoxDecoration(
+                                          color: connectivityColor,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      connectivityBadgeLabel,
+                                      key: const Key('connectivity_status'),
+                                      style: textTheme.labelMedium?.copyWith(
+                                        color: connectivityColor,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
-                            ],
+                            ),
                           ),
                         ),
                       ],

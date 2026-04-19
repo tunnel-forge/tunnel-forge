@@ -25,6 +25,7 @@ void installVpnChannelMock(
               return onConnect(call);
             }
             return null;
+          case VpnContract.setLogLevel:
           case VpnContract.disconnect:
             return null;
           default:

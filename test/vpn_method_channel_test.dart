@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:tunnel_forge/profile_models.dart';
+import 'package:tunnel_forge/utils/log_entry.dart';
 import 'package:tunnel_forge/vpn_client.dart';
 import 'package:tunnel_forge/vpn_contract.dart';
 
@@ -27,6 +28,7 @@ void main() {
             switch (call.method) {
               case VpnContract.prepareVpn:
                 return true;
+              case VpnContract.setLogLevel:
               case VpnContract.connect:
               case VpnContract.disconnect:
               case VpnContract.onEngineLog:
@@ -173,6 +175,73 @@ void main() {
       final client = VpnClient();
       await client.disconnect();
       expect(calls.single.method, VpnContract.disconnect);
+    });
+
+    test('setLogLevel', () async {
+      final client = VpnClient();
+      await client.setLogLevel(LogDisplayLevel.warning);
+      expect(calls.single.method, VpnContract.setLogLevel);
+      expect(calls.single.arguments, <String, Object?>{
+        VpnContract.argLogLevel: 'warning',
+      });
+    });
+
+    test('engine log callback parses source when present', () async {
+      LogLevel? seenLevel;
+      LogSource? seenSource;
+      String? seenTag;
+      String? seenMessage;
+      final client = VpnClient(
+        onEngineLog: (level, source, tag, message) {
+          seenLevel = level;
+          seenSource = source;
+          seenTag = tag;
+          seenMessage = message;
+        },
+      );
+      const codec = StandardMethodCodec();
+      final data = codec.encodeMethodCall(
+        const MethodCall(VpnContract.onEngineLog, <String, Object?>{
+          VpnContract.argEngineLogLevel: 5,
+          VpnContract.argEngineLogSource: 'native',
+          VpnContract.argEngineLogTag: 'tunnel_engine',
+          VpnContract.argEngineLogMessage: 'hello',
+        }),
+      );
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(VpnContract.channel, data, (ByteData? _) {});
+      await Future<void>.delayed(Duration.zero);
+      client.dispose();
+
+      expect(seenLevel, LogLevel.warning);
+      expect(seenSource, LogSource.native);
+      expect(seenTag, 'tunnel_engine');
+      expect(seenMessage, 'hello');
+    });
+
+    test('engine log callback defaults source to kotlin when absent', () async {
+      LogSource? seenSource;
+      final client = VpnClient(
+        onEngineLog: (_, source, tag, message) {
+          expect(tag, 'MainActivity');
+          expect(message, 'hello');
+          seenSource = source;
+        },
+      );
+      const codec = StandardMethodCodec();
+      final data = codec.encodeMethodCall(
+        const MethodCall(VpnContract.onEngineLog, <String, Object?>{
+          VpnContract.argEngineLogLevel: 4,
+          VpnContract.argEngineLogTag: 'MainActivity',
+          VpnContract.argEngineLogMessage: 'hello',
+        }),
+      );
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(VpnContract.channel, data, (ByteData? _) {});
+      await Future<void>.delayed(Duration.zero);
+      client.dispose();
+
+      expect(seenSource, LogSource.kotlin);
     });
   });
 }
