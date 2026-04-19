@@ -1,0 +1,5 @@
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path_android: "resources/logo/tf-xxxhdpi.png"
+  min_sdk_android: 21
