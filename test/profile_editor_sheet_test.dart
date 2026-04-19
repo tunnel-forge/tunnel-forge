@@ -67,6 +67,27 @@ void main() {
     );
   });
 
+  testWidgets('shows clearer mtu hint and helper copy', (tester) async {
+    final store = await buildStore();
+    const profile = Profile(
+      id: 'profile-mtu',
+      displayName: 'Office',
+      server: 'vpn.example.com',
+      user: 'alice',
+      dns: '1.1.1.1',
+    );
+    await store.upsertProfile(profile, password: 'pw', psk: '');
+
+    await pumpHost(tester, store: store, profileId: profile.id);
+
+    final mtuField = tester.widgetList<TextField>(find.byType(TextField)).last;
+    expect(mtuField.decoration?.hintText, 'Default ${Profile.defaultVpnMtu}');
+    expect(
+      mtuField.decoration?.helperText,
+      'Range ${Profile.minVpnMtu}-${Profile.maxVpnMtu}. Use ${Profile.defaultVpnMtu} unless you need a smaller MTU.',
+    );
+  });
+
   testWidgets('invalid dns entry blocks save with a snackbar', (tester) async {
     final store = await buildStore();
     const profile = Profile(
