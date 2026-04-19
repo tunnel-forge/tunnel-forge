@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../profile_models.dart';
+import '../theme.dart';
 
 /// Theme mode, connection mode, VPN routing, and global local-proxy settings.
 class SettingsPanel extends StatefulWidget {
@@ -85,6 +86,9 @@ class _SettingsPanelState extends State<SettingsPanel> {
         ? 'No apps selected. Choose at least one app to connect.'
         : '${widget.allowedAppPackages.length} app${widget.allowedAppPackages.length == 1 ? '' : 's'} will use VPN';
     final proxyMode = widget.connectionMode == ConnectionMode.proxyOnly;
+    final semanticColors =
+        Theme.of(context).extension<AppSemanticColors>() ??
+        AppSemanticColors.fallback(widget.colorScheme.brightness);
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -191,7 +195,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                     enabled: !widget.routingLocked,
                     leading: Icon(
                       Icons.tune,
-                      color: widget.colorScheme.primary,
+                      color: widget.colorScheme.onSurfaceVariant,
                     ),
                     title: const Text('Select apps'),
                     subtitle: Text(
@@ -226,6 +230,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
             child: Column(
               children: [
                 SwitchListTile(
+                  contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                   title: const Text('HTTP proxy'),
                   subtitle: Text(
                     'Apps that support manual HTTP proxy settings can use 127.0.0.1:${widget.proxySettings.httpPort}',
@@ -241,7 +246,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                         ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
                   child: TextFormField(
                     key: const Key('proxy_http_port_field'),
                     controller: _httpPortController,
@@ -262,6 +267,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                 ),
                 const Divider(height: 1),
                 SwitchListTile(
+                  contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                   title: const Text('SOCKS5 proxy'),
                   subtitle: Text(
                     'Apps that support SOCKS5 can use 127.0.0.1:${widget.proxySettings.socksPort}',
@@ -277,7 +283,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                         ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
                   child: TextFormField(
                     key: const Key('proxy_socks_port_field'),
                     controller: _socksPortController,
@@ -303,10 +309,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
           Card(
             margin: EdgeInsets.zero,
             child: ListTile(
-              leading: Icon(
-                Icons.info_outline,
-                color: widget.colorScheme.primary,
-              ),
+              leading: Icon(Icons.info_outline, color: semanticColors.info),
               title: const Text('Proxy endpoints'),
               subtitle: Text(
                 [

@@ -65,7 +65,7 @@ class _LogsPanelState extends State<LogsPanel> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Connect to see engine output here.',
+                'Connection events and diagnostics will appear here.',
                 textAlign: TextAlign.center,
                 style: widget.textTheme.bodySmall?.copyWith(
                   color: widget.colorScheme.onSurfaceVariant,

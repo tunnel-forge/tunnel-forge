@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../theme.dart';
+
+enum _ConnectionVisualState { idle, connecting, connected, disconnecting }
+
 /// VPN tab: active profile summary and the large connect / disconnect control.
 class ConnectionPanel extends StatelessWidget {
   const ConnectionPanel({
@@ -34,14 +38,30 @@ class ConnectionPanel extends StatelessWidget {
     final pickerEnabled = !profilesLoading;
     final locked = busy || (awaitingTunnel && !tunnelUp);
     final showProgress = busy || (awaitingTunnel && !tunnelUp);
+    final theme = Theme.of(context);
+    final semanticColors =
+        theme.extension<AppSemanticColors>() ??
+        AppSemanticColors.fallback(theme.brightness);
+    final visualState = tunnelUp
+        ? (busy
+              ? _ConnectionVisualState.disconnecting
+              : _ConnectionVisualState.connected)
+        : (showProgress
+              ? _ConnectionVisualState.connecting
+              : _ConnectionVisualState.idle);
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final centerGap = (constraints.maxHeight * 0.16).clamp(30.0, 110.0);
+        final availableHeight =
+            constraints.hasBoundedHeight && constraints.maxHeight.isFinite
+            ? constraints.maxHeight
+            : 0.0;
+        final centerGap = (availableHeight * 0.16).clamp(30.0, 110.0);
+        final minHeight = (availableHeight - 28).clamp(0.0, double.infinity);
         return SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
           child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: constraints.maxHeight - 28),
+            constraints: BoxConstraints(minHeight: minHeight),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -63,7 +83,7 @@ class ConnectionPanel extends StatelessWidget {
                         children: [
                           Icon(
                             Icons.folder_outlined,
-                            color: colorScheme.primary,
+                            color: colorScheme.onSurfaceVariant,
                             size: 26,
                           ),
                           const SizedBox(width: 12),
@@ -112,32 +132,70 @@ class ConnectionPanel extends StatelessWidget {
                 SizedBox(height: centerGap),
                 Builder(
                   builder: (context) {
-                    final bg = tunnelUp
-                        ? colorScheme.tertiary
-                        : colorScheme.primary;
-                    final fg =
-                        ThemeData.estimateBrightnessForColor(bg) ==
-                            Brightness.dark
-                        ? Colors.white
-                        : const Color(0xFF1B1B1F);
-                    final disabledFg = colorScheme.onSurfaceVariant;
-                    final effectiveFg = locked ? disabledFg : fg;
-                    final buttonBg = locked
-                        ? colorScheme.surfaceContainerHighest
-                        : bg;
-                    final spinnerColor =
-                        ThemeData.estimateBrightnessForColor(buttonBg) ==
-                            Brightness.dark
-                        ? Colors.white
-                        : const Color(0xFF1B1B1F);
-                    final ringColor = locked
-                        ? colorScheme.outline.withValues(alpha: 0.18)
-                        : bg.withValues(alpha: 0.20);
+                    final buttonBg = switch (visualState) {
+                      _ConnectionVisualState.idle => semanticColors.connectIdle,
+                      _ConnectionVisualState.connecting =>
+                        colorScheme.surfaceContainerHighest,
+                      _ConnectionVisualState.connected =>
+                        semanticColors.disconnect,
+                      _ConnectionVisualState.disconnecting =>
+                        semanticColors.disconnect,
+                    };
+                    final buttonFg = switch (visualState) {
+                      _ConnectionVisualState.idle =>
+                        semanticColors.onConnectIdle,
+                      _ConnectionVisualState.connecting =>
+                        colorScheme.onSurfaceVariant,
+                      _ConnectionVisualState.connected =>
+                        semanticColors.onDisconnect,
+                      _ConnectionVisualState.disconnecting =>
+                        semanticColors.onDisconnect,
+                    };
+                    final statusColor = switch (visualState) {
+                      _ConnectionVisualState.idle =>
+                        colorScheme.onSurfaceVariant,
+                      _ConnectionVisualState.connecting =>
+                        semanticColors.connecting,
+                      _ConnectionVisualState.connected =>
+                        semanticColors.connected,
+                      _ConnectionVisualState.disconnecting =>
+                        semanticColors.disconnect,
+                    };
+                    final ringColor = switch (visualState) {
+                      _ConnectionVisualState.idle =>
+                        colorScheme.outline.withValues(alpha: 0.28),
+                      _ConnectionVisualState.connecting =>
+                        semanticColors.connecting.withValues(alpha: 0.30),
+                      _ConnectionVisualState.connected =>
+                        semanticColors.disconnect.withValues(alpha: 0.32),
+                      _ConnectionVisualState.disconnecting =>
+                        semanticColors.disconnect.withValues(alpha: 0.32),
+                    };
+                    final statusBadgeBackground = switch (visualState) {
+                      _ConnectionVisualState.idle =>
+                        colorScheme.surfaceContainerHighest,
+                      _ConnectionVisualState.connecting =>
+                        semanticColors.connecting.withValues(alpha: 0.16),
+                      _ConnectionVisualState.connected =>
+                        semanticColors.connected.withValues(alpha: 0.16),
+                      _ConnectionVisualState.disconnecting =>
+                        semanticColors.disconnect.withValues(alpha: 0.16),
+                    };
+                    final spinnerColor = switch (visualState) {
+                      _ConnectionVisualState.connecting =>
+                        semanticColors.connecting,
+                      _ConnectionVisualState.disconnecting =>
+                        semanticColors.onDisconnect,
+                      _ConnectionVisualState.idle => buttonFg,
+                      _ConnectionVisualState.connected =>
+                        semanticColors.onDisconnect,
+                    };
 
                     return Column(
                       children: [
                         Center(
                           child: Container(
+                            key: const Key('vpn_action_ring'),
                             width: 172,
                             height: 172,
                             decoration: BoxDecoration(
@@ -152,10 +210,9 @@ class ConnectionPanel extends StatelessWidget {
                                 shape: const CircleBorder(),
                                 fixedSize: const Size.square(136),
                                 backgroundColor: buttonBg,
-                                foregroundColor: effectiveFg,
-                                disabledBackgroundColor:
-                                    colorScheme.surfaceContainerHighest,
-                                disabledForegroundColor: disabledFg,
+                                foregroundColor: buttonFg,
+                                disabledBackgroundColor: buttonBg,
+                                disabledForegroundColor: buttonFg,
                                 elevation: 0,
                               ),
                               child: showProgress
@@ -170,19 +227,44 @@ class ConnectionPanel extends StatelessWidget {
                                   : Icon(
                                       Icons.power_settings_new,
                                       size: 44,
-                                      color: effectiveFg,
+                                      color: buttonFg,
                                     ),
                             ),
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        Text(
-                          connectButtonLabel,
-                          key: const Key('vpn_status'),
-                          style: textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
+                        const SizedBox(height: 14),
+                        Container(
+                          key: const Key('vpn_status_badge'),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
                           ),
-                          textAlign: TextAlign.center,
+                          decoration: BoxDecoration(
+                            color: statusBadgeBackground,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: statusColor,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                connectButtonLabel,
+                                key: const Key('vpn_status'),
+                                style: textTheme.labelMedium?.copyWith(
+                                  color: statusColor,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     );
