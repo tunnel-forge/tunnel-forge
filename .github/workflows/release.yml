@@ -113,12 +113,25 @@ jobs:
             cp build/app/outputs/flutter-apk/app-x86_64-release.apk \
               "dist/tunnel-forge-${{ steps.tag.outputs.tag }}-android-x86_64.apk"
           fi
+          (
+            cd dist
+            sha256sum ./*.apk > SHA256SUMS
+            while IFS= read -r line; do
+              checksum="${line%% *}"
+              file="${line#* }"
+              file="${file#* }"
+              printf '%s  %s\n' "${checksum}" "${file}" > "${file}.sha256"
+            done < SHA256SUMS
+          )
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v6
         with:
           name: tunnel-forge-${{ steps.tag.outputs.tag }}-android-release
-          path: dist/*.apk
+          path: |
+            dist/*.apk
+            dist/*.sha256
+            dist/SHA256SUMS
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -126,11 +139,11 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           if gh release view "${{ steps.tag.outputs.tag }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release upload "${{ steps.tag.outputs.tag }}" dist/*.apk \
+            gh release upload "${{ steps.tag.outputs.tag }}" dist/* \
               --repo "${{ github.repository }}" \
               --clobber
           else
-            gh release create "${{ steps.tag.outputs.tag }}" dist/*.apk \
+            gh release create "${{ steps.tag.outputs.tag }}" dist/* \
               --repo "${{ github.repository }}" \
               --verify-tag \
               --generate-notes \
