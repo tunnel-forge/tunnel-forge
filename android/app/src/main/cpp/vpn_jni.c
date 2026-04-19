@@ -1,27 +1,19 @@
 /*
- * JNI surface for Kotlin VpnBridge: registers JavaVM, forwards tunnel run / negotiate / stop
- * to tunnel_loop.c. Every jstring is converted with GetStringUTFChars and released on all paths.
+ * JNI surface for Kotlin VpnBridge: explicit registration avoids package-coupled
+ * Java_* symbol names. Every jstring is converted with GetStringUTFChars and released on all paths.
  */
 #include "engine.h"
 
 #include <android/log.h>
 #include <stdlib.h>
-#include <string.h>
 
 #define LOG_TAG "tunnel_engine"
+#define VPN_BRIDGE_CLASS "io/github/evokelektrique/tunnelforge/VpnBridge"
 
 void tunnel_loop_stop(void);
 
-JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
-  (void)reserved;
-  engine_set_java_vm(vm);
-  return JNI_VERSION_1_6;
-}
-
-JNIEXPORT jint JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeRunTunnel(JNIEnv *env, jclass clazz, jint tun_fd,
-                                                                                jstring jserver, jstring juser,
-                                                                                jstring jpassword, jstring jpsk,
-                                                                                jint tun_mtu) {
+static jint native_run_tunnel(JNIEnv *env, jclass clazz, jint tun_fd, jstring jserver, jstring juser, jstring jpassword,
+                              jstring jpsk, jint tun_mtu) {
   (void)clazz;
   jint out = (jint)TUNNEL_EXIT_BAD_ARGS;
   const char *server = (*env)->GetStringUTFChars(env, jserver, NULL);
@@ -33,17 +25,17 @@ JNIEXPORT jint JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeRunTunnel(
     goto cleanup;
   }
   out = (jint)tunnel_loop_run(tun_fd, server, user, password, psk, (int)tun_mtu);
+
 cleanup:
-  if (server) (*env)->ReleaseStringUTFChars(env, jserver, server);
-  if (user) (*env)->ReleaseStringUTFChars(env, juser, user);
-  if (password) (*env)->ReleaseStringUTFChars(env, jpassword, password);
-  if (psk) (*env)->ReleaseStringUTFChars(env, jpsk, psk);
+  if (server != NULL) (*env)->ReleaseStringUTFChars(env, jserver, server);
+  if (user != NULL) (*env)->ReleaseStringUTFChars(env, juser, user);
+  if (password != NULL) (*env)->ReleaseStringUTFChars(env, jpassword, password);
+  if (psk != NULL) (*env)->ReleaseStringUTFChars(env, jpsk, psk);
   return out;
 }
 
-JNIEXPORT jint JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeNegotiate(
-    JNIEnv *env, jclass clazz, jstring jserver, jstring juser, jstring jpassword, jstring jpsk,
-    jint tun_mtu, jintArray jout_client_ipv4) {
+static jint native_negotiate(JNIEnv *env, jclass clazz, jstring jserver, jstring juser, jstring jpassword, jstring jpsk,
+                             jint tun_mtu, jintArray jout_client_ipv4) {
   (void)clazz;
   jint out = (jint)TUNNEL_EXIT_BAD_ARGS;
   const char *server = (*env)->GetStringUTFChars(env, jserver, NULL);
@@ -59,50 +51,49 @@ JNIEXPORT jint JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeNegotiate(
     jsize alen = (*env)->GetArrayLength(env, jout_client_ipv4);
     if (alen >= 4) {
       uint8_t b[4];
+      jint tmp[4];
       tunnel_negotiated_client_ipv4(b);
-      jint tmp[4] = {(jint)b[0], (jint)b[1], (jint)b[2], (jint)b[3]};
+      tmp[0] = (jint)b[0];
+      tmp[1] = (jint)b[1];
+      tmp[2] = (jint)b[2];
+      tmp[3] = (jint)b[3];
       (*env)->SetIntArrayRegion(env, jout_client_ipv4, 0, 4, tmp);
     }
   }
+
 cleanup:
-  if (server) (*env)->ReleaseStringUTFChars(env, jserver, server);
-  if (user) (*env)->ReleaseStringUTFChars(env, juser, user);
-  if (password) (*env)->ReleaseStringUTFChars(env, jpassword, password);
-  if (psk) (*env)->ReleaseStringUTFChars(env, jpsk, psk);
+  if (server != NULL) (*env)->ReleaseStringUTFChars(env, jserver, server);
+  if (user != NULL) (*env)->ReleaseStringUTFChars(env, juser, user);
+  if (password != NULL) (*env)->ReleaseStringUTFChars(env, jpassword, password);
+  if (psk != NULL) (*env)->ReleaseStringUTFChars(env, jpsk, psk);
   return out;
 }
 
-JNIEXPORT void JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeSetSocketProtectionEnabled(JNIEnv *env,
-                                                                                                  jclass clazz,
-                                                                                                  jboolean enabled) {
+static void native_set_socket_protection_enabled(JNIEnv *env, jclass clazz, jboolean enabled) {
   (void)env;
   (void)clazz;
   engine_set_socket_protection_enabled(enabled ? 1 : 0);
 }
 
-JNIEXPORT jint JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeStartLoop(JNIEnv *env, jclass clazz,
-                                                                                 jint tun_fd) {
+static jint native_start_loop(JNIEnv *env, jclass clazz, jint tun_fd) {
   (void)env;
   (void)clazz;
   return (jint)tunnel_run_loop(tun_fd);
 }
 
-JNIEXPORT jint JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeStartProxyLoop(JNIEnv *env, jclass clazz) {
+static jint native_start_proxy_loop(JNIEnv *env, jclass clazz) {
   (void)env;
   (void)clazz;
   return (jint)tunnel_run_proxy_loop();
 }
 
-JNIEXPORT jboolean JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeIsProxyPacketBridgeActive(JNIEnv *env,
-                                                                                                     jclass clazz) {
+static jboolean native_is_proxy_packet_bridge_active(JNIEnv *env, jclass clazz) {
   (void)env;
   (void)clazz;
   return tunnel_proxy_is_bridge_active() ? JNI_TRUE : JNI_FALSE;
 }
 
-JNIEXPORT jint JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeQueueProxyOutboundPacket(JNIEnv *env,
-                                                                                                jclass clazz,
-                                                                                                jbyteArray jpacket) {
+static jint native_queue_proxy_outbound_packet(JNIEnv *env, jclass clazz, jbyteArray jpacket) {
   (void)clazz;
   if (jpacket == NULL) return (jint)TUNNEL_EXIT_BAD_ARGS;
   jsize len = (*env)->GetArrayLength(env, jpacket);
@@ -114,9 +105,7 @@ JNIEXPORT jint JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeQueueProxy
   return (jint)rc;
 }
 
-JNIEXPORT jbyteArray JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeReadProxyInboundPacket(JNIEnv *env,
-                                                                                                    jclass clazz,
-                                                                                                    jint max_len) {
+static jbyteArray native_read_proxy_inbound_packet(JNIEnv *env, jclass clazz, jint max_len) {
   (void)clazz;
   if (max_len <= 0) return NULL;
   uint8_t *buf = (uint8_t *)malloc((size_t)max_len);
@@ -134,8 +123,66 @@ JNIEXPORT jbyteArray JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeRead
   return out;
 }
 
-JNIEXPORT void JNICALL Java_com_example_tunnel_1forge_VpnBridge_nativeStopTunnel(JNIEnv *env, jclass clazz) {
+static void native_stop_tunnel(JNIEnv *env, jclass clazz) {
   (void)env;
   (void)clazz;
   tunnel_loop_stop();
+}
+
+static int register_vpn_bridge(JNIEnv *env) {
+  static const JNINativeMethod methods[] = {
+      {"nativeRunTunnel", "(ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)I",
+       (void *)native_run_tunnel},
+      {"nativeNegotiate", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I[I)I",
+       (void *)native_negotiate},
+      {"nativeSetSocketProtectionEnabled", "(Z)V", (void *)native_set_socket_protection_enabled},
+      {"nativeStartLoop", "(I)I", (void *)native_start_loop},
+      {"nativeStartProxyLoop", "()I", (void *)native_start_proxy_loop},
+      {"nativeIsProxyPacketBridgeActive", "()Z", (void *)native_is_proxy_packet_bridge_active},
+      {"nativeQueueProxyOutboundPacket", "([B)I", (void *)native_queue_proxy_outbound_packet},
+      {"nativeReadProxyInboundPacket", "(I)[B", (void *)native_read_proxy_inbound_packet},
+      {"nativeStopTunnel", "()V", (void *)native_stop_tunnel},
+  };
+  jclass bridge_class = (*env)->FindClass(env, VPN_BRIDGE_CLASS);
+  if (bridge_class == NULL) {
+    (*env)->ExceptionClear(env);
+    __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "JNI_OnLoad: could not find %s", VPN_BRIDGE_CLASS);
+    return -1;
+  }
+  if ((*env)->RegisterNatives(env, bridge_class, methods, (jint)(sizeof(methods) / sizeof(methods[0]))) != JNI_OK) {
+    (*env)->ExceptionClear(env);
+    (*env)->DeleteLocalRef(env, bridge_class);
+    __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "JNI_OnLoad: RegisterNatives failed for %s", VPN_BRIDGE_CLASS);
+    return -1;
+  }
+  (*env)->DeleteLocalRef(env, bridge_class);
+  return 0;
+}
+
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
+  (void)reserved;
+  JNIEnv *env = NULL;
+  if ((*vm)->GetEnv(vm, (void **)&env, JNI_VERSION_1_6) != JNI_OK || env == NULL) {
+    __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "JNI_OnLoad: GetEnv failed");
+    return JNI_ERR;
+  }
+  engine_set_java_vm(vm);
+  if (engine_jni_init(env) != 0) {
+    __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "JNI_OnLoad: engine_jni_init failed");
+    return JNI_ERR;
+  }
+  if (register_vpn_bridge(env) != 0) {
+    engine_jni_cleanup(env);
+    return JNI_ERR;
+  }
+  return JNI_VERSION_1_6;
+}
+
+JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
+  (void)reserved;
+  JNIEnv *env = NULL;
+  if ((*vm)->GetEnv(vm, (void **)&env, JNI_VERSION_1_6) == JNI_OK && env != NULL) {
+    engine_jni_cleanup(env);
+  }
+  engine_set_java_vm(NULL);
 }

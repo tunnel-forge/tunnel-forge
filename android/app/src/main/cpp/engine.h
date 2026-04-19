@@ -56,6 +56,8 @@ void tunnel_engine_log(int prio, const char *tag, const char *fmt, ...) __attrib
 
 void engine_set_java_vm(JavaVM *vm);
 JavaVM *engine_get_java_vm(void);
+int engine_jni_init(JNIEnv *env);
+void engine_jni_cleanup(JNIEnv *env);
 
 /** Dataplane counters for tunnel_run_loop (optional; used from tunnel_loop.c + ppp.c). */
 void engine_dp_note_tun_rx(void);
