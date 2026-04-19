@@ -130,7 +130,7 @@ jobs:
 
       - name: Upload Android test results to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v5
+        uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1.2.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: android/app/build/test-results/testDebugUnitTest/*.xml
