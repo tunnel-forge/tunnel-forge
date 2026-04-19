@@ -454,8 +454,8 @@ class TunnelVpnService : VpnService() {
         private const val NOTIFICATION_ID = 7101
         private const val REQUEST_CODE_DISCONNECT = 7102
 
-        /** When [EXTRA_MTU] is absent or invalid; aligns with typical PPP MRU 1280 + 2-byte ACFC prefix. */
-        const val DEFAULT_TUN_MTU = 1278
+        /** When [EXTRA_MTU] is absent or invalid. */
+        const val DEFAULT_TUN_MTU = 1450
         const val DEFAULT_DNS_SERVER = "8.8.8.8"
 
         private const val MIN_TUN_MTU = 576

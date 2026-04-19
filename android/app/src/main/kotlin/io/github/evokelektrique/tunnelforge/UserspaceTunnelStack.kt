@@ -573,7 +573,7 @@ class BridgeUserspaceTunnelStack(
         private const val MAX_TCP_OPTION_VALUE = 0xffff
         private const val DEFAULT_CLIENT_IPV4 = "10.0.0.2"
         private const val DEFAULT_DNS_SERVER = "8.8.8.8"
-        private const val DEFAULT_LINK_MTU = 1278
+        private const val DEFAULT_LINK_MTU = 1450
         private const val DEFAULT_FAILURE_REASON = "TCP forwarding over the proxy packet bridge is not attached yet."
         private const val DEFAULT_CONNECT_TIMEOUT_MS = 10_000L
     }

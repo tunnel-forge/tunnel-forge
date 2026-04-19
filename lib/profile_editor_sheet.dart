@@ -309,8 +309,7 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
                         decoration: _deco(
                           context,
                           label: 'TUN MTU',
-                          hint:
-                              '${Profile.defaultVpnMtu} (typical for PPP MRU 1280)',
+                          hint: '${Profile.defaultVpnMtu}',
                         ),
                       ),
                     ],

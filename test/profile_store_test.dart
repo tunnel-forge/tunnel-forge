@@ -121,6 +121,11 @@ void main() {
       expect(row.psk, 'psk1');
     });
 
+    test('starts empty without seeding a default profile', () async {
+      expect(await store.loadProfiles(), isEmpty);
+      expect(await store.loadLastProfileId(), isNull);
+    });
+
     test('persists connection mode and proxy settings', () async {
       await store.saveConnectionMode(ConnectionMode.proxyOnly);
       await store.saveProxySettings(

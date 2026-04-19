@@ -25,7 +25,6 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
       _setHomeState(() => _profilesLoading = true);
     }
     try {
-      await _profileStore.ensureDebugDefaultProfileIfEmpty();
       final list = await _profileStore.loadProfiles();
       final last = await _profileStore.loadLastProfileId();
       final connectionMode = await _profileStore.loadConnectionMode();

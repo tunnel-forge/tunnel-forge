@@ -106,12 +106,12 @@ class Profile {
     this.mtu = defaultVpnMtu,
   });
 
-  /// TUN interface MTU (bytes). Default fits common L2TP PPP MRU 1280 with 2-byte ACFC proto prefix.
-  static const int defaultVpnMtu = 1278;
+  /// TUN interface MTU (bytes). Shared default for new profiles and quick-connect.
+  static const int defaultVpnMtu = 1450;
   static const String defaultDns = '8.8.8.8';
 
   static const int minVpnMtu = 576;
-  static const int maxVpnMtu = 1500;
+  static const int maxVpnMtu = 1450;
 
   final String id;
   final String displayName;

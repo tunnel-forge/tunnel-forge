@@ -278,6 +278,33 @@ void main() {
     expect(find.byKey(const Key('profile_picker_tile')), findsOneWidget);
   });
 
+  testWidgets('cold start with empty prefs shows no saved profile state', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final methods = <String>[];
+    installVpnChannelMock(methods);
+    addTearDown(uninstallVpnChannelMock);
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 50; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(find.text('No saved profile'), findsOneWidget);
+    expect(find.text('Create your first profile'), findsOneWidget);
+  });
+
   testWidgets('proxy-only skips VPN prepare and sends connect', (
     WidgetTester tester,
   ) async {
