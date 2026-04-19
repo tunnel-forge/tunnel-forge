@@ -31,6 +31,7 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
       final proxySettings = await _profileStore.loadProxySettings();
       final connectivityCheckSettings = await _profileStore
           .loadConnectivityCheckSettings();
+      final logDisplayLevel = await _profileStore.loadLogDisplayLevel();
       if (!mounted) return;
       if (last != null && list.any((e) => e.id == last)) {
         final row = await _profileStore.loadProfileWithSecrets(last);
@@ -43,8 +44,10 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
             _connectionMode = connectionMode;
             _proxySettings = proxySettings;
             _connectivityCheckSettings = connectivityCheckSettings;
+            _logsLevel = logDisplayLevel;
             _applyProfileToControllers(row.profile, row.password, row.psk);
           });
+          await _client.setLogLevel(logDisplayLevel);
           return;
         }
       }
@@ -55,8 +58,10 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
         _connectionMode = connectionMode;
         _proxySettings = proxySettings;
         _connectivityCheckSettings = connectivityCheckSettings;
+        _logsLevel = logDisplayLevel;
       });
       _applyNewFormTemplate();
+      await _client.setLogLevel(logDisplayLevel);
     } catch (_) {
       _setHomeStateIfMounted(() => _profilesLoading = false);
     }

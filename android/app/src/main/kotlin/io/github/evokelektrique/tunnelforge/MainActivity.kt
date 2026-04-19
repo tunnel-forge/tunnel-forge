@@ -198,6 +198,12 @@ class MainActivity : FlutterActivity() {
                     }
                     dispatchConnectIntent(intent, result, "vpn_call connect")
                 }
+                VpnContract.SET_LOG_LEVEL -> {
+                    val args = call.arguments as? Map<*, *>
+                    val rawLevel = args?.get(VpnContract.ARG_LOG_LEVEL) as? String
+                    EngineLogPolicy.update(EngineLogLevel.fromWireValue(rawLevel))
+                    result.success(null)
+                }
                 VpnContract.DISCONNECT -> {
                     AppLog.d(TAG, "vpn_call disconnect dispatched action=ACTION_STOP")
                     val intent = Intent(this, TunnelVpnService::class.java).apply {

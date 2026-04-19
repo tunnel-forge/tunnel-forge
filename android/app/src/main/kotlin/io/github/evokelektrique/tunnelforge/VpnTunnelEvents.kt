@@ -67,6 +67,7 @@ object VpnTunnelEvents {
         message: String,
         source: String = VpnContract.LOG_SOURCE_KOTLIN,
     ) {
+        if (!shouldForwardEngineLog(priority)) return
         invokeOnMain(
             VpnContract.ON_ENGINE_LOG,
             mapOf(
@@ -83,6 +84,9 @@ object VpnTunnelEvents {
     fun emitEngineLogFromNative(priority: Int, tag: String, message: String) {
         emitEngineLog(priority, tag, message, source = VpnContract.LOG_SOURCE_NATIVE)
     }
+
+    internal fun shouldForwardEngineLog(priority: Int): Boolean =
+        EngineLogPolicy.shouldForward(priority)
 
     private const val TAG = "VpnTunnelEvents"
 }

@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'profile_models.dart';
+import 'utils/log_entry.dart';
 
 /// Persists sensitive strings (password, PSK) outside [SharedPreferences].
 abstract class SecretStore {
@@ -61,6 +62,7 @@ class ProfileStore {
   static const prefsKeyProxySocksEnabled = 'proxy_socks_enabled_v1';
   static const prefsKeyProxySocksPort = 'proxy_socks_port_v1';
   static const prefsKeyConnectivityCheckUrl = 'connectivity_check_url_v1';
+  static const prefsKeyLogDisplayLevel = 'log_display_level_v1';
 
   final SharedPreferences? _prefsOverride;
   final SecretStore _secrets;
@@ -175,6 +177,16 @@ class ProfileStore {
       prefsKeyConnectivityCheckUrl,
       ConnectivityCheckSettings.normalizeUrl(settings.url),
     );
+  }
+
+  Future<LogDisplayLevel> loadLogDisplayLevel() async {
+    final p = await _prefs();
+    return LogDisplayLevel.fromStorage(p.getString(prefsKeyLogDisplayLevel));
+  }
+
+  Future<void> saveLogDisplayLevel(LogDisplayLevel level) async {
+    final p = await _prefs();
+    await p.setString(prefsKeyLogDisplayLevel, level.storageValue);
   }
 
   Future<void> _saveProfileList(List<Profile> list) async {

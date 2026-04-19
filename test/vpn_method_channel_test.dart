@@ -28,6 +28,7 @@ void main() {
             switch (call.method) {
               case VpnContract.prepareVpn:
                 return true;
+              case VpnContract.setLogLevel:
               case VpnContract.connect:
               case VpnContract.disconnect:
               case VpnContract.onEngineLog:
@@ -176,6 +177,15 @@ void main() {
       expect(calls.single.method, VpnContract.disconnect);
     });
 
+    test('setLogLevel', () async {
+      final client = VpnClient();
+      await client.setLogLevel(LogDisplayLevel.warning);
+      expect(calls.single.method, VpnContract.setLogLevel);
+      expect(calls.single.arguments, <String, Object?>{
+        VpnContract.argLogLevel: 'warning',
+      });
+    });
+
     test('engine log callback parses source when present', () async {
       LogLevel? seenLevel;
       LogSource? seenSource;
@@ -199,11 +209,7 @@ void main() {
         }),
       );
       await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .handlePlatformMessage(
-            VpnContract.channel,
-            data,
-            (ByteData? _) {},
-          );
+          .handlePlatformMessage(VpnContract.channel, data, (ByteData? _) {});
       await Future<void>.delayed(Duration.zero);
       client.dispose();
 
@@ -231,11 +237,7 @@ void main() {
         }),
       );
       await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .handlePlatformMessage(
-            VpnContract.channel,
-            data,
-            (ByteData? _) {},
-          );
+          .handlePlatformMessage(VpnContract.channel, data, (ByteData? _) {});
       await Future<void>.delayed(Duration.zero);
       client.dispose();
 

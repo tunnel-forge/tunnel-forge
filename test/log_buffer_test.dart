@@ -20,4 +20,26 @@ void main() {
       '12:34:56  WARNING  native/tunnel_engine  example warning',
     );
   });
+
+  test('log display levels use the requested cumulative ladder', () {
+    expect(LogDisplayLevel.info.includes(LogLevel.info), isTrue);
+    expect(LogDisplayLevel.info.includes(LogLevel.warning), isTrue);
+    expect(LogDisplayLevel.info.includes(LogLevel.error), isTrue);
+    expect(LogDisplayLevel.info.includes(LogLevel.debug), isFalse);
+
+    expect(LogDisplayLevel.warning.includes(LogLevel.info), isFalse);
+    expect(LogDisplayLevel.warning.includes(LogLevel.warning), isTrue);
+    expect(LogDisplayLevel.warning.includes(LogLevel.error), isTrue);
+    expect(LogDisplayLevel.warning.includes(LogLevel.debug), isFalse);
+
+    expect(LogDisplayLevel.error.includes(LogLevel.info), isFalse);
+    expect(LogDisplayLevel.error.includes(LogLevel.warning), isFalse);
+    expect(LogDisplayLevel.error.includes(LogLevel.error), isTrue);
+    expect(LogDisplayLevel.error.includes(LogLevel.debug), isFalse);
+
+    expect(LogDisplayLevel.debug.includes(LogLevel.debug), isTrue);
+    expect(LogDisplayLevel.debug.includes(LogLevel.info), isTrue);
+    expect(LogDisplayLevel.debug.includes(LogLevel.warning), isTrue);
+    expect(LogDisplayLevel.debug.includes(LogLevel.error), isTrue);
+  });
 }

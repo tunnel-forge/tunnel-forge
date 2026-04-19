@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tunnel_forge/profile_models.dart';
 import 'package:tunnel_forge/profile_store.dart';
+import 'package:tunnel_forge/utils/log_entry.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -159,6 +160,14 @@ void main() {
         (await store.loadConnectivityCheckSettings()).url,
         'https://example.com/health',
       );
+    });
+
+    test('defaults log display level to error and persists updates', () async {
+      expect(await store.loadLogDisplayLevel(), LogDisplayLevel.error);
+
+      await store.saveLogDisplayLevel(LogDisplayLevel.debug);
+
+      expect(await store.loadLogDisplayLevel(), LogDisplayLevel.debug);
     });
   });
 }

@@ -160,4 +160,11 @@ class VpnClient {
 
   Future<void> disconnect() =>
       _channel.invokeMethod<void>(VpnContract.disconnect);
+
+  Future<void> setLogLevel(LogDisplayLevel level) {
+    return _channel.invokeMethod<void>(
+      VpnContract.setLogLevel,
+      <String, Object?>{VpnContract.argLogLevel: level.storageValue},
+    );
+  }
 }

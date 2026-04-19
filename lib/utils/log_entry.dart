@@ -21,17 +21,39 @@ enum LogLevel {
   }
 }
 
-enum LogViewerFilter {
-  all('All', null),
-  debug('DEBUG', LogLevel.debug),
-  info('INFO', LogLevel.info),
-  warning('WARNING', LogLevel.warning),
-  error('ERROR', LogLevel.error);
+enum LogDisplayLevel {
+  info('INFO', 'info'),
+  warning('WARNING', 'warning'),
+  error('ERROR', 'error'),
+  debug('DEBUG', 'debug');
 
-  const LogViewerFilter(this.label, this.level);
+  const LogDisplayLevel(this.label, this.storageValue);
 
   final String label;
-  final LogLevel? level;
+  final String storageValue;
+
+  bool includes(LogLevel level) {
+    return switch (this) {
+      LogDisplayLevel.info =>
+        level == LogLevel.info ||
+            level == LogLevel.warning ||
+            level == LogLevel.error,
+      LogDisplayLevel.warning =>
+        level == LogLevel.warning || level == LogLevel.error,
+      LogDisplayLevel.error => level == LogLevel.error,
+      LogDisplayLevel.debug => true,
+    };
+  }
+
+  static LogDisplayLevel fromStorage(Object? raw) {
+    if (raw is! String) return LogDisplayLevel.error;
+    return switch (raw.trim().toLowerCase()) {
+      'info' => LogDisplayLevel.info,
+      'warning' => LogDisplayLevel.warning,
+      'debug' => LogDisplayLevel.debug,
+      _ => LogDisplayLevel.error,
+    };
+  }
 }
 
 enum LogSource {

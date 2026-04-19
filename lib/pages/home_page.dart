@@ -73,7 +73,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
   final _logBuffer = LogBuffer();
   bool _logsStickToBottom = true;
   bool _logsWordWrap = true;
-  LogViewerFilter _logsFilter = LogViewerFilter.all;
+  LogDisplayLevel _logsLevel = LogDisplayLevel.error;
 
   bool _busy = false;
   bool _tunnelUp = false;

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -340,7 +341,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
 
-    expect(methods, [VpnContract.prepareVpn, VpnContract.connect]);
+    expect(methods, [
+      VpnContract.setLogLevel,
+      VpnContract.prepareVpn,
+      VpnContract.connect,
+    ]);
     expect(statusText(tester), contains('Connecting'));
 
     // Mock never delivers TUN; UI clears "Connecting..." after the 60s await timeout.
@@ -451,7 +456,7 @@ void main() {
     expect(connectivityStatusText(tester), '84 ms');
   });
 
-  testWidgets('logs default to all levels and allow exact filtering', (
+  testWidgets('logs default to error level and use cumulative filtering', (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
@@ -488,23 +493,176 @@ void main() {
       tag: 'tunnel_engine',
       message: 'warn message',
     );
+    await simulateHostEngineLog(
+      tester,
+      priority: 6,
+      source: 'kotlin',
+      tag: 'TunnelVpnService',
+      message: 'error message',
+    );
+    await simulateHostEngineLog(
+      tester,
+      priority: 3,
+      source: 'kotlin',
+      tag: 'MainActivity',
+      message: 'debug message',
+    );
 
     await tester.tap(find.text('Logs'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(find.textContaining('info message'), findsOneWidget);
-    expect(find.textContaining('warn message'), findsOneWidget);
-    expect(find.text('Filter: All'), findsOneWidget);
+    expect(find.textContaining('info message'), findsNothing);
+    expect(find.textContaining('warn message'), findsNothing);
+    expect(find.textContaining('error message'), findsOneWidget);
+    expect(find.textContaining('debug message'), findsNothing);
+    expect(find.text('ERROR'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Filter level'));
+    await tester.tap(find.byTooltip('Log level'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('WARNING').last);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('info message'), findsNothing);
     expect(find.textContaining('warn message'), findsOneWidget);
-    expect(find.text('Filter: WARNING'), findsOneWidget);
+    expect(find.textContaining('error message'), findsOneWidget);
+    expect(find.textContaining('debug message'), findsNothing);
+    expect(find.text('Log level: WARNING'), findsOneWidget);
+  });
+
+  testWidgets('debug log level requires confirmation before enabling', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final methods = <String>[];
+    installVpnChannelMock(methods);
+    addTearDown(uninstallVpnChannelMock);
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await tester.tap(find.text('Logs'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    await tester.tap(find.byTooltip('Log level'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DEBUG').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Enable debug logs?'), findsOneWidget);
+    expect(
+      find.textContaining('may slow down the tunnel and the device'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Enable debug logs?'), findsNothing);
+    expect(find.text('ERROR'), findsOneWidget);
+    expect(methods.where((method) => method == VpnContract.setLogLevel), [
+      VpnContract.setLogLevel,
+    ]);
+
+    await tester.tap(find.byTooltip('Log level'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DEBUG').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Enable Debug'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('DEBUG'), findsOneWidget);
+    expect(methods.where((method) => method == VpnContract.setLogLevel), [
+      VpnContract.setLogLevel,
+      VpnContract.setLogLevel,
+    ]);
+  });
+
+  testWidgets('copy visible only uses the current log level', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    String? clipboardText;
+    installVpnChannelMock(<String>[]);
+    addTearDown(uninstallVpnChannelMock);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.setData') {
+            final args = Map<String, dynamic>.from(call.arguments as Map);
+            clipboardText = args['text'] as String?;
+          }
+          return null;
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await simulateHostEngineLog(
+      tester,
+      priority: 4,
+      source: 'kotlin',
+      tag: 'MainActivity',
+      message: 'info message',
+    );
+    await simulateHostEngineLog(
+      tester,
+      priority: 5,
+      source: 'native',
+      tag: 'tunnel_engine',
+      message: 'warn message',
+    );
+    await simulateHostEngineLog(
+      tester,
+      priority: 6,
+      source: 'kotlin',
+      tag: 'TunnelVpnService',
+      message: 'error message',
+    );
+
+    await tester.tap(find.text('Logs'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    await tester.tap(find.byTooltip('Log level'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('WARNING').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Copy visible'));
+    await tester.pump();
+
+    expect(clipboardText, isNot(contains('info message')));
+    expect(clipboardText, contains('warn message'));
+    expect(clipboardText, contains('error message'));
   });
 
   testWidgets('VPN tab shows profile picker tile', (WidgetTester tester) async {
@@ -627,7 +785,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
 
-    expect(methods, [VpnContract.connect]);
+    expect(methods, [VpnContract.setLogLevel, VpnContract.connect]);
     expect(statusText(tester), contains('Connecting'));
   });
 }

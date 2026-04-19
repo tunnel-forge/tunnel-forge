@@ -14,7 +14,7 @@ class LogsPanel extends StatefulWidget {
     required this.onJumpToLatest,
     required this.wordWrap,
     required this.hasAnyLogs,
-    required this.filterLabel,
+    required this.levelLabel,
   });
 
   final List<LogEntry> logs;
@@ -25,7 +25,7 @@ class LogsPanel extends StatefulWidget {
   final VoidCallback onJumpToLatest;
   final bool wordWrap;
   final bool hasAnyLogs;
-  final String filterLabel;
+  final String levelLabel;
 
   @override
   State<LogsPanel> createState() => _LogsPanelState();
@@ -44,9 +44,11 @@ class _LogsPanelState extends State<LogsPanel> {
   Widget build(BuildContext context) {
     final logs = widget.logs;
     if (logs.isEmpty) {
-      final title = widget.hasAnyLogs ? 'No logs match this filter' : 'No activity yet';
+      final title = widget.hasAnyLogs
+          ? 'No logs match this level'
+          : 'No activity yet';
       final subtitle = widget.hasAnyLogs
-          ? 'Try a different level filter to see more entries.'
+          ? 'Try a different log level to see more entries.'
           : 'Connection events and diagnostics will appear here.';
       return Center(
         child: Padding(
@@ -134,7 +136,10 @@ class _LogsPanelState extends State<LogsPanel> {
                     children: [
                       TextSpan(text: entry.timeLabel, style: timeStyle),
                       TextSpan(text: '  '),
-                      TextSpan(text: '[${entry.level.label}]', style: levelStyle),
+                      TextSpan(
+                        text: '[${entry.level.label}]',
+                        style: levelStyle,
+                      ),
                       TextSpan(text: '  '),
                       TextSpan(text: entry.sourceTagLabel, style: sourceStyle),
                       TextSpan(text: '  '),
@@ -191,9 +196,12 @@ class _LogsPanelState extends State<LogsPanel> {
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 child: Text(
-                  'Filter: ${widget.filterLabel}',
+                  'Log level: ${widget.levelLabel}',
                   style: widget.textTheme.labelSmall?.copyWith(
                     color: cs.onSurfaceVariant,
                   ),

@@ -72,7 +72,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
 
-    expect(methods, [VpnContract.prepareVpn, VpnContract.connect]);
+    expect(methods, [
+      VpnContract.setLogLevel,
+      VpnContract.prepareVpn,
+      VpnContract.connect,
+    ]);
     expect(statusText(tester), contains('Connecting'));
 
     await tester.pump(const Duration(seconds: 60));
@@ -95,7 +99,7 @@ void main() {
     expect(find.byKey(const Key('vpn_connect')), findsOneWidget);
   });
 
-  testWidgets('logs default to all levels and still allow exact filtering', (
+  testWidgets('logs default to error level and use cumulative filtering', (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
@@ -118,23 +122,41 @@ void main() {
       tag: 'tunnel_engine',
       message: 'warn message',
     );
+    await simulateHostEngineLog(
+      tester,
+      priority: 6,
+      source: 'kotlin',
+      tag: 'TunnelVpnService',
+      message: 'error message',
+    );
+    await simulateHostEngineLog(
+      tester,
+      priority: 3,
+      source: 'kotlin',
+      tag: 'MainActivity',
+      message: 'debug message',
+    );
 
     await tester.tap(find.text('Logs'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(find.textContaining('info message'), findsOneWidget);
-    expect(find.textContaining('warn message'), findsOneWidget);
-    expect(find.text('Filter: All'), findsOneWidget);
+    expect(find.textContaining('info message'), findsNothing);
+    expect(find.textContaining('warn message'), findsNothing);
+    expect(find.textContaining('error message'), findsOneWidget);
+    expect(find.textContaining('debug message'), findsNothing);
+    expect(find.text('Log level: ERROR'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Filter level'));
+    await tester.tap(find.byTooltip('Log level'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('WARNING').last);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('info message'), findsNothing);
     expect(find.textContaining('warn message'), findsOneWidget);
-    expect(find.text('Filter: WARNING'), findsOneWidget);
+    expect(find.textContaining('error message'), findsOneWidget);
+    expect(find.textContaining('debug message'), findsNothing);
+    expect(find.text('Log level: WARNING'), findsOneWidget);
   });
 
   testWidgets('prepareVpn denied surfaces message and does not connect', (
@@ -151,7 +173,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(methods, [VpnContract.prepareVpn]);
+    expect(methods, [VpnContract.setLogLevel, VpnContract.prepareVpn]);
     expect(find.text('VPN permission is required'), findsOneWidget);
     expect(statusText(tester), 'Ready');
   });
@@ -176,7 +198,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(methods, [VpnContract.prepareVpn, VpnContract.connect]);
+    expect(methods, [
+      VpnContract.setLogLevel,
+      VpnContract.prepareVpn,
+      VpnContract.connect,
+    ]);
     expect(find.text('Simulated native failure'), findsOneWidget);
     expect(statusText(tester), 'Ready');
   });
@@ -200,6 +226,10 @@ void main() {
     await simulateHostTunnelState(tester, VpnTunnelState.connected, 'tun0');
 
     expect(statusText(tester), 'Connected');
-    expect(methods, [VpnContract.prepareVpn, VpnContract.connect]);
+    expect(methods, [
+      VpnContract.setLogLevel,
+      VpnContract.prepareVpn,
+      VpnContract.connect,
+    ]);
   });
 }

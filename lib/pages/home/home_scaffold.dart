@@ -60,7 +60,7 @@ extension _VpnHomePageUi on _VpnHomePageState {
             onJumpToLatest: _jumpLogsToBottom,
             wordWrap: _logsWordWrap,
             hasAnyLogs: _logBuffer.entries.isNotEmpty,
-            filterLabel: _logsFilterLabel,
+            levelLabel: _logsLevelLabel,
           ),
         );
       default:
@@ -157,30 +157,28 @@ extension _VpnHomePageUi on _VpnHomePageState {
                 children: switch (_navIndex) {
                   0 => <Widget>[],
                   1 => [
-                    PopupMenuButton<LogViewerFilter>(
-                      tooltip: 'Filter level',
-                      initialValue: _logsFilter,
-                      onSelected: _setLogsFilter,
+                    PopupMenuButton<LogDisplayLevel>(
+                      tooltip: 'Log level',
+                      initialValue: _logsLevel,
+                      onSelected: (level) {
+                        unawaited(_setLogsLevel(level));
+                      },
                       itemBuilder: (context) => const [
-                        PopupMenuItem<LogViewerFilter>(
-                          value: LogViewerFilter.all,
-                          child: Text('All'),
-                        ),
-                        PopupMenuItem<LogViewerFilter>(
-                          value: LogViewerFilter.debug,
-                          child: Text('DEBUG'),
-                        ),
-                        PopupMenuItem<LogViewerFilter>(
-                          value: LogViewerFilter.info,
+                        PopupMenuItem<LogDisplayLevel>(
+                          value: LogDisplayLevel.info,
                           child: Text('INFO'),
                         ),
-                        PopupMenuItem<LogViewerFilter>(
-                          value: LogViewerFilter.warning,
+                        PopupMenuItem<LogDisplayLevel>(
+                          value: LogDisplayLevel.warning,
                           child: Text('WARNING'),
                         ),
-                        PopupMenuItem<LogViewerFilter>(
-                          value: LogViewerFilter.error,
+                        PopupMenuItem<LogDisplayLevel>(
+                          value: LogDisplayLevel.error,
                           child: Text('ERROR'),
+                        ),
+                        PopupMenuItem<LogDisplayLevel>(
+                          value: LogDisplayLevel.debug,
+                          child: Text('DEBUG'),
                         ),
                       ],
                       child: Padding(
@@ -194,7 +192,7 @@ extension _VpnHomePageUi on _VpnHomePageState {
                             const Icon(Icons.filter_list_rounded, size: 20),
                             const SizedBox(width: 6),
                             Text(
-                              _logsFilterLabel,
+                              _logsLevelLabel,
                               style: textTheme.labelMedium?.copyWith(
                                 color: cs.onSurfaceVariant,
                               ),
@@ -216,13 +214,14 @@ extension _VpnHomePageUi on _VpnHomePageState {
                     ListenableBuilder(
                       listenable: _logBuffer,
                       builder: (context, _) {
+                        final visibleEmpty = _visibleLogs.isEmpty;
                         final empty = _logBuffer.isEmpty;
                         return Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
-                              tooltip: 'Copy all',
-                              onPressed: empty ? null : _copyLogs,
+                              tooltip: 'Copy visible',
+                              onPressed: visibleEmpty ? null : _copyLogs,
                               icon: const Icon(Icons.copy_all_outlined),
                             ),
                             IconButton(
