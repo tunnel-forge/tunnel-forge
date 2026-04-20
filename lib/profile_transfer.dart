@@ -60,9 +60,6 @@ class ProfileTransferEnvelope {
   String toTfUri() {
     final jsonBytes = utf8.encode(jsonEncode(toJson()));
     final compressed = GZipEncoder().encode(jsonBytes);
-    if (compressed == null) {
-      throw const FormatException('Could not compress transfer payload');
-    }
     final payload = base64UrlEncode(compressed).replaceAll('=', '');
     return '$uriScheme://$uriHost/$payload';
   }

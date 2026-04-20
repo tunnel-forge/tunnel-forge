@@ -62,7 +62,7 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
       _toast('Imported "${imported.displayName}" from $noun');
     } on FormatException catch (e) {
       if (mounted) {
-        _toast(e.message ?? 'Couldn\'t import profile', error: true);
+        _toast(e.message.toString(), error: true);
       }
     } catch (_) {
       if (mounted) _toast('Couldn\'t import profile', error: true);
