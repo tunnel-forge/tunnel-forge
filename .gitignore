@@ -53,3 +53,7 @@ vpn.env
 .codex
 .cursor
 .gradle-home/
+
+# Android signing keys
+upload-keystore.jks
+upload-keystore.jks.base64

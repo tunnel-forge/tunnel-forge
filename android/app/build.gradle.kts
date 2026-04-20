@@ -1,9 +1,31 @@
+import org.gradle.api.GradleException
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+val keystorePath = System.getenv("TUNNEL_FORGE_ANDROID_KEYSTORE_PATH")
+val keystorePassword = System.getenv("TUNNEL_FORGE_ANDROID_KEYSTORE_PASSWORD")
+val releaseKeyAlias = System.getenv("TUNNEL_FORGE_ANDROID_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("TUNNEL_FORGE_ANDROID_KEY_PASSWORD")
+val releaseSigningInputs =
+    mapOf(
+        "TUNNEL_FORGE_ANDROID_KEYSTORE_PATH" to keystorePath,
+        "TUNNEL_FORGE_ANDROID_KEYSTORE_PASSWORD" to keystorePassword,
+        "TUNNEL_FORGE_ANDROID_KEY_ALIAS" to releaseKeyAlias,
+        "TUNNEL_FORGE_ANDROID_KEY_PASSWORD" to releaseKeyPassword,
+    )
+val hasReleaseSigning =
+    releaseSigningInputs.values.all { !it.isNullOrBlank() }
+
+if (!hasReleaseSigning && releaseSigningInputs.values.any { !it.isNullOrBlank() }) {
+    throw GradleException(
+        "Incomplete Android release signing configuration. Set all of: " +
+            releaseSigningInputs.keys.joinToString(", "),
+    )
 }
 
 android {
@@ -38,9 +60,22 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = rootProject.file(keystorePath!!)
+                storePassword = keystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
