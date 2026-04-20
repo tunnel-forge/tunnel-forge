@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'profile_models.dart';
+import 'profile_transfer.dart';
 import 'utils/log_entry.dart';
 
 /// Persists sensitive strings (password, PSK) outside [SharedPreferences].
@@ -213,6 +214,22 @@ class ProfileStore {
     await _secrets.write(_passwordKey(profile.id), password);
     await _secrets.write(_pskKey(profile.id), psk);
     await setLastProfileId(profile.id);
+  }
+
+  Future<Profile> saveImportedProfile(
+    ProfileTransferEnvelope envelope, {
+    bool selectAsLastProfile = true,
+  }) async {
+    final imported = envelope.toProfile(newProfileId());
+    final list = await loadProfiles()
+      ..add(imported);
+    await _saveProfileList(list);
+    await _secrets.write(_passwordKey(imported.id), envelope.password);
+    await _secrets.write(_pskKey(imported.id), envelope.psk);
+    if (selectAsLastProfile) {
+      await setLastProfileId(imported.id);
+    }
+    return imported;
   }
 
   Future<void> deleteProfile(String id) async {

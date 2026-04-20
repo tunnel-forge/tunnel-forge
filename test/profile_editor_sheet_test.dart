@@ -88,7 +88,7 @@ void main() {
     );
   });
 
-  testWidgets('invalid dns entry blocks save with a snackbar', (tester) async {
+  testWidgets('invalid dns entry blocks save with a toast', (tester) async {
     final store = await buildStore();
     const profile = Profile(
       id: 'profile-2',
@@ -109,7 +109,7 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pump();
 
-    expect(find.byType(SnackBar), findsWidgets);
+    expect(find.byKey(const Key('app_toast')), findsOneWidget);
     expect(
       find.text('DNS server "example.com" is not a valid IPv4 address'),
       findsWidgets,

@@ -1,15 +1,24 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:cross_file/cross_file.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../app_selector_page.dart';
+import '../app_scaffold_messenger.dart';
 import '../connectivity_checker.dart';
 import '../profile_editor_sheet.dart';
 import '../profile_models.dart';
 import '../profile_picker_sheet.dart';
-import '../utils/log_entry.dart';
 import '../profile_store.dart';
+import '../profile_transfer.dart';
+import '../profile_transfer_bridge.dart';
+import '../profile_transfer_contract.dart';
+import '../utils/log_entry.dart';
 import '../utils/log_buffer.dart';
 import '../vpn_client.dart';
 import '../vpn_contract.dart';
@@ -49,6 +58,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
   late final VpnClient _client;
   late final ProfileStore _profileStore;
   late final ConnectivityChecker _connectivityChecker;
+  late final ProfileTransferBridge _profileTransferBridge;
 
   List<Profile> _profiles = [];
   String? _activeProfileId;
@@ -79,6 +89,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
   bool _tunnelUp = false;
   bool _awaitingTunnel = false;
   Timer? _awaitTimer;
+  StreamSubscription<IncomingProfileTransfer>? _profileTransferSub;
   String? _activeAttemptId;
   DateTime? _connectStartedAt;
   bool _timedOutThisAttempt = false;
@@ -103,11 +114,16 @@ class _VpnHomePageState extends State<VpnHomePage> {
     _profileStore = widget.profileStore ?? ProfileStore();
     _connectivityChecker =
         widget.connectivityChecker ?? DirectConnectivityChecker();
+    _profileTransferBridge = ProfileTransferBridge();
     _logsScroll.addListener(_syncLogsStickToBottom);
     _client = VpnClient(
       onTunnelState: _onTunnelFromHost,
       onEngineLog: _onEngineLogFromHost,
     );
+    _profileTransferSub = _profileTransferBridge.incomingTransfers.listen(
+      _onIncomingProfileTransfer,
+    );
+    unawaited(_consumePendingProfileTransfers());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future<void>.delayed(Duration.zero, () {
         if (!mounted) return;
@@ -119,6 +135,8 @@ class _VpnHomePageState extends State<VpnHomePage> {
   @override
   void dispose() {
     _awaitTimer?.cancel();
+    _profileTransferSub?.cancel();
+    unawaited(_profileTransferBridge.dispose());
     _client.dispose();
     _server.dispose();
     _user.dispose();

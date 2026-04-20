@@ -2,6 +2,9 @@ part of '../home_page.dart';
 
 /// Loads [ProfileStore], profile picker/editor sheets, and per-app allow-list navigation.
 extension _VpnHomePageProfiles on _VpnHomePageState {
+  bool get _shouldSelectImportedProfile =>
+      !_busy && !_tunnelUp && !_awaitingTunnel;
+
   void _applyProfileToControllers(Profile p, String password, String psk) {
     _server.text = p.server;
     _user.text = p.user;
@@ -18,6 +21,125 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
     _psk.text = '';
     _dns.text = Profile.defaultDns;
     _mtu.text = '${Profile.defaultVpnMtu}';
+  }
+
+  Future<void> _consumePendingProfileTransfers() async {
+    final pending = await _profileTransferBridge.start();
+    for (final transfer in pending) {
+      await _onIncomingProfileTransfer(transfer);
+    }
+  }
+
+  Future<void> _onIncomingProfileTransfer(
+    IncomingProfileTransfer transfer,
+  ) async {
+    if (!mounted) return;
+    if (transfer.isError) {
+      _toast(
+        transfer.message ?? 'Couldn\'t open the incoming profile',
+        error: true,
+      );
+      return;
+    }
+    try {
+      final envelope = ProfileTransferEnvelope.fromIncomingTransfer(transfer);
+      final imported = await _profileStore.saveImportedProfile(
+        envelope,
+        selectAsLastProfile: _shouldSelectImportedProfile,
+      );
+      final updatedProfiles = await _profileStore.loadProfiles();
+      if (!mounted) return;
+      _setHomeState(() {
+        _profiles = updatedProfiles;
+        if (_shouldSelectImportedProfile) {
+          _activeProfileId = imported.id;
+          _applyProfileToControllers(imported, envelope.password, envelope.psk);
+        }
+      });
+      final noun = transfer.type == ProfileTransferContract.typeTfUri
+          ? 'link'
+          : 'file';
+      _toast('Imported "${imported.displayName}" from $noun');
+    } on FormatException catch (e) {
+      if (mounted) {
+        _toast(e.message ?? 'Couldn\'t import profile', error: true);
+      }
+    } catch (_) {
+      if (mounted) _toast('Couldn\'t import profile', error: true);
+    }
+  }
+
+  Future<void> _importProfileFromPicker() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        withData: true,
+        allowedExtensions: const [ProfileTransferEnvelope.fileExtension],
+      );
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.single;
+      final bytes = file.bytes;
+      if (bytes == null) {
+        _toast('Couldn\'t read the selected file', error: true);
+        return;
+      }
+      final contents = utf8.decode(bytes);
+      await _onIncomingProfileTransfer(
+        IncomingProfileTransfer(
+          type: ProfileTransferContract.typeTfpJson,
+          data: contents,
+          source: file.name,
+        ),
+      );
+    } catch (_) {
+      if (mounted) _toast('Couldn\'t import .tfp file', error: true);
+    }
+  }
+
+  Future<void> _copyProfileShareLink(String id) async {
+    final row = await _profileStore.loadProfileWithSecrets(id);
+    if (row == null) {
+      if (mounted) _toast('This profile no longer exists.', error: true);
+      return;
+    }
+    final envelope = ProfileTransferEnvelope.fromProfile(
+      profile: row.profile,
+      password: row.password,
+      psk: row.psk,
+    );
+    await Clipboard.setData(ClipboardData(text: envelope.toTfUri()));
+    if (mounted) _toast('Share link copied');
+  }
+
+  Future<void> _exportProfileFile(String id) async {
+    final row = await _profileStore.loadProfileWithSecrets(id);
+    if (row == null) {
+      if (mounted) _toast('This profile no longer exists.', error: true);
+      return;
+    }
+    final envelope = ProfileTransferEnvelope.fromProfile(
+      profile: row.profile,
+      password: row.password,
+      psk: row.psk,
+    );
+    final bytes = Uint8List.fromList(utf8.encode(envelope.toFileJson()));
+    final fileName = ProfileTransferEnvelope.exportFileNameFor(row.profile);
+    try {
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [
+            XFile.fromData(bytes, mimeType: ProfileTransferEnvelope.mimeType),
+          ],
+          fileNameOverrides: [fileName],
+          title: 'Export Tunnel Forge profile',
+        ),
+      );
+      if (mounted) {
+        _toast('Profile file ready to save or share');
+      }
+    } catch (_) {
+      if (mounted) _toast('Couldn\'t export .tfp file', error: true);
+    }
   }
 
   Future<void> _loadPersistedProfiles() async {
@@ -214,6 +336,9 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
       },
       onDelete: _confirmDeleteProfileById,
       onCreateNew: _createAndSelectNewProfile,
+      onImportFile: _importProfileFromPicker,
+      onCopyShareLink: _copyProfileShareLink,
+      onExportFile: _exportProfileFile,
     );
   }
 }

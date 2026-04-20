@@ -10,23 +10,43 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.util.Log
-import java.io.ByteArrayOutputStream
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
 
 class MainActivity : FlutterActivity() {
 
     private var vpnPermissionResult: MethodChannel.Result? = null
     private var notificationPermissionResult: MethodChannel.Result? = null
     private var pendingConnectIntent: Intent? = null
+    private var profileTransferChannel: MethodChannel? = null
+    private val pendingProfileTransfers = mutableListOf<Map<String, String?>>()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val vpnChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VpnContract.METHOD_CHANNEL)
+        profileTransferChannel =
+            MethodChannel(
+                flutterEngine.dartExecutor.binaryMessenger,
+                ProfileTransferContract.METHOD_CHANNEL,
+            ).also { channel ->
+                channel.setMethodCallHandler { call, result ->
+                    when (call.method) {
+                        ProfileTransferContract.CONSUME_PENDING_TRANSFERS -> {
+                            val pending = ArrayList(pendingProfileTransfers)
+                            pendingProfileTransfers.clear()
+                            result.success(pending)
+                        }
+                        else -> result.notImplemented()
+                    }
+                }
+            }
+        handleProfileTransferIntent(intent, deliverImmediately = false)
         VpnTunnelEvents.attach(vpnChannel)
         vpnChannel.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -223,8 +243,15 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        profileTransferChannel = null
         VpnTunnelEvents.detach()
         super.onDestroy()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleProfileTransferIntent(intent, deliverImmediately = true)
     }
 
     @Deprecated("Deprecated in Java")
@@ -397,9 +424,118 @@ class MainActivity : FlutterActivity() {
         return checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     }
 
+    private fun handleProfileTransferIntent(intent: Intent?, deliverImmediately: Boolean) {
+        val transfer = parseProfileTransferIntent(intent) ?: return
+        dispatchProfileTransfer(transfer, deliverImmediately)
+    }
+
+    private fun dispatchProfileTransfer(
+        transfer: Map<String, String?>,
+        deliverImmediately: Boolean,
+    ) {
+        if (!deliverImmediately) {
+            pendingProfileTransfers.add(transfer)
+            return
+        }
+        val channel = profileTransferChannel
+        if (channel == null) {
+            pendingProfileTransfers.add(transfer)
+            return
+        }
+        channel.invokeMethod(ProfileTransferContract.ON_INCOMING_TRANSFER, transfer)
+    }
+
+    private fun parseProfileTransferIntent(intent: Intent?): Map<String, String?>? {
+        if (intent == null) return null
+        return when (intent.action) {
+            Intent.ACTION_VIEW -> parseViewIntent(intent)
+            Intent.ACTION_SEND -> parseSendIntent(intent)
+            else -> null
+        }
+    }
+
+    private fun parseViewIntent(intent: Intent): Map<String, String?>? {
+        val uri = intent.data ?: return null
+        val scheme = uri.scheme?.lowercase()
+        if (scheme == "tf") {
+            return transferPayload(
+                type = ProfileTransferContract.TYPE_TF_URI,
+                data = uri.toString(),
+                source = "link",
+            )
+        }
+        if (!looksLikeProfileFile(intent, uri)) return null
+        return profileFileTransfer(uri)
+    }
+
+    private fun parseSendIntent(intent: Intent): Map<String, String?>? {
+        val uri =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(Intent.EXTRA_STREAM)
+            } ?: return null
+        if (!looksLikeProfileFile(intent, uri)) return null
+        return profileFileTransfer(uri)
+    }
+
+    private fun looksLikeProfileFile(intent: Intent, uri: Uri): Boolean {
+        val mime = intent.type?.lowercase().orEmpty()
+        if (mime == ProfileTransferMimeType) {
+            return true
+        }
+        val path = uri.lastPathSegment?.lowercase().orEmpty()
+        return path.endsWith(".tfp")
+    }
+
+    private fun profileFileTransfer(uri: Uri): Map<String, String?> {
+        return try {
+            val data = readUtf8Text(uri)
+            transferPayload(
+                type = ProfileTransferContract.TYPE_TFP_JSON,
+                data = data,
+                source = uri.lastPathSegment,
+            )
+        } catch (e: Exception) {
+            AppLog.e(TAG, "profile_transfer read failed uri=$uri", e)
+            transferError("Couldn't read the selected .tfp file", uri.lastPathSegment)
+        }
+    }
+
+    private fun readUtf8Text(uri: Uri): String {
+        val input =
+            contentResolver.openInputStream(uri)
+                ?: throw IllegalStateException("Input stream unavailable")
+        return input.use { stream ->
+            stream.readBytes().toString(Charsets.UTF_8)
+        }
+    }
+
+    private fun transferPayload(
+        type: String,
+        data: String,
+        source: String?,
+    ): Map<String, String?> {
+        return mapOf(
+            ProfileTransferContract.ARG_TYPE to type,
+            ProfileTransferContract.ARG_DATA to data,
+            ProfileTransferContract.ARG_SOURCE to source,
+        )
+    }
+
+    private fun transferError(message: String, source: String?): Map<String, String?> {
+        return mapOf(
+            ProfileTransferContract.ARG_TYPE to ProfileTransferContract.TYPE_ERROR,
+            ProfileTransferContract.ARG_MESSAGE to message,
+            ProfileTransferContract.ARG_SOURCE to source,
+        )
+    }
+
     companion object {
         private const val TAG = "MainActivity"
         private const val REQUEST_VPN_PERMISSION = 0x4E50
         private const val REQUEST_POST_NOTIFICATIONS = 0x4E51
+        private const val ProfileTransferMimeType = "application/vnd.tunnelforge.profile+json"
     }
 }

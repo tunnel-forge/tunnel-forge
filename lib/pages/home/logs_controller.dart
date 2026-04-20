@@ -93,17 +93,7 @@ extension _VpnHomePageLogs on _VpnHomePageState {
 
   void _toast(String message, {bool error = false}) {
     if (!mounted) return;
-    final cs = Theme.of(context).colorScheme;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: TextStyle(color: error ? cs.onError : cs.onInverseSurface),
-        ),
-        backgroundColor: error ? cs.error : cs.inverseSurface,
-      ),
-    );
+    showAppSnackBar(context, message, error: error);
   }
 
   void _clearLogs() {

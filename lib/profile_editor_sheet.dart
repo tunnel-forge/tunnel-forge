@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'app_scaffold_messenger.dart';
 import 'profile_models.dart';
 import 'profile_store.dart';
 
@@ -105,38 +106,32 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
   Future<void> _save() async {
     final serverTrim = _server.text.trim();
     if (serverTrim.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Enter a server address')));
+      showAppSnackBar(context, 'Enter a server address', error: true);
       return;
     }
     final mtuParsed = int.tryParse(_mtu.text.trim());
     if (mtuParsed == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'MTU must be a number (${Profile.minVpnMtu}–${Profile.maxVpnMtu})',
-          ),
-        ),
+      showAppSnackBar(
+        context,
+        'MTU must be a number (${Profile.minVpnMtu}–${Profile.maxVpnMtu})',
+        error: true,
       );
       return;
     }
     if (mtuParsed < Profile.minVpnMtu || mtuParsed > Profile.maxVpnMtu) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'MTU must be between ${Profile.minVpnMtu} and ${Profile.maxVpnMtu}',
-          ),
-        ),
+      showAppSnackBar(
+        context,
+        'MTU must be between ${Profile.minVpnMtu} and ${Profile.maxVpnMtu}',
+        error: true,
       );
       return;
     }
     final invalidDns = Profile.firstInvalidDnsServer(_dns.text);
     if (invalidDns != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('DNS server "$invalidDns" is not a valid IPv4 address'),
-        ),
+      showAppSnackBar(
+        context,
+        'DNS server "$invalidDns" is not a valid IPv4 address',
+        error: true,
       );
       return;
     }
@@ -160,9 +155,7 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
       Navigator.of(context).pop(true);
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Could not save changes')));
+      showAppSnackBar(context, 'Could not save changes', error: true);
     }
   }
 

@@ -18,6 +18,9 @@ class ProfilePickerSheet extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onCreateNew,
+    required this.onImportFile,
+    required this.onCopyShareLink,
+    required this.onExportFile,
   });
 
   final List<Profile> profiles;
@@ -27,6 +30,9 @@ class ProfilePickerSheet extends StatelessWidget {
   final ValueChanged<String> onEdit;
   final Future<void> Function(String id) onDelete;
   final Future<void> Function() onCreateNew;
+  final Future<void> Function() onImportFile;
+  final Future<void> Function(String id) onCopyShareLink;
+  final Future<void> Function(String id) onExportFile;
 
   static Future<void> show(
     BuildContext context, {
@@ -37,6 +43,9 @@ class ProfilePickerSheet extends StatelessWidget {
     required ValueChanged<String> onEdit,
     required Future<void> Function(String id) onDelete,
     required Future<void> Function() onCreateNew,
+    required Future<void> Function() onImportFile,
+    required Future<void> Function(String id) onCopyShareLink,
+    required Future<void> Function(String id) onExportFile,
   }) {
     final theme = Theme.of(context);
     final sheetColor =
@@ -65,6 +74,12 @@ class ProfilePickerSheet extends StatelessWidget {
               await onCreateNew();
               if (sheetContext.mounted) setModalState(() {});
             },
+            onImportFile: () async {
+              await onImportFile();
+              if (sheetContext.mounted) setModalState(() {});
+            },
+            onCopyShareLink: onCopyShareLink,
+            onExportFile: onExportFile,
           );
         },
       ),
@@ -97,6 +112,12 @@ class ProfilePickerSheet extends StatelessWidget {
                   child: Row(
                     children: [
                       Expanded(child: Text('Profiles', style: tt.titleLarge)),
+                      IconButton.filledTonal(
+                        tooltip: 'Import .tfp',
+                        onPressed: loading ? null : () async => onImportFile(),
+                        icon: const Icon(Icons.file_open_outlined),
+                      ),
+                      const SizedBox(width: 8),
                       IconButton.filledTonal(
                         tooltip: 'New profile',
                         onPressed: loading ? null : () async => onCreateNew(),
@@ -151,6 +172,29 @@ class ProfilePickerSheet extends StatelessWidget {
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
+                                  PopupMenuButton<_ProfileTileAction>(
+                                    tooltip: 'Profile actions',
+                                    onSelected: (action) async {
+                                      switch (action) {
+                                        case _ProfileTileAction.copyShareLink:
+                                          await onCopyShareLink(p.id);
+                                          break;
+                                        case _ProfileTileAction.exportFile:
+                                          await onExportFile(p.id);
+                                          break;
+                                      }
+                                    },
+                                    itemBuilder: (context) => const [
+                                      PopupMenuItem<_ProfileTileAction>(
+                                        value: _ProfileTileAction.copyShareLink,
+                                        child: Text('Copy share link'),
+                                      ),
+                                      PopupMenuItem<_ProfileTileAction>(
+                                        value: _ProfileTileAction.exportFile,
+                                        child: Text('Export .tfp'),
+                                      ),
+                                    ],
+                                  ),
                                   IconButton(
                                     tooltip: 'Edit profile',
                                     icon: const Icon(
@@ -187,3 +231,5 @@ class ProfilePickerSheet extends StatelessWidget {
     );
   }
 }
+
+enum _ProfileTileAction { copyShareLink, exportFile }
