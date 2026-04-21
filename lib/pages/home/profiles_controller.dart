@@ -8,7 +8,11 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
   void _applyProfileToControllers(Profile p, String password, String psk) {
     _server.text = p.server;
     _user.text = p.user;
-    _dns.text = p.dns;
+    _dnsAutomatic = p.dnsAutomatic;
+    _dns1.text = p.dns1Host;
+    _dns1Protocol = p.dns1Protocol;
+    _dns2.text = p.dns2Host;
+    _dns2Protocol = p.dns2Protocol;
     _mtu.text = '${p.mtu}';
     _password.text = password;
     _psk.text = psk;
@@ -19,7 +23,11 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
     _user.text = '';
     _password.text = '';
     _psk.text = '';
-    _dns.text = Profile.defaultDns;
+    _dnsAutomatic = true;
+    _dns1.text = '';
+    _dns1Protocol = DnsProtocol.dnsOverUdp;
+    _dns2.text = '';
+    _dns2Protocol = DnsProtocol.dnsOverUdp;
     _mtu.text = '${Profile.defaultVpnMtu}';
   }
 
@@ -252,7 +260,11 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
       displayName: 'New profile',
       server: 'example.invalid',
       user: '',
-      dns: Profile.defaultDns,
+      dnsAutomatic: true,
+      dns1Host: '',
+      dns1Protocol: DnsProtocol.dnsOverUdp,
+      dns2Host: '',
+      dns2Protocol: DnsProtocol.dnsOverUdp,
     );
     try {
       await _profileStore.upsertProfile(profile, password: '', psk: '');

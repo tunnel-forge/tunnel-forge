@@ -583,7 +583,14 @@ class UserspaceTunnelStackTest {
             BridgeUserspaceTunnelStack(
                 bridge = ProxyPacketBridge(backend = backend),
                 clientIpv4 = "10.0.0.2",
-                dnsServers = listOf("1.1.1.1"),
+                dnsServers =
+                    listOf(
+                        ResolvedDnsServerConfig(
+                            host = "1.1.1.1",
+                            protocol = DnsProtocol.dnsOverUdp,
+                            resolvedIpv4 = "1.1.1.1",
+                        ),
+                    ),
                 logger = { _, _ -> },
             )
         assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
@@ -649,7 +656,19 @@ class UserspaceTunnelStackTest {
             BridgeUserspaceTunnelStack(
                 bridge = ProxyPacketBridge(backend = backend),
                 clientIpv4 = "10.0.0.2",
-                dnsServers = listOf("1.1.1.1", "8.8.8.8"),
+                dnsServers =
+                    listOf(
+                        ResolvedDnsServerConfig(
+                            host = "1.1.1.1",
+                            protocol = DnsProtocol.dnsOverUdp,
+                            resolvedIpv4 = "1.1.1.1",
+                        ),
+                        ResolvedDnsServerConfig(
+                            host = "8.8.8.8",
+                            protocol = DnsProtocol.dnsOverUdp,
+                            resolvedIpv4 = "8.8.8.8",
+                        ),
+                    ),
                 logger = { _, _ -> },
             )
         assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
@@ -712,7 +731,19 @@ class UserspaceTunnelStackTest {
             BridgeUserspaceTunnelStack(
                 bridge = ProxyPacketBridge(backend = backend),
                 clientIpv4 = "10.0.0.2",
-                dnsServers = listOf("1.1.1.1", "8.8.8.8"),
+                dnsServers =
+                    listOf(
+                        ResolvedDnsServerConfig(
+                            host = "1.1.1.1",
+                            protocol = DnsProtocol.dnsOverUdp,
+                            resolvedIpv4 = "1.1.1.1",
+                        ),
+                        ResolvedDnsServerConfig(
+                            host = "8.8.8.8",
+                            protocol = DnsProtocol.dnsOverUdp,
+                            resolvedIpv4 = "8.8.8.8",
+                        ),
+                    ),
                 logger = { _, _ -> },
             )
         assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
@@ -763,7 +794,19 @@ class UserspaceTunnelStackTest {
             BridgeUserspaceTunnelStack(
                 bridge = ProxyPacketBridge(backend = backend),
                 clientIpv4 = "10.0.0.2",
-                dnsServers = listOf("1.1.1.1", "8.8.8.8"),
+                dnsServers =
+                    listOf(
+                        ResolvedDnsServerConfig(
+                            host = "1.1.1.1",
+                            protocol = DnsProtocol.dnsOverUdp,
+                            resolvedIpv4 = "1.1.1.1",
+                        ),
+                        ResolvedDnsServerConfig(
+                            host = "8.8.8.8",
+                            protocol = DnsProtocol.dnsOverUdp,
+                            resolvedIpv4 = "8.8.8.8",
+                        ),
+                    ),
                 logger = { _, _ -> },
             )
         assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))

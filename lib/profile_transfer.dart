@@ -13,12 +13,16 @@ class ProfileTransferEnvelope {
     required this.user,
     required this.password,
     required this.psk,
-    required this.dns,
+    required this.dnsAutomatic,
+    required this.dns1Host,
+    required this.dns1Protocol,
+    required this.dns2Host,
+    required this.dns2Protocol,
     required this.mtu,
     this.version = currentVersion,
   });
 
-  static const int currentVersion = 1;
+  static const int currentVersion = 3;
   static const String fileExtension = 'tfp';
   static const String mimeType = 'application/vnd.tunnelforge.profile+json';
   static const String uriScheme = 'tf';
@@ -30,7 +34,11 @@ class ProfileTransferEnvelope {
   final String user;
   final String password;
   final String psk;
-  final String dns;
+  final bool dnsAutomatic;
+  final String dns1Host;
+  final DnsProtocol dns1Protocol;
+  final String dns2Host;
+  final DnsProtocol dns2Protocol;
   final int mtu;
 
   Profile toProfile(String id) {
@@ -39,7 +47,11 @@ class ProfileTransferEnvelope {
       displayName: displayName.trim().isEmpty ? server.trim() : displayName,
       server: server.trim(),
       user: user,
-      dns: Profile.normalizeDns(dns),
+      dnsAutomatic: dnsAutomatic,
+      dns1Host: Profile.normalizeDnsServer(dns1Host),
+      dns1Protocol: dns1Protocol,
+      dns2Host: Profile.normalizeDnsServer(dns2Host),
+      dns2Protocol: dns2Protocol,
       mtu: Profile.normalizeMtu(mtu),
     );
   }
@@ -51,7 +63,11 @@ class ProfileTransferEnvelope {
     'user': user,
     'password': password,
     'psk': psk,
-    'dns': Profile.normalizeDns(dns),
+    'dnsAutomatic': dnsAutomatic,
+    'dns1Host': Profile.normalizeDnsServer(dns1Host),
+    'dns1Protocol': dns1Protocol.jsonValue,
+    'dns2Host': Profile.normalizeDnsServer(dns2Host),
+    'dns2Protocol': dns2Protocol.jsonValue,
     'mtu': Profile.normalizeMtu(mtu),
   };
 
@@ -75,7 +91,11 @@ class ProfileTransferEnvelope {
       user: profile.user,
       password: password,
       psk: psk,
-      dns: profile.dns,
+      dnsAutomatic: profile.dnsAutomatic,
+      dns1Host: profile.dns1Host,
+      dns1Protocol: profile.dns1Protocol,
+      dns2Host: profile.dns2Host,
+      dns2Protocol: profile.dns2Protocol,
       mtu: profile.mtu,
     );
   }
@@ -127,14 +147,45 @@ class ProfileTransferEnvelope {
     final user = _requireString(map, 'user');
     final password = _requireString(map, 'password');
     final psk = _requireString(map, 'psk');
-    final dns = _requireString(map, 'dns');
+    final dnsAutomatic = _requireBool(map, 'dnsAutomatic');
+    final dns1Host = _requireString(map, 'dns1Host');
+    final dns1Protocol = DnsProtocol.fromJson(_requireString(map, 'dns1Protocol'));
+    final dns2Host = _requireString(map, 'dns2Host');
+    final dns2Protocol = DnsProtocol.fromJson(_requireString(map, 'dns2Protocol'));
     final mtu = _requireInt(map, 'mtu');
     if (server.trim().isEmpty) {
       throw const FormatException('Profile transfer server is required');
     }
-    final invalidDns = Profile.firstInvalidDnsServer(dns);
-    if (invalidDns != null) {
-      throw FormatException('Invalid IPv4 DNS server: $invalidDns');
+    final invalidDns1 = Profile.invalidDnsServer(dns1Host, dns1Protocol);
+    if (invalidDns1 != null) {
+      throw FormatException(
+        Profile.validationMessageForDnsServer(
+          'DNS 1',
+          dns1Host,
+          dns1Protocol,
+        ),
+      );
+    }
+    final invalidDns2 = Profile.invalidDnsServer(dns2Host, dns2Protocol);
+    if (invalidDns2 != null) {
+      throw FormatException(
+        Profile.validationMessageForDnsServer(
+          'DNS 2',
+          dns2Host,
+          dns2Protocol,
+        ),
+      );
+    }
+    if (!dnsAutomatic &&
+        Profile.orderedDnsServers(
+          dns1Host: dns1Host,
+          dns1Protocol: dns1Protocol,
+          dns2Host: dns2Host,
+          dns2Protocol: dns2Protocol,
+        ).isEmpty) {
+      throw const FormatException(
+        'Manual DNS requires at least one DNS server',
+      );
     }
     return ProfileTransferEnvelope(
       version: version,
@@ -143,7 +194,11 @@ class ProfileTransferEnvelope {
       user: user,
       password: password,
       psk: psk,
-      dns: dns,
+      dnsAutomatic: dnsAutomatic,
+      dns1Host: dns1Host,
+      dns1Protocol: dns1Protocol,
+      dns2Host: dns2Host,
+      dns2Protocol: dns2Protocol,
       mtu: mtu,
     );
   }
@@ -176,6 +231,14 @@ class ProfileTransferEnvelope {
             (throw FormatException('Invalid integer field: $key')),
       _ => throw FormatException('Missing integer field: $key'),
     };
+  }
+
+  static bool _requireBool(Map<String, Object?> map, String key) {
+    final value = map[key];
+    if (value is! bool) {
+      throw FormatException('Missing bool field: $key');
+    }
+    return value;
   }
 
   static String _requireString(Map<String, Object?> map, String key) {

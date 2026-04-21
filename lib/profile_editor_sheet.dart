@@ -51,15 +51,20 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
   final _user = TextEditingController();
   final _password = TextEditingController();
   final _psk = TextEditingController();
-  final _dns = TextEditingController();
+  final _dns1 = TextEditingController();
+  final _dns2 = TextEditingController();
   final _mtu = TextEditingController();
+  bool _dnsAutomatic = true;
+  DnsProtocol _dns1Protocol = DnsProtocol.dnsOverUdp;
+  DnsProtocol _dns2Protocol = DnsProtocol.dnsOverUdp;
   bool _loading = true;
   String? _loadError;
 
   @override
   void initState() {
     super.initState();
-    _dns.addListener(_onDnsChanged);
+    _dns1.addListener(_onDnsChanged);
+    _dns2.addListener(_onDnsChanged);
     _load();
   }
 
@@ -85,7 +90,11 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
       _user.text = p.user;
       _password.text = row.password;
       _psk.text = row.psk;
-      _dns.text = p.dns;
+      _dnsAutomatic = p.dnsAutomatic;
+      _dns1.text = p.dns1Host;
+      _dns1Protocol = p.dns1Protocol;
+      _dns2.text = p.dns2Host;
+      _dns2Protocol = p.dns2Protocol;
       _mtu.text = '${p.mtu}';
       _loading = false;
     });
@@ -98,7 +107,8 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
     _user.dispose();
     _password.dispose();
     _psk.dispose();
-    _dns.dispose();
+    _dns1.dispose();
+    _dns2.dispose();
     _mtu.dispose();
     super.dispose();
   }
@@ -126,14 +136,46 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
       );
       return;
     }
-    final invalidDns = Profile.firstInvalidDnsServer(_dns.text);
-    if (invalidDns != null) {
-      showAppSnackBar(
-        context,
-        'DNS server "$invalidDns" is not a valid IPv4 address',
-        error: true,
-      );
-      return;
+    if (!_dnsAutomatic) {
+      final invalidDns1 = Profile.invalidDnsServer(_dns1.text, _dns1Protocol);
+      if (invalidDns1 != null) {
+        showAppSnackBar(
+          context,
+          Profile.validationMessageForDnsServer(
+            'DNS 1',
+            _dns1.text,
+            _dns1Protocol,
+          ),
+          error: true,
+        );
+        return;
+      }
+      final invalidDns2 = Profile.invalidDnsServer(_dns2.text, _dns2Protocol);
+      if (invalidDns2 != null) {
+        showAppSnackBar(
+          context,
+          Profile.validationMessageForDnsServer(
+            'DNS 2',
+            _dns2.text,
+            _dns2Protocol,
+          ),
+          error: true,
+        );
+        return;
+      }
+      if (Profile.orderedDnsServers(
+        dns1Host: _dns1.text,
+        dns1Protocol: _dns1Protocol,
+        dns2Host: _dns2.text,
+        dns2Protocol: _dns2Protocol,
+      ).isEmpty) {
+        showAppSnackBar(
+          context,
+          'Enter at least one DNS server or enable Automatic',
+          error: true,
+        );
+        return;
+      }
     }
     final profile = Profile(
       id: widget.profileId,
@@ -142,7 +184,11 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
           : _displayName.text.trim(),
       server: serverTrim,
       user: _user.text,
-      dns: Profile.normalizeDns(_dns.text),
+      dnsAutomatic: _dnsAutomatic,
+      dns1Host: Profile.normalizeDnsServer(_dns1.text),
+      dns1Protocol: _dns1Protocol,
+      dns2Host: Profile.normalizeDnsServer(_dns2.text),
+      dns2Protocol: _dns2Protocol,
       mtu: Profile.normalizeMtu(mtuParsed),
     );
     try {
@@ -174,6 +220,63 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
     );
   }
 
+  Widget _dnsRow({
+    required BuildContext context,
+    required TextEditingController controller,
+    required DnsProtocol protocol,
+    required String hint,
+    required String? errorText,
+    required ValueChanged<DnsProtocol?> onProtocolChanged,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: TextField(
+            controller: controller,
+            enabled: !_dnsAutomatic,
+            keyboardType: TextInputType.text,
+            decoration: _deco(
+              context,
+              label: 'DNS servers',
+              hint: hint,
+            ).copyWith(errorText: errorText),
+          ),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 118,
+          child: DropdownButtonFormField<DnsProtocol>(
+            initialValue: protocol,
+            isExpanded: true,
+            onChanged: _dnsAutomatic ? null : onProtocolChanged,
+            decoration: _deco(context).copyWith(
+              labelText: null,
+              hintText: null,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 14,
+              ),
+            ),
+            items: DnsProtocol.orderedValues
+                .map(
+                  (value) => DropdownMenuItem<DnsProtocol>(
+                    value: value,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(value.shortLabel),
+                    ),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -184,13 +287,13 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
     final maxH = MediaQuery.sizeOf(context).height * 0.9;
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     final safeBottom = MediaQuery.paddingOf(context).bottom;
-    final dnsCount = Profile.dnsEntriesFromText(_dns.text).length;
-    final invalidDns = Profile.firstInvalidDnsServer(_dns.text);
-    final dnsHelper = invalidDns != null
-        ? 'Invalid IPv4 DNS: $invalidDns'
-        : dnsCount > 1
-        ? '$dnsCount resolvers configured. Proxy mode falls back in order.'
-        : 'Separate with commas. Order matters.';
+    final dnsInvalid1 = _dnsAutomatic
+        ? null
+        : Profile.invalidDnsServer(_dns1.text, _dns1Protocol);
+    final dnsInvalid2 = _dnsAutomatic
+        ? null
+        : Profile.invalidDnsServer(_dns2.text, _dns2Protocol);
+    final dnsSectionColor = theme.colorScheme.surfaceContainerHigh;
     final mtuHelper =
         'Range ${Profile.minVpnMtu}-${Profile.maxVpnMtu}. Use ${Profile.defaultVpnMtu} unless you need a smaller MTU.';
 
@@ -288,14 +391,82 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      TextField(
-                        controller: _dns,
-                        keyboardType: TextInputType.text,
-                        decoration: _deco(
-                          context,
-                          label: 'DNS servers',
-                          hint: Profile.defaultDns,
-                        ).copyWith(helperText: dnsHelper),
+                      CheckboxListTile(
+                        value: _dnsAutomatic,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Automatic'),
+                        subtitle: const Text(
+                          'Receive DNS configuration automatically from the VPN server during PPP negotiation.',
+                        ),
+                        onChanged: _loading
+                            ? null
+                            : (value) {
+                                setState(() {
+                                  _dnsAutomatic = value ?? true;
+                                });
+                              },
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: dnsSectionColor,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text('DNS servers', style: tt.titleSmall),
+                            const SizedBox(height: 4),
+                            Text(
+                              'DNS 1 is primary. DNS 2 is fallback.',
+                              style: tt.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            _dnsRow(
+                              context: context,
+                              controller: _dns1,
+                              protocol: _dns1Protocol,
+                              hint: 'DNS 1',
+                              errorText: dnsInvalid1 == null
+                                  ? null
+                                  : Profile.validationMessageForDnsServer(
+                                      'DNS 1',
+                                      _dns1.text,
+                                      _dns1Protocol,
+                                    ),
+                              onProtocolChanged: (value) {
+                                setState(() {
+                                  _dns1Protocol =
+                                      value ?? DnsProtocol.dnsOverUdp;
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            _dnsRow(
+                              context: context,
+                              controller: _dns2,
+                              protocol: _dns2Protocol,
+                              hint: 'DNS 2',
+                              errorText: dnsInvalid2 == null
+                                  ? null
+                                  : Profile.validationMessageForDnsServer(
+                                      'DNS 2',
+                                      _dns2.text,
+                                      _dns2Protocol,
+                                    ),
+                              onProtocolChanged: (value) {
+                                setState(() {
+                                  _dns2Protocol =
+                                      value ?? DnsProtocol.dnsOverUdp;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
                       ),
                       const SizedBox(height: 12),
                       TextField(

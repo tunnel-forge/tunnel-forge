@@ -55,7 +55,7 @@ class ProfileStore {
     : _prefsOverride = prefsOverride,
       _secrets = secretsOverride ?? FlutterSecureSecretStore();
 
-  static const prefsKeyProfilesJson = 'vpn_profiles_json_v1';
+  static const prefsKeyProfilesJson = 'vpn_profiles_json_v3';
   static const prefsKeyLastProfileId = 'vpn_last_profile_id_v1';
   static const prefsKeyConnectionMode = 'connection_mode_v1';
   static const prefsKeyProxyHttpEnabled = 'proxy_http_enabled_v1';

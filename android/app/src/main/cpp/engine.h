@@ -38,6 +38,7 @@ int tunnel_negotiate(const char *server, const char *user, const char *password,
 
 /** After successful tunnel_negotiate(), copies negotiated PPP client IPv4 (same as IPCP local_ip). */
 void tunnel_negotiated_client_ipv4(uint8_t out[4]);
+void tunnel_negotiated_dns_ipv4(uint8_t primary_out[4], uint8_t secondary_out[4]);
 
 /** Phase 2: poll loop over TUN + ESP. Call after VPN establish(). Requires prior tunnel_negotiate() success. */
 int tunnel_run_loop(int tun_fd);

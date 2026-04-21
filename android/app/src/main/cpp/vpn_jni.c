@@ -35,7 +35,8 @@ cleanup:
 }
 
 static jint native_negotiate(JNIEnv *env, jclass clazz, jstring jserver, jstring juser, jstring jpassword, jstring jpsk,
-                             jint tun_mtu, jintArray jout_client_ipv4) {
+                             jint tun_mtu, jintArray jout_client_ipv4, jintArray jout_primary_dns_ipv4,
+                             jintArray jout_secondary_dns_ipv4) {
   (void)clazz;
   jint out = (jint)TUNNEL_EXIT_BAD_ARGS;
   const char *server = (*env)->GetStringUTFChars(env, jserver, NULL);
@@ -58,6 +59,26 @@ static jint native_negotiate(JNIEnv *env, jclass clazz, jstring jserver, jstring
       tmp[2] = (jint)b[2];
       tmp[3] = (jint)b[3];
       (*env)->SetIntArrayRegion(env, jout_client_ipv4, 0, 4, tmp);
+    }
+  }
+  if (out == (jint)TUNNEL_EXIT_OK) {
+    uint8_t primary_dns[4];
+    uint8_t secondary_dns[4];
+    jint tmp[4];
+    tunnel_negotiated_dns_ipv4(primary_dns, secondary_dns);
+    if (jout_primary_dns_ipv4 != NULL && (*env)->GetArrayLength(env, jout_primary_dns_ipv4) >= 4) {
+      tmp[0] = (jint)primary_dns[0];
+      tmp[1] = (jint)primary_dns[1];
+      tmp[2] = (jint)primary_dns[2];
+      tmp[3] = (jint)primary_dns[3];
+      (*env)->SetIntArrayRegion(env, jout_primary_dns_ipv4, 0, 4, tmp);
+    }
+    if (jout_secondary_dns_ipv4 != NULL && (*env)->GetArrayLength(env, jout_secondary_dns_ipv4) >= 4) {
+      tmp[0] = (jint)secondary_dns[0];
+      tmp[1] = (jint)secondary_dns[1];
+      tmp[2] = (jint)secondary_dns[2];
+      tmp[3] = (jint)secondary_dns[3];
+      (*env)->SetIntArrayRegion(env, jout_secondary_dns_ipv4, 0, 4, tmp);
     }
   }
 
@@ -133,7 +154,7 @@ static int register_vpn_bridge(JNIEnv *env) {
   static const JNINativeMethod methods[] = {
       {"nativeRunTunnel", "(ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)I",
        (void *)native_run_tunnel},
-      {"nativeNegotiate", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I[I)I",
+      {"nativeNegotiate", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I[I[I[I)I",
        (void *)native_negotiate},
       {"nativeSetSocketProtectionEnabled", "(Z)V", (void *)native_set_socket_protection_enabled},
       {"nativeStartLoop", "(I)I", (void *)native_start_loop},

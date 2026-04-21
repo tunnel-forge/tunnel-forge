@@ -3,6 +3,9 @@ package io.github.evokelektrique.tunnelforge
 import android.util.Log
 import java.io.IOException
 import java.io.OutputStream
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -40,10 +43,10 @@ data class UserspaceSessionSnapshot(
     val lastEvent: String,
 )
 
-class BridgeUserspaceTunnelStack(
+internal class BridgeUserspaceTunnelStack(
     private val bridge: ProxyPacketBridge,
     private val clientIpv4: String = DEFAULT_CLIENT_IPV4,
-    private val dnsServers: List<String> = listOf(DEFAULT_DNS_SERVER),
+    private val dnsServers: List<ResolvedDnsServerConfig> = emptyList(),
     private val linkMtu: Int = DEFAULT_LINK_MTU,
     private val logger: (Int, String) -> Unit = { level, message ->
         AppLog.println(level, TAG, message)
@@ -61,6 +64,7 @@ class BridgeUserspaceTunnelStack(
             bridge = bridge,
             clientIpv4 = clientIpv4,
             dnsServers = dnsServers,
+            openTunneledSocket = ::openTunneledSocket,
             logger = logger,
         )
     private val maxTcpPayloadBytes = (linkMtu - IPV4_HEADER_LEN - TCP_HEADER_LEN).coerceAtLeast(1)
@@ -90,7 +94,7 @@ class BridgeUserspaceTunnelStack(
                 )
             logger(
                 Log.DEBUG,
-                "userspace stack inbound pump started clientIpv4=$clientIpv4 dns=${dnsServers.joinToString(",")} mtu=$linkMtu mss=$advertisedMss",
+                "userspace stack inbound pump started clientIpv4=$clientIpv4 dns=${dnsServers.joinToString(",") { "${it.host}[${it.protocol.shortLabel}]=>${it.resolvedIpv4}" }} mtu=$linkMtu mss=$advertisedMss",
             )
         }
         return true
@@ -564,6 +568,48 @@ class BridgeUserspaceTunnelStack(
         }
     }
 
+    private fun openTunneledSocket(server: ResolvedDnsServerConfig): Socket {
+        val session =
+            openTcpSession(
+                ProxyConnectRequest(
+                    host = server.resolvedIpv4,
+                    port = server.port,
+                    protocol = server.protocol.wireValue,
+                ),
+            )
+        session.awaitEstablished(connectTimeoutMs)
+        val listener = ServerSocket(0, 1, InetAddress.getByName(LOCALHOST_IPV4))
+        try {
+            val clientSocket = Socket(LOCALHOST_IPV4, listener.localPort)
+            val accepted = listener.accept()
+            listener.close()
+            Thread(
+                {
+                    accepted.use { socket ->
+                        session.use {
+                            it.pumpBidirectional(
+                                ProxyClientConnection(
+                                    socket = socket,
+                                    input = socket.getInputStream(),
+                                    output = socket.getOutputStream(),
+                                ),
+                            )
+                        }
+                    }
+                },
+                "dns-tunnel-session-${session.descriptor.sessionId}",
+            ).start()
+            return clientSocket
+        } catch (e: IOException) {
+            try {
+                listener.close()
+            } catch (_: IOException) {
+            }
+            session.close()
+            throw e
+        }
+    }
+
     companion object {
         private const val TAG = "UserspaceTunnelStack"
         private const val IPV4_HEADER_LEN = 20
@@ -572,10 +618,10 @@ class BridgeUserspaceTunnelStack(
         private const val ICMP_CODE_FRAGMENTATION_NEEDED = 4
         private const val MAX_TCP_OPTION_VALUE = 0xffff
         private const val DEFAULT_CLIENT_IPV4 = "10.0.0.2"
-        private const val DEFAULT_DNS_SERVER = "8.8.8.8"
         private const val DEFAULT_LINK_MTU = 1450
         private const val DEFAULT_FAILURE_REASON = "TCP forwarding over the proxy packet bridge is not attached yet."
         private const val DEFAULT_CONNECT_TIMEOUT_MS = 10_000L
+        private const val LOCALHOST_IPV4 = "127.0.0.1"
     }
 }
 

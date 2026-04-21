@@ -95,6 +95,11 @@ void tunnel_negotiated_client_ipv4(uint8_t out[4]) {
   memcpy(out, g_state.ppp.local_ip, 4);
 }
 
+void tunnel_negotiated_dns_ipv4(uint8_t primary_out[4], uint8_t secondary_out[4]) {
+  if (primary_out != NULL) memcpy(primary_out, g_state.ppp.primary_dns, 4);
+  if (secondary_out != NULL) memcpy(secondary_out, g_state.ppp.secondary_dns, 4);
+}
+
 static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint) {
   if (!g_state.ready) {
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "tunnel_run_loop: not negotiated");

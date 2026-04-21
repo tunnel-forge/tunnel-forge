@@ -227,19 +227,60 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
         'Sending connect to ${proxyMode ? 'proxy service' : 'tunnel service'}... attempt=$attemptId',
         tag: 'tunnel',
       );
-      final invalidDns = Profile.firstInvalidDnsServer(_dns.text);
-      if (invalidDns != null) {
-        _logWarning(
-          'Connect blocked: invalid DNS server "$invalidDns"',
-          tag: 'tunnel',
-        );
-        _toast(
-          'DNS server "$invalidDns" is not a valid IPv4 address',
-          error: true,
-        );
-        return;
+      // Automatic PPP DNS treats the manual fields as dormant editor state only.
+      final dnsServers = !_dnsAutomatic
+          ? Profile.orderedDnsServers(
+              dns1Host: _dns1.text,
+              dns1Protocol: _dns1Protocol,
+              dns2Host: _dns2.text,
+              dns2Protocol: _dns2Protocol,
+            )
+          : const <DnsServerConfig>[];
+      if (!_dnsAutomatic) {
+        final invalidDns1 = Profile.invalidDnsServer(_dns1.text, _dns1Protocol);
+        if (invalidDns1 != null) {
+          _logWarning(
+            'Connect blocked: invalid DNS 1 server "$invalidDns1"',
+            tag: 'tunnel',
+          );
+          _toast(
+            Profile.validationMessageForDnsServer(
+              'DNS 1',
+              _dns1.text,
+              _dns1Protocol,
+            ),
+            error: true,
+          );
+          return;
+        }
+        final invalidDns2 = Profile.invalidDnsServer(_dns2.text, _dns2Protocol);
+        if (invalidDns2 != null) {
+          _logWarning(
+            'Connect blocked: invalid DNS 2 server "$invalidDns2"',
+            tag: 'tunnel',
+          );
+          _toast(
+            Profile.validationMessageForDnsServer(
+              'DNS 2',
+              _dns2.text,
+              _dns2Protocol,
+            ),
+            error: true,
+          );
+          return;
+        }
+        if (dnsServers.isEmpty) {
+          _logWarning(
+            'Connect blocked: manual DNS enabled without any DNS servers',
+            tag: 'tunnel',
+          );
+          _toast(
+            'Enter at least one DNS server or enable Automatic',
+            error: true,
+          );
+          return;
+        }
       }
-      final dnsServers = Profile.dnsServersFromText(_dns.text);
       final mtu = Profile.mtuFromText(
         _mtu.text,
         fallback: Profile.defaultVpnMtu,
@@ -252,8 +293,13 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
           break;
         }
       }
+      final dnsLog = _dnsAutomatic
+          ? 'automatic(ppp)'
+          : dnsServers
+                .map((entry) => '${entry.host}[${entry.protocol.shortLabel}]')
+                .join(', ');
       _logDebug(
-        'Profile: server=$host user=${_user.text.isEmpty ? '(empty)' : _user.text} dns=${dnsServers.join(', ')} mtu=$mtu '
+        'Profile: server=$host user=${_user.text.isEmpty ? '(empty)' : _user.text} dns=$dnsLog mtu=$mtu '
         'psk=${_psk.text.isEmpty ? 'off (cleartext L2TP if server allows)' : 'on'} '
         'mode=${_connectionMode.jsonValue} routing=${_routingMode.jsonValue} allowedApps=${_allowedAppPackages.length} '
         'http=${_proxySettings.httpEnabled ? _proxySettings.httpPort : 'off'} socks=${_proxySettings.socksEnabled ? _proxySettings.socksPort : 'off'} '
@@ -268,6 +314,7 @@ extension _VpnHomePageTunnel on _VpnHomePageState {
         user: _user.text,
         password: _password.text,
         psk: _psk.text,
+        dnsAutomatic: _dnsAutomatic,
         dnsServers: dnsServers,
         mtu: mtu,
         routingMode: _routingMode,

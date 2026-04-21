@@ -66,7 +66,13 @@ void main() {
         user: 'u',
         password: 'p',
         psk: 's',
-        dnsServers: const ['1.1.1.1'],
+        dnsAutomatic: false,
+        dnsServers: const [
+          DnsServerConfig(
+            host: '1.1.1.1',
+            protocol: DnsProtocol.dnsOverUdp,
+          ),
+        ],
       );
       expect(calls.single.method, VpnContract.connect);
       final args = calls.single.arguments as Map;
@@ -74,8 +80,13 @@ void main() {
       expect(args[VpnContract.argUser], 'u');
       expect(args[VpnContract.argPassword], 'p');
       expect(args[VpnContract.argPsk], 's');
-      expect(args[VpnContract.argDns], '1.1.1.1');
-      expect(args[VpnContract.argDnsServers], ['1.1.1.1']);
+      expect(args[VpnContract.argDnsAutomatic], isFalse);
+      expect(args[VpnContract.argDnsServers], [
+        {
+          VpnContract.argDnsServerHost: '1.1.1.1',
+          VpnContract.argDnsServerProtocol: DnsProtocol.dnsOverUdp.jsonValue,
+        },
+      ]);
       expect(args[VpnContract.argMtu], Profile.defaultVpnMtu);
       expect(
         args[VpnContract.argConnectionMode],

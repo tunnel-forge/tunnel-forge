@@ -23,6 +23,8 @@ object VpnBridge {
         psk: String,
         tunMtu: Int,
         outClientIpv4: IntArray?,
+        outPrimaryDnsIpv4: IntArray?,
+        outSecondaryDnsIpv4: IntArray?,
     ): Int
 
     @JvmStatic

@@ -38,6 +38,7 @@ class TunnelVpnService : VpnService() {
     private val running = AtomicBoolean(false)
     private var tunInterface: ParcelFileDescriptor? = null
     private var engineThread: Thread? = null
+    private var localDnsServer: LocalDnsServer? = null
     private var activeServer: String = ""
     private var activeProfileName: String? = null
 
@@ -114,7 +115,8 @@ class TunnelVpnService : VpnService() {
                 val user = intent.getStringExtra(EXTRA_USER) ?: ""
                 val password = intent.getStringExtra(EXTRA_PASSWORD) ?: ""
                 val psk = intent.getStringExtra(EXTRA_PSK) ?: ""
-                val dnsServers = sanitizeDnsServers(intent.getStringArrayListExtra(EXTRA_DNS_SERVERS), intent.getStringExtra(EXTRA_DNS))
+                val dnsAutomatic = intent.getBooleanExtra(EXTRA_DNS_AUTOMATIC, true)
+                val dnsServers = manualDnsServersFromIntent(intent)
                 val tunMtu = sanitizeMtu(intent.getIntExtra(EXTRA_MTU, DEFAULT_TUN_MTU))
                 val profileName = intent.getStringExtra(EXTRA_PROFILE_NAME)?.trim().orEmpty()
                 val routingMode = intent.getStringExtra(EXTRA_ROUTING_MODE) ?: VpnContract.ROUTING_FULL_TUNNEL
@@ -124,12 +126,12 @@ class TunnelVpnService : VpnService() {
                 VpnTunnelEvents.emitEngineLog(
                     Log.DEBUG,
                     TAG,
-                    "${prefixAttempt(attemptId)}ACTION_START accepted server=$server userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dns=${dnsServers.joinToString(",")} mtu=$tunMtu routing=$routingMode",
+                    "${prefixAttempt(attemptId)}ACTION_START accepted server=$server userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dnsMode=${if (dnsAutomatic) "automatic" else "manual"} dns=${dnsServers.joinToString(",") { "${it.host}[${it.protocol.shortLabel}]" }} mtu=$tunMtu routing=$routingMode",
                 )
                 // TUN establish() can block; do not hold up onStartCommand after startForeground.
                 Thread(
                     {
-                        startTunnel(attemptId, server, user, password, psk, dnsServers, tunMtu, routingMode, allowedPackages)
+                        startTunnel(attemptId, server, user, password, psk, dnsAutomatic, dnsServers, tunMtu, routingMode, allowedPackages)
                     },
                     "tun-setup",
                 ).start()
@@ -153,7 +155,8 @@ class TunnelVpnService : VpnService() {
         user: String,
         password: String,
         psk: String,
-        dnsServers: List<String>,
+        dnsAutomatic: Boolean,
+        dnsServers: List<DnsServerConfig>,
         tunMtu: Int,
         routingMode: String,
         allowedPackages: ArrayList<String>?,
@@ -200,7 +203,19 @@ class TunnelVpnService : VpnService() {
             VpnBridge.nativeSetSocketProtectionEnabled(true)
             // Phase 1: negotiate IKE+L2TP+PPP on the real network (no VPN tunnel yet).
             val negotiatedClientIp = IntArray(4)
-            val negResult = VpnBridge.nativeNegotiate(server, user, password, psk, tunMtu, negotiatedClientIp)
+            val negotiatedPrimaryDns = IntArray(4)
+            val negotiatedSecondaryDns = IntArray(4)
+            val negResult =
+                VpnBridge.nativeNegotiate(
+                    server,
+                    user,
+                    password,
+                    psk,
+                    tunMtu,
+                    negotiatedClientIp,
+                    negotiatedPrimaryDns,
+                    negotiatedSecondaryDns,
+                )
             VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}nativeNegotiate finished with exit code=$negResult")
             if (negResult != 0) {
                 VpnTunnelEvents.emit(VpnContract.TUNNEL_FAILED, tunnelExitDetail(negResult))
@@ -224,13 +239,60 @@ class TunnelVpnService : VpnService() {
                 TAG,
                 "${prefixAttempt(attemptId)}TUN addAddress=$addressForTun (IPCP=$tunIpv4 useIpcp=$useIpcpAddress)",
             )
+            val automaticDnsServers = DnsConfigSupport.negotiatedServers(negotiatedPrimaryDns, negotiatedSecondaryDns)
+            val manualDnsServers =
+                if (dnsAutomatic) {
+                    emptyList()
+                } else {
+                    DnsConfigSupport.resolveUpstreamServers(dnsServers)
+                }
+            if ((dnsAutomatic && automaticDnsServers.isEmpty()) ||
+                (!dnsAutomatic && manualDnsServers.isEmpty())
+            ) {
+                VpnTunnelEvents.emit(
+                    VpnContract.TUNNEL_FAILED,
+                    if (dnsAutomatic) {
+                        "PPP negotiation did not provide any DNS servers."
+                    } else {
+                        "Manual DNS requires at least one DNS server."
+                    },
+                )
+                VpnTunnelEvents.emitEngineLog(
+                    Log.ERROR,
+                    TAG,
+                    "${prefixAttempt(attemptId)}No DNS servers available after negotiation dnsMode=${if (dnsAutomatic) "automatic" else "manual"}",
+                )
+                running.set(false)
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return
+            }
+            if (!dnsAutomatic) {
+                localDnsServer =
+                    LocalDnsServer(
+                        exchangeClient =
+                            DirectDnsExchangeClient(
+                                servers = manualDnsServers,
+                                logger = { level, message ->
+                                    VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
+                                },
+                            ),
+                        logger = { level, message ->
+                            VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
+                        },
+                    ).also { it.start() }
+            }
             val builder = Builder()
                 .setSession(getString(R.string.vpn_session_name))
                 .setMtu(tunMtu)
                 .addAddress(addressForTun, 32)
                 .addRoute("0.0.0.0", 0)
-            for (dnsServer in dnsServers) {
-                builder.addDnsServer(dnsServer)
+            if (dnsAutomatic) {
+                for (dnsServer in automaticDnsServers.map { it.resolvedIpv4 }) {
+                    builder.addDnsServer(dnsServer)
+                }
+            } else {
+                builder.addDnsServer(LocalDnsServer.LOCALHOST_IPV4)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 builder.allowFamily(OsConstants.AF_INET)
@@ -293,6 +355,11 @@ class TunnelVpnService : VpnService() {
             VpnTunnelEvents.emit(VpnContract.TUNNEL_FAILED, e.message ?: "startTunnel failed")
             running.set(false)
             try {
+                localDnsServer?.close()
+            } catch (_: Exception) {
+            }
+            localDnsServer = null
+            try {
                 tunInterface?.close()
             } catch (_: Exception) {
             }
@@ -323,6 +390,11 @@ class TunnelVpnService : VpnService() {
         } catch (_: Exception) {
         }
         tunInterface = null
+        try {
+            localDnsServer?.close()
+        } catch (_: Exception) {
+        }
+        localDnsServer = null
         activeServer = ""
         activeProfileName = null
         running.set(false)
@@ -336,6 +408,11 @@ class TunnelVpnService : VpnService() {
         } catch (_: Exception) {
         }
         tunInterface = null
+        try {
+            localDnsServer?.close()
+        } catch (_: Exception) {
+        }
+        localDnsServer = null
         try {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } catch (e: Exception) {
@@ -442,8 +519,11 @@ class TunnelVpnService : VpnService() {
         const val EXTRA_USER = "user"
         const val EXTRA_PASSWORD = "password"
         const val EXTRA_PSK = "psk"
-        const val EXTRA_DNS = "dns"
-        const val EXTRA_DNS_SERVERS = "dnsServers"
+        const val EXTRA_DNS_AUTOMATIC = "dnsAutomatic"
+        const val EXTRA_DNS_SERVER_1_HOST = "dnsServer1Host"
+        const val EXTRA_DNS_SERVER_1_PROTOCOL = "dnsServer1Protocol"
+        const val EXTRA_DNS_SERVER_2_HOST = "dnsServer2Host"
+        const val EXTRA_DNS_SERVER_2_PROTOCOL = "dnsServer2Protocol"
         const val EXTRA_MTU = "mtu"
         const val EXTRA_PROFILE_NAME = "profileName"
         const val EXTRA_ROUTING_MODE = "routingMode"
@@ -455,8 +535,6 @@ class TunnelVpnService : VpnService() {
 
         /** When [EXTRA_MTU] is absent or invalid. */
         const val DEFAULT_TUN_MTU = 1450
-        const val DEFAULT_DNS_SERVER = "8.8.8.8"
-
         private const val MIN_TUN_MTU = 576
         private const val MAX_TUN_MTU = 1500
 
@@ -464,16 +542,19 @@ class TunnelVpnService : VpnService() {
 
         fun sanitizeMtu(value: Int): Int = value.coerceIn(MIN_TUN_MTU, MAX_TUN_MTU)
 
-        fun sanitizeDnsServers(raw: List<String>?, legacyDns: String?): List<String> {
-            val out = linkedSetOf<String>()
-            raw.orEmpty().forEach { server ->
-                val ipv4 = server.trim().toIpv4LiteralOrNull()
-                if (ipv4 != null) out.add(ipv4)
-            }
-            val legacy = legacyDns?.trim().orEmpty().toIpv4LiteralOrNull()
-            if (legacy != null) out.add(legacy)
-            if (out.isEmpty()) out.add(DEFAULT_DNS_SERVER)
-            return out.toList()
+        internal fun manualDnsServersFromIntent(intent: Intent): List<DnsServerConfig> {
+            val servers =
+                listOf(
+                    DnsServerConfig(
+                        host = intent.getStringExtra(EXTRA_DNS_SERVER_1_HOST)?.trim().orEmpty(),
+                        protocol = DnsProtocol.fromWireValue(intent.getStringExtra(EXTRA_DNS_SERVER_1_PROTOCOL)),
+                    ),
+                    DnsServerConfig(
+                        host = intent.getStringExtra(EXTRA_DNS_SERVER_2_HOST)?.trim().orEmpty(),
+                        protocol = DnsProtocol.fromWireValue(intent.getStringExtra(EXTRA_DNS_SERVER_2_PROTOCOL)),
+                    ),
+                )
+            return DnsConfigSupport.sanitize(servers)
         }
 
         @Volatile

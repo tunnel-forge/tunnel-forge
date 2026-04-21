@@ -14,7 +14,11 @@ void main() {
         'displayName': 'Office',
         'server': 'vpn.company.net',
         'user': 'u',
-        'dns': '1.1.1.1',
+        'dnsAutomatic': false,
+        'dns1Host': '1.1.1.1',
+        'dns1Protocol': 'dnsOverUdp',
+        'dns2Host': '',
+        'dns2Protocol': 'dnsOverUdp',
       });
       expect(p, isNotNull);
       expect(p!.id, 'a1');
@@ -30,7 +34,11 @@ void main() {
         'displayName': 'M',
         'server': 's',
         'user': 'u',
-        'dns': '8.8.8.8',
+        'dnsAutomatic': true,
+        'dns1Host': '',
+        'dns1Protocol': 'dnsOverUdp',
+        'dns2Host': '',
+        'dns2Protocol': 'dnsOverUdp',
         'mtu': 9000,
       });
       expect(hi, isNotNull);
@@ -40,7 +48,11 @@ void main() {
         'displayName': 'M',
         'server': 's',
         'user': 'u',
-        'dns': '8.8.8.8',
+        'dnsAutomatic': true,
+        'dns1Host': '',
+        'dns1Protocol': 'dnsOverUdp',
+        'dns2Host': '',
+        'dns2Protocol': 'dnsOverUdp',
         'mtu': 100,
       });
       expect(lo, isNotNull);
@@ -53,7 +65,11 @@ void main() {
         'displayName': 'Per',
         'server': 'vpn.example',
         'user': 'u',
-        'dns': '8.8.8.8',
+        'dnsAutomatic': true,
+        'dns1Host': '',
+        'dns1Protocol': 'dnsOverUdp',
+        'dns2Host': '',
+        'dns2Protocol': 'dnsOverUdp',
         'routingMode': 'perAppAllowList',
         'allowedAppPackages': ['com.foo.app', 'com.bar.app'],
       });
@@ -63,28 +79,34 @@ void main() {
       expect(p.toJson().containsKey('allowedAppPackages'), isFalse);
     });
 
-    test('normalizes multi-dns entries while preserving order', () {
-      expect(
-        Profile.dnsServersFromText(' 1.1.1.1,8.8.8.8; 1.1.1.1 \n 9.9.9.9 '),
-        ['1.1.1.1', '8.8.8.8', '9.9.9.9'],
+    test('orders manual dns with dns1 priority and dns2 fallback', () {
+      final ordered = Profile.orderedDnsServers(
+        dns1Host: ' 1.1.1.1 ',
+        dns1Protocol: DnsProtocol.dnsOverUdp,
+        dns2Host: 'resolver.example',
+        dns2Protocol: DnsProtocol.dnsOverTls,
       );
-      expect(
-        Profile.normalizeDns(' 1.1.1.1,8.8.8.8; 1.1.1.1 \n 9.9.9.9 '),
-        '1.1.1.1, 8.8.8.8, 9.9.9.9',
-      );
+      expect(ordered, hasLength(2));
+      expect(ordered[0].host, '1.1.1.1');
+      expect(ordered[0].protocol, DnsProtocol.dnsOverUdp);
+      expect(ordered[1].host, 'resolver.example');
+      expect(ordered[1].protocol, DnsProtocol.dnsOverTls);
     });
 
-    test('falls back to default dns when input is empty', () {
-      expect(Profile.dnsServersFromText('   '), [Profile.defaultDns]);
-      expect(Profile.normalizeDns(''), Profile.defaultDns);
+    test('normalizes individual dns inputs', () {
+      expect(Profile.normalizeDnsServer(' 1.1.1.1 '), '1.1.1.1');
+      expect(Profile.normalizeDnsServer(''), '');
     });
 
-    test('reports the first invalid dns server token', () {
+    test('reports invalid dns entries per field', () {
       expect(
-        Profile.firstInvalidDnsServer('1.1.1.1, example.com, 9.9.9.9'),
-        'example.com',
+        Profile.invalidDnsServer('1.1.1.1', DnsProtocol.dnsOverTls),
+        '1.1.1.1',
       );
-      expect(Profile.firstInvalidDnsServer('1.1.1.1, 9.9.9.9'), isNull);
+      expect(
+        Profile.invalidDnsServer('example.com', DnsProtocol.dnsOverUdp),
+        isNull,
+      );
     });
   });
 
@@ -107,7 +129,11 @@ void main() {
         displayName: 'One',
         server: 's.example',
         user: 'alice',
-        dns: '8.8.8.8',
+        dnsAutomatic: true,
+        dns1Host: '',
+        dns1Protocol: DnsProtocol.dnsOverUdp,
+        dns2Host: '',
+        dns2Protocol: DnsProtocol.dnsOverUdp,
       );
       await store.upsertProfile(profile, password: 'pw1', psk: 'psk1');
 

@@ -654,7 +654,11 @@ static int ppp_auth_pap(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer
 static int ipcp_ipv4_is_zero(const uint8_t ip[4]) { return ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0; }
 
 /** [ipcp] starts at IPCP Code byte; [ipcplen] is RFC 1661 Length field (Code+Id+Len+Options). */
-static int ipcp_opts_first_ip3(const uint8_t *ipcp, uint16_t ipcplen, uint8_t ip_out[4]) {
+#define IPCP_OPT_IP_ADDRESS 3u
+#define IPCP_OPT_PRIMARY_DNS 129u
+#define IPCP_OPT_SECONDARY_DNS 131u
+
+static int ipcp_opts_first_ipv4_option(const uint8_t *ipcp, uint16_t ipcplen, uint8_t option_type, uint8_t ip_out[4]) {
   if (ipcplen < 4u) return -1;
   const uint8_t *opts = ipcp + 4u;
   size_t rem = (size_t)ipcplen - 4u;
@@ -663,7 +667,7 @@ static int ipcp_opts_first_ip3(const uint8_t *ipcp, uint16_t ipcplen, uint8_t ip
     uint8_t t = opts[i];
     uint8_t ol = opts[i + 1u];
     if (ol < 2u || i + (size_t)ol > rem) break;
-    if (t == 3u && ol >= 6u) {
+    if (t == option_type && ol >= 6u) {
       memcpy(ip_out, opts + i + 2u, 4);
       return 0;
     }
@@ -672,8 +676,9 @@ static int ipcp_opts_first_ip3(const uint8_t *ipcp, uint16_t ipcplen, uint8_t ip
   return -1;
 }
 
-static void ipcp_apply_conf_reject_ip(const uint8_t *ipcp, uint16_t ipcplen, int *include_ip_opt) {
-  if (ipcplen < 4u || include_ip_opt == NULL) return;
+static void ipcp_apply_conf_reject_opts(const uint8_t *ipcp, uint16_t ipcplen, int *include_ip_opt,
+                                        int *include_primary_dns_opt, int *include_secondary_dns_opt) {
+  if (ipcplen < 4u) return;
   const uint8_t *opts = ipcp + 4u;
   size_t rem = (size_t)ipcplen - 4u;
   size_t i = 0;
@@ -681,22 +686,25 @@ static void ipcp_apply_conf_reject_ip(const uint8_t *ipcp, uint16_t ipcplen, int
     uint8_t t = opts[i];
     uint8_t ol = opts[i + 1u];
     if (ol < 2u || i + (size_t)ol > rem) break;
-    if (t == 3u) *include_ip_opt = 0;
+    if (t == IPCP_OPT_IP_ADDRESS && include_ip_opt != NULL) *include_ip_opt = 0;
+    if (t == IPCP_OPT_PRIMARY_DNS && include_primary_dns_opt != NULL) *include_primary_dns_opt = 0;
+    if (t == IPCP_OPT_SECONDARY_DNS && include_secondary_dns_opt != NULL) *include_secondary_dns_opt = 0;
     i += (size_t)ol;
   }
 }
 
 static int ipcp_build_cr(uint8_t *out, size_t cap, uint8_t id, const uint8_t ip[4], int include_address_control,
-                         int include_ip_opt) {
+                         int include_ip_opt, const uint8_t primary_dns[4], int include_primary_dns_opt,
+                         const uint8_t secondary_dns[4], int include_secondary_dns_opt) {
   size_t o = 0;
   if (include_address_control) {
-    if (cap < 32u) return -1;
+    if (cap < 8u) return -1;
     out[o++] = 0xff;
     out[o++] = 0x03;
     util_write_be16(out + o, PROTO_IPCP);
     o += 2u;
   } else {
-    if (cap < 28u) return -1;
+    if (cap < 6u) return -1;
     util_write_be16(out + o, PROTO_IPCP);
     o += 2u;
   }
@@ -707,9 +715,23 @@ static int ipcp_build_cr(uint8_t *out, size_t cap, uint8_t id, const uint8_t ip[
   o += 2u;
   if (include_ip_opt) {
     if (o + 6u > cap) return -1;
-    out[o++] = 3;
+    out[o++] = IPCP_OPT_IP_ADDRESS;
     out[o++] = 6;
     memcpy(out + o, ip, 4);
+    o += 4u;
+  }
+  if (include_primary_dns_opt) {
+    if (o + 6u > cap) return -1;
+    out[o++] = IPCP_OPT_PRIMARY_DNS;
+    out[o++] = 6;
+    memcpy(out + o, primary_dns, 4);
+    o += 4u;
+  }
+  if (include_secondary_dns_opt) {
+    if (o + 6u > cap) return -1;
+    out[o++] = IPCP_OPT_SECONDARY_DNS;
+    out[o++] = 6;
+    memcpy(out + o, secondary_dns, 4);
     o += 4u;
   }
   util_write_be16(out + len_mark, (uint16_t)(o - code_off));
@@ -720,14 +742,24 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
                               l2tp_session_t *l2tp, ppp_session_t *ppp) {
   uint8_t id = 1;
   uint8_t req_ip[4] = {0, 0, 0, 0};
+  uint8_t req_primary_dns[4] = {0, 0, 0, 0};
+  uint8_t req_secondary_dns[4] = {0, 0, 0, 0};
   int ipcp_out_include_ac = 1;
   int ipcp_peer_framing_seen = 0;
   int include_ip_opt = 1;
+  int include_primary_dns_opt = 1;
+  int include_secondary_dns_opt = 1;
   uint8_t pkt[64];
-  int plen = ipcp_build_cr(pkt, sizeof(pkt), id, req_ip, ipcp_out_include_ac, include_ip_opt);
+  int plen = ipcp_build_cr(pkt, sizeof(pkt), id, req_ip, ipcp_out_include_ac, include_ip_opt, req_primary_dns,
+                           include_primary_dns_opt, req_secondary_dns, include_secondary_dns_opt);
   if (plen < 0) return -1;
-  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp: send Configure-Request id=%u ip=%u.%u.%u.%u", (unsigned)id,
-                    (unsigned)req_ip[0], (unsigned)req_ip[1], (unsigned)req_ip[2], (unsigned)req_ip[3]);
+  tunnel_engine_log(
+      ANDROID_LOG_DEBUG, LOG_TAG,
+      "ppp ipcp: send Configure-Request id=%u ip=%u.%u.%u.%u primary_dns=%u.%u.%u.%u secondary_dns=%u.%u.%u.%u",
+      (unsigned)id, (unsigned)req_ip[0], (unsigned)req_ip[1], (unsigned)req_ip[2], (unsigned)req_ip[3],
+      (unsigned)req_primary_dns[0], (unsigned)req_primary_dns[1], (unsigned)req_primary_dns[2],
+      (unsigned)req_primary_dns[3], (unsigned)req_secondary_dns[0], (unsigned)req_secondary_dns[1],
+      (unsigned)req_secondary_dns[2], (unsigned)req_secondary_dns[3]);
   if (send_ppp(esp_fd, esp, peer, peer_len, l2tp, pkt, (size_t)plen) < 0) return -1;
 
   uint8_t in[4096];
@@ -756,7 +788,7 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
         tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp peer framing addr_ctl=%d", ipcp_out_include_ac);
       }
       uint8_t peer_gw[4];
-      if (ipcp_opts_first_ip3(ipcp_msg, ipcplen, peer_gw) == 0) {
+      if (ipcp_opts_first_ipv4_option(ipcp_msg, ipcplen, IPCP_OPT_IP_ADDRESS, peer_gw) == 0) {
         memcpy(ppp->peer_ip, peer_gw, 4);
         tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp: peer Configure-Request IP=%u.%u.%u.%u",
                           (unsigned)peer_gw[0], (unsigned)peer_gw[1], (unsigned)peer_gw[2], (unsigned)peer_gw[3]);
@@ -775,7 +807,7 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
     }
 
     if (code == 2 && rid == id) {
-      if (ipcp_opts_first_ip3(ipcp_msg, ipcplen, ppp->local_ip) != 0) {
+      if (ipcp_opts_first_ipv4_option(ipcp_msg, ipcplen, IPCP_OPT_IP_ADDRESS, ppp->local_ip) != 0) {
         memcpy(ppp->local_ip, req_ip, 4);
       }
       if (ipcp_ipv4_is_zero(ppp->local_ip)) {
@@ -785,24 +817,50 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
         ppp->local_ip[3] = 2;
       }
       ppp->have_ip = 1;
-      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp: Configure-Ack id=%u local=%u.%u.%u.%u", (unsigned)id,
-                        (unsigned)ppp->local_ip[0], (unsigned)ppp->local_ip[1], (unsigned)ppp->local_ip[2],
-                        (unsigned)ppp->local_ip[3]);
+      if (include_primary_dns_opt &&
+          ipcp_opts_first_ipv4_option(ipcp_msg, ipcplen, IPCP_OPT_PRIMARY_DNS, ppp->primary_dns) != 0) {
+        memcpy(ppp->primary_dns, req_primary_dns, 4);
+      }
+      if (!ipcp_ipv4_is_zero(ppp->primary_dns)) {
+        ppp->have_primary_dns = 1;
+      }
+      if (include_secondary_dns_opt &&
+          ipcp_opts_first_ipv4_option(ipcp_msg, ipcplen, IPCP_OPT_SECONDARY_DNS, ppp->secondary_dns) != 0) {
+        memcpy(ppp->secondary_dns, req_secondary_dns, 4);
+      }
+      if (!ipcp_ipv4_is_zero(ppp->secondary_dns)) {
+        ppp->have_secondary_dns = 1;
+      }
+      tunnel_engine_log(
+          ANDROID_LOG_DEBUG, LOG_TAG,
+          "ppp ipcp: Configure-Ack id=%u local=%u.%u.%u.%u primary_dns=%u.%u.%u.%u secondary_dns=%u.%u.%u.%u",
+          (unsigned)id, (unsigned)ppp->local_ip[0], (unsigned)ppp->local_ip[1], (unsigned)ppp->local_ip[2],
+          (unsigned)ppp->local_ip[3], (unsigned)ppp->primary_dns[0], (unsigned)ppp->primary_dns[1],
+          (unsigned)ppp->primary_dns[2], (unsigned)ppp->primary_dns[3], (unsigned)ppp->secondary_dns[0],
+          (unsigned)ppp->secondary_dns[1], (unsigned)ppp->secondary_dns[2], (unsigned)ppp->secondary_dns[3]);
       got_ack = 1;
       break;
     }
 
     if (code == 3 && rid == id) {
-      if (ipcp_opts_first_ip3(ipcp_msg, ipcplen, req_ip) == 0) {
+      if (ipcp_opts_first_ipv4_option(ipcp_msg, ipcplen, IPCP_OPT_IP_ADDRESS, req_ip) == 0) {
         tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp: Configure-Nak id=%u suggested=%u.%u.%u.%u",
                           (unsigned)rid, (unsigned)req_ip[0], (unsigned)req_ip[1], (unsigned)req_ip[2],
                           (unsigned)req_ip[3]);
-      } else {
-        tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "ppp ipcp: Configure-Nak id=%u (no IP option parsed)",
-                          (unsigned)rid);
+      }
+      if (ipcp_opts_first_ipv4_option(ipcp_msg, ipcplen, IPCP_OPT_PRIMARY_DNS, req_primary_dns) == 0) {
+        tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp: Configure-Nak id=%u primary_dns=%u.%u.%u.%u",
+                          (unsigned)rid, (unsigned)req_primary_dns[0], (unsigned)req_primary_dns[1],
+                          (unsigned)req_primary_dns[2], (unsigned)req_primary_dns[3]);
+      }
+      if (ipcp_opts_first_ipv4_option(ipcp_msg, ipcplen, IPCP_OPT_SECONDARY_DNS, req_secondary_dns) == 0) {
+        tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp: Configure-Nak id=%u secondary_dns=%u.%u.%u.%u",
+                          (unsigned)rid, (unsigned)req_secondary_dns[0], (unsigned)req_secondary_dns[1],
+                          (unsigned)req_secondary_dns[2], (unsigned)req_secondary_dns[3]);
       }
       id++;
-      plen = ipcp_build_cr(pkt, sizeof(pkt), id, req_ip, ipcp_out_include_ac, include_ip_opt);
+      plen = ipcp_build_cr(pkt, sizeof(pkt), id, req_ip, ipcp_out_include_ac, include_ip_opt, req_primary_dns,
+                           include_primary_dns_opt, req_secondary_dns, include_secondary_dns_opt);
       if (plen < 0) return -1;
       if (send_ppp(esp_fd, esp, peer, peer_len, l2tp, pkt, (size_t)plen) < 0) return -1;
       continue;
@@ -810,9 +868,11 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
 
     if (code == 4 && rid == id) {
       tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "ppp ipcp: Configure-Reject id=%u", (unsigned)rid);
-      ipcp_apply_conf_reject_ip(ipcp_msg, ipcplen, &include_ip_opt);
+      ipcp_apply_conf_reject_opts(ipcp_msg, ipcplen, &include_ip_opt, &include_primary_dns_opt,
+                                  &include_secondary_dns_opt);
       id++;
-      plen = ipcp_build_cr(pkt, sizeof(pkt), id, req_ip, ipcp_out_include_ac, include_ip_opt);
+      plen = ipcp_build_cr(pkt, sizeof(pkt), id, req_ip, ipcp_out_include_ac, include_ip_opt, req_primary_dns,
+                           include_primary_dns_opt, req_secondary_dns, include_secondary_dns_opt);
       if (plen < 0) return -1;
       if (send_ppp(esp_fd, esp, peer, peer_len, l2tp, pkt, (size_t)plen) < 0) return -1;
       continue;

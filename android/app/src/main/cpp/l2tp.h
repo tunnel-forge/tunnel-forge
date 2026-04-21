@@ -25,8 +25,11 @@ typedef struct {
   uint8_t local_ip[4];
   /** Peer IPv4 from their IPCP Configure-Request option 3 (link remote), if present. */
   uint8_t peer_ip[4];
-  uint8_t dns[4];
+  uint8_t primary_dns[4];
+  uint8_t secondary_dns[4];
   int have_ip;
+  int have_primary_dns;
+  int have_secondary_dns;
   /** Inner IPv4 link MTU chosen by the app; also advertised as our PPP MRU. */
   uint16_t link_mtu;
   /** TCP MSS clamp derived from [link_mtu] for outbound IPv4 SYN packets. */

@@ -15,7 +15,11 @@ void main() {
         user: 'alice',
         password: 'pw',
         psk: 'psk',
-        dns: '1.1.1.1, 8.8.8.8',
+        dnsAutomatic: false,
+        dns1Host: '1.1.1.1',
+        dns1Protocol: DnsProtocol.dnsOverUdp,
+        dns2Host: 'dns.example.com',
+        dns2Protocol: DnsProtocol.dnsOverTls,
         mtu: 1400,
       );
 
@@ -27,7 +31,11 @@ void main() {
       expect(decoded.server, 'vpn.example.com');
       expect(decoded.password, 'pw');
       expect(decoded.psk, 'psk');
-      expect(decoded.dns, '1.1.1.1, 8.8.8.8');
+      expect(decoded.dnsAutomatic, isFalse);
+      expect(decoded.dns1Host, '1.1.1.1');
+      expect(decoded.dns1Protocol, DnsProtocol.dnsOverUdp);
+      expect(decoded.dns2Host, 'dns.example.com');
+      expect(decoded.dns2Protocol, DnsProtocol.dnsOverTls);
       expect(decoded.mtu, 1400);
     });
 
@@ -38,7 +46,11 @@ void main() {
         user: 'alice',
         password: 'pw',
         psk: 'psk',
-        dns: '1.1.1.1',
+        dnsAutomatic: false,
+        dns1Host: '1.1.1.1',
+        dns1Protocol: DnsProtocol.dnsOverUdp,
+        dns2Host: '',
+        dns2Protocol: DnsProtocol.dnsOverUdp,
         mtu: 1400,
       );
 
@@ -59,7 +71,11 @@ void main() {
           'user': 'alice',
           'password': 'pw',
           'psk': 'psk',
-          'dns': '1.1.1.1',
+          'dnsAutomatic': false,
+          'dns1Host': '1.1.1.1',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
           'mtu': 1400,
         }),
         throwsFormatException,
@@ -86,7 +102,11 @@ void main() {
         displayName: 'Office',
         server: 'vpn.example.com',
         user: 'alice',
-        dns: '1.1.1.1',
+        dnsAutomatic: false,
+        dns1Host: '1.1.1.1',
+        dns1Protocol: DnsProtocol.dnsOverUdp,
+        dns2Host: '',
+        dns2Protocol: DnsProtocol.dnsOverUdp,
       );
       await store.upsertProfile(existing, password: 'old', psk: 'old-psk');
 
@@ -97,7 +117,11 @@ void main() {
           user: 'alice',
           password: 'new',
           psk: 'new-psk',
-          dns: '1.1.1.1',
+          dnsAutomatic: false,
+          dns1Host: '1.1.1.1',
+          dns1Protocol: DnsProtocol.dnsOverUdp,
+          dns2Host: '',
+          dns2Protocol: DnsProtocol.dnsOverUdp,
           mtu: 1400,
         ),
       );

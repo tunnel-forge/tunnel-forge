@@ -103,8 +103,8 @@ class MainActivity : FlutterActivity() {
                     val user = args[VpnContract.ARG_USER] as? String ?: ""
                     val password = args[VpnContract.ARG_PASSWORD] as? String ?: ""
                     val psk = args[VpnContract.ARG_PSK] as? String ?: ""
-                    val dnsServers = parseDnsServers(args[VpnContract.ARG_DNS_SERVERS], args[VpnContract.ARG_DNS] as? String)
-                    val dns = dnsServers.first()
+                    val dnsAutomatic = args[VpnContract.ARG_DNS_AUTOMATIC] as? Boolean ?: true
+                    val dnsServers = parseDnsServers(args[VpnContract.ARG_DNS_SERVERS])
                     val mtuRaw = args[VpnContract.ARG_MTU]
                     val mtu = TunnelVpnService.sanitizeMtu(
                         when (mtuRaw) {
@@ -163,7 +163,7 @@ class MainActivity : FlutterActivity() {
                     }
                     AppLog.d(
                         TAG,
-                        "vpn_call connect start attempt=$attemptId server=$serverTrim userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dns=${dnsServers.joinToString(",")} mtu=$mtu mode=$connectionMode routing=$routingMode allowedApps=${allowedPackages.size}",
+                        "vpn_call connect start attempt=$attemptId server=$serverTrim userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dnsMode=${if (dnsAutomatic) "automatic" else "manual"} dns=${dnsServers.joinToString(",") { "${it.host}[${it.protocol.shortLabel}]" }} mtu=$mtu mode=$connectionMode routing=$routingMode allowedApps=${allowedPackages.size}",
                     )
                     val intent =
                         if (connectionMode == VpnContract.MODE_PROXY_ONLY) {
@@ -174,8 +174,8 @@ class MainActivity : FlutterActivity() {
                                 putExtra(ProxyTunnelService.EXTRA_USER, user)
                                 putExtra(ProxyTunnelService.EXTRA_PASSWORD, password)
                                 putExtra(ProxyTunnelService.EXTRA_PSK, psk)
-                                putExtra(ProxyTunnelService.EXTRA_DNS, dns)
-                                putStringArrayListExtra(ProxyTunnelService.EXTRA_DNS_SERVERS, ArrayList(dnsServers))
+                                putExtra(ProxyTunnelService.EXTRA_DNS_AUTOMATIC, dnsAutomatic)
+                                putDnsServerExtras(this, dnsServers)
                                 putExtra(ProxyTunnelService.EXTRA_MTU, mtu)
                                 putExtra(ProxyTunnelService.EXTRA_PROFILE_NAME, profileName)
                                 putExtra(ProxyTunnelService.EXTRA_PROXY_HTTP_ENABLED, proxyHttpEnabled)
@@ -191,8 +191,8 @@ class MainActivity : FlutterActivity() {
                                 putExtra(TunnelVpnService.EXTRA_USER, user)
                                 putExtra(TunnelVpnService.EXTRA_PASSWORD, password)
                                 putExtra(TunnelVpnService.EXTRA_PSK, psk)
-                                putExtra(TunnelVpnService.EXTRA_DNS, dns)
-                                putStringArrayListExtra(TunnelVpnService.EXTRA_DNS_SERVERS, ArrayList(dnsServers))
+                                putExtra(TunnelVpnService.EXTRA_DNS_AUTOMATIC, dnsAutomatic)
+                                putDnsServerExtras(this, dnsServers)
                                 putExtra(TunnelVpnService.EXTRA_MTU, mtu)
                                 putExtra(TunnelVpnService.EXTRA_PROFILE_NAME, profileName)
                                 putExtra(TunnelVpnService.EXTRA_ROUTING_MODE, routingMode)
@@ -405,18 +405,35 @@ class MainActivity : FlutterActivity() {
         return if (candidate in 1..65535) candidate else fallback
     }
 
-    private fun parseDnsServers(raw: Any?, legacyDns: String?): List<String> {
-        val out = linkedSetOf<String>()
+    private fun parseDnsServers(raw: Any?): List<DnsServerConfig> {
+        val out = mutableListOf<DnsServerConfig>()
         if (raw is List<*>) {
             for (entry in raw) {
-                val server = (entry as? String)?.trim().orEmpty().toIpv4LiteralOrNull()
-                if (server != null) out.add(server)
+                val map = entry as? Map<*, *> ?: continue
+                val host = (map[VpnContract.ARG_DNS_SERVER_HOST] as? String)?.trim().orEmpty()
+                val protocol =
+                    DnsProtocol.fromWireValue(
+                        map[VpnContract.ARG_DNS_SERVER_PROTOCOL] as? String,
+                    )
+                out += DnsServerConfig(host = host, protocol = protocol)
             }
         }
-        val legacy = legacyDns?.trim().orEmpty().toIpv4LiteralOrNull()
-        if (legacy != null) out.add(legacy)
-        if (out.isEmpty()) out.add(TunnelVpnService.DEFAULT_DNS_SERVER)
-        return out.toList()
+        return DnsConfigSupport.sanitize(out)
+    }
+
+    private fun putDnsServerExtras(intent: Intent, dnsServers: List<DnsServerConfig>) {
+        val dns1 = dnsServers.getOrNull(0)
+        val dns2 = dnsServers.getOrNull(1)
+        intent.putExtra(TunnelVpnService.EXTRA_DNS_SERVER_1_HOST, dns1?.host ?: "")
+        intent.putExtra(
+            TunnelVpnService.EXTRA_DNS_SERVER_1_PROTOCOL,
+            dns1?.protocol?.wireValue ?: DnsProtocol.dnsOverUdp.wireValue,
+        )
+        intent.putExtra(TunnelVpnService.EXTRA_DNS_SERVER_2_HOST, dns2?.host ?: "")
+        intent.putExtra(
+            TunnelVpnService.EXTRA_DNS_SERVER_2_PROTOCOL,
+            dns2?.protocol?.wireValue ?: DnsProtocol.dnsOverUdp.wireValue,
+        )
     }
 
     private fun hasPostNotificationsPermission(): Boolean {

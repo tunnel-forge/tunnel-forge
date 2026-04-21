@@ -80,16 +80,26 @@ class VpnClient {
     String user = '',
     String password = '',
     String psk = '',
-    List<String> dnsServers = const [Profile.defaultDns],
+    bool dnsAutomatic = true,
+    List<DnsServerConfig> dnsServers = const [],
     int mtu = Profile.defaultVpnMtu,
     RoutingMode routingMode = RoutingMode.fullTunnel,
     List<String> allowedAppPackages = const [],
     ProxySettings proxySettings = const ProxySettings(),
   }) {
     final mtuClamped = Profile.normalizeMtu(mtu);
-    final normalizedDnsServers = Profile.dnsServersFromText(
-      dnsServers.join(','),
-    );
+    // Flutter keeps DNS slot ordering explicit so Android can preserve DNS 1
+    // as primary and DNS 2 as fallback without reparsing free-form text.
+    final normalizedDnsServers = dnsServers
+        .map(
+          (entry) => <String, Object?>{
+            VpnContract.argDnsServerHost: Profile.normalizeDnsServer(
+              entry.host,
+            ),
+            VpnContract.argDnsServerProtocol: entry.protocol.jsonValue,
+          },
+        )
+        .toList(growable: false);
     return _channel.invokeMethod<void>(VpnContract.connect, <String, Object?>{
       if (attemptId.isNotEmpty) VpnContract.argAttemptId: attemptId,
       VpnContract.argServer: server,
@@ -98,8 +108,8 @@ class VpnClient {
       VpnContract.argUser: user,
       VpnContract.argPassword: password,
       VpnContract.argPsk: psk,
-      VpnContract.argDns: normalizedDnsServers.first,
-      VpnContract.argDnsServers: List<String>.from(normalizedDnsServers),
+      VpnContract.argDnsAutomatic: dnsAutomatic,
+      VpnContract.argDnsServers: normalizedDnsServers,
       VpnContract.argMtu: mtuClamped,
       VpnContract.argConnectionMode: connectionMode.jsonValue,
       VpnContract.argRoutingMode: routingMode.jsonValue,

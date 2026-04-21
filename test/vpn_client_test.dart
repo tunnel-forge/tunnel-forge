@@ -73,7 +73,7 @@ void main() {
       );
     });
 
-    test('sends ordered dns servers and legacy primary dns', () async {
+    test('sends ordered dns servers in manual mode', () async {
       MethodCall? capturedCall;
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(const MethodChannel(VpnContract.channel), (
@@ -85,16 +85,43 @@ void main() {
 
       await VpnClient().connect(
         server: 'x.example',
-        dnsServers: const ['1.1.1.1', '8.8.8.8', '1.1.1.1'],
+        dnsAutomatic: false,
+        dnsServers: const [
+          DnsServerConfig(
+            host: '1.1.1.1',
+            protocol: DnsProtocol.dnsOverUdp,
+          ),
+          DnsServerConfig(
+            host: '8.8.8.8',
+            protocol: DnsProtocol.dnsOverTcp,
+          ),
+          DnsServerConfig(
+            host: '1.1.1.1',
+            protocol: DnsProtocol.dnsOverUdp,
+          ),
+        ],
       );
 
       expect(capturedCall?.method, VpnContract.connect);
       final args = Map<Object?, Object?>.from(capturedCall?.arguments as Map);
-      expect(args[VpnContract.argDns], '1.1.1.1');
-      expect(args[VpnContract.argDnsServers], ['1.1.1.1', '8.8.8.8']);
+      expect(args[VpnContract.argDnsAutomatic], isFalse);
+      expect(args[VpnContract.argDnsServers], [
+        {
+          VpnContract.argDnsServerHost: '1.1.1.1',
+          VpnContract.argDnsServerProtocol: DnsProtocol.dnsOverUdp.jsonValue,
+        },
+        {
+          VpnContract.argDnsServerHost: '8.8.8.8',
+          VpnContract.argDnsServerProtocol: DnsProtocol.dnsOverTcp.jsonValue,
+        },
+        {
+          VpnContract.argDnsServerHost: '1.1.1.1',
+          VpnContract.argDnsServerProtocol: DnsProtocol.dnsOverUdp.jsonValue,
+        },
+      ]);
     });
 
-    test('falls back to default dns when caller passes no servers', () async {
+    test('sends automatic dns mode without explicit servers', () async {
       MethodCall? capturedCall;
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(const MethodChannel(VpnContract.channel), (
@@ -104,11 +131,11 @@ void main() {
             return null;
           });
 
-      await VpnClient().connect(server: 'x.example', dnsServers: const []);
+      await VpnClient().connect(server: 'x.example');
 
       final args = Map<Object?, Object?>.from(capturedCall?.arguments as Map);
-      expect(args[VpnContract.argDns], Profile.defaultDns);
-      expect(args[VpnContract.argDnsServers], [Profile.defaultDns]);
+      expect(args[VpnContract.argDnsAutomatic], isTrue);
+      expect(args[VpnContract.argDnsServers], isEmpty);
     });
   });
 }

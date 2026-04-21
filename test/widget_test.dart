@@ -310,7 +310,11 @@ void main() {
           'displayName': 'Test',
           'server': 'vpn.test.example',
           'user': '',
-          'dns': '8.8.8.8',
+          'dnsAutomatic': true,
+          'dns1Host': '',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
         },
       ]),
       ProfileStore.prefsKeyLastProfileId: 'widget_test_p1',
@@ -420,7 +424,11 @@ void main() {
           'displayName': 'Connectivity Test',
           'server': 'vpn.test.example',
           'user': '',
-          'dns': '8.8.8.8',
+          'dnsAutomatic': true,
+          'dns1Host': '',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
         },
       ]),
       ProfileStore.prefsKeyLastProfileId: 'widget_test_connectivity',
@@ -673,7 +681,11 @@ void main() {
           'displayName': 'Test',
           'server': 'vpn.test.example',
           'user': '',
-          'dns': '8.8.8.8',
+          'dnsAutomatic': true,
+          'dns1Host': '',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
         },
       ]),
       ProfileStore.prefsKeyLastProfileId: 'widget_test_p2',
@@ -756,7 +768,11 @@ void main() {
           'displayName': 'Proxy Test',
           'server': 'vpn.test.example',
           'user': '',
-          'dns': '8.8.8.8',
+          'dnsAutomatic': true,
+          'dns1Host': '',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
         },
       ]),
       ProfileStore.prefsKeyLastProfileId: 'widget_test_proxy',
@@ -786,6 +802,68 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
 
     expect(methods, [VpnContract.setLogLevel, VpnContract.connect]);
+    expect(statusText(tester), contains('Connecting'));
+  });
+
+  testWidgets('automatic DNS ignores stale invalid manual DNS values', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      ProfileStore.prefsKeyProfilesJson: jsonEncode([
+        {
+          'id': 'widget_test_auto_dns',
+          'displayName': 'Automatic DNS',
+          'server': 'vpn.test.example',
+          'user': '',
+          'dnsAutomatic': true,
+          'dns1Host': 'bad/path',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '1.1.1.1',
+          'dns2Protocol': 'dnsOverHttps',
+        },
+      ]),
+      ProfileStore.prefsKeyLastProfileId: 'widget_test_auto_dns',
+    });
+    final methods = <String>[];
+    MethodCall? connectCall;
+    installVpnChannelMock(
+      methods,
+      onConnect: (call) async {
+        connectCall = call;
+        return null;
+      },
+    );
+    addTearDown(uninstallVpnChannelMock);
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 50; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await tester.tap(find.byKey(const Key('vpn_connect')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(methods, [
+      VpnContract.setLogLevel,
+      VpnContract.prepareVpn,
+      VpnContract.connect,
+    ]);
+    expect(connectCall, isNotNull);
+    final args = Map<Object?, Object?>.from(connectCall!.arguments as Map);
+    expect(args[VpnContract.argDnsAutomatic], isTrue);
+    expect(args[VpnContract.argDnsServers], isEmpty);
+    expect(find.textContaining('must be'), findsNothing);
     expect(statusText(tester), contains('Connecting'));
   });
 }

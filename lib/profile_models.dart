@@ -32,6 +32,59 @@ enum RoutingMode {
   }
 }
 
+/// Ordered by UI display and by the contract sent to Android.
+enum DnsProtocol {
+  dnsOverTcp('dnsOverTcp', 'TCP', 'DNS-over-TCP'),
+  dnsOverUdp('dnsOverUdp', 'UDP', 'DNS-over-UDP'),
+  dnsOverTls('dnsOverTls', 'TLS', 'DNS-over-TLS'),
+  dnsOverHttps('dnsOverHttps', 'HTTPS', 'DNS-over-HTTPS');
+
+  const DnsProtocol(this.jsonValue, this.shortLabel, this.displayLabel);
+
+  final String jsonValue;
+  final String shortLabel;
+  final String displayLabel;
+
+  bool get requiresHostname =>
+      this == DnsProtocol.dnsOverTls || this == DnsProtocol.dnsOverHttps;
+
+  static const List<DnsProtocol> orderedValues = <DnsProtocol>[
+    DnsProtocol.dnsOverTcp,
+    DnsProtocol.dnsOverUdp,
+    DnsProtocol.dnsOverTls,
+    DnsProtocol.dnsOverHttps,
+  ];
+
+  static DnsProtocol fromJson(Object? raw) {
+    if (raw is! String) return DnsProtocol.dnsOverUdp;
+    return switch (raw) {
+      'dnsOverTcp' => DnsProtocol.dnsOverTcp,
+      'dnsOverTls' => DnsProtocol.dnsOverTls,
+      'dnsOverHttps' => DnsProtocol.dnsOverHttps,
+      _ => DnsProtocol.dnsOverUdp,
+    };
+  }
+}
+
+class DnsServerConfig {
+  const DnsServerConfig({required this.host, required this.protocol});
+
+  final String host;
+  final DnsProtocol protocol;
+
+  DnsServerConfig copyWith({String? host, DnsProtocol? protocol}) {
+    return DnsServerConfig(
+      host: host ?? this.host,
+      protocol: protocol ?? this.protocol,
+    );
+  }
+
+  Map<String, Object?> toJson() => {
+    'host': host,
+    'protocol': protocol.jsonValue,
+  };
+}
+
 /// Global local-proxy settings; ports are loopback-only in v1.
 class ProxySettings {
   const ProxySettings({
@@ -133,13 +186,16 @@ class Profile {
     required this.displayName,
     required this.server,
     required this.user,
-    required this.dns,
+    this.dnsAutomatic = true,
+    this.dns1Host = '',
+    this.dns1Protocol = DnsProtocol.dnsOverUdp,
+    this.dns2Host = '',
+    this.dns2Protocol = DnsProtocol.dnsOverUdp,
     this.mtu = defaultVpnMtu,
   });
 
   /// TUN interface MTU (bytes). Shared default for new profiles and quick-connect.
   static const int defaultVpnMtu = 1450;
-  static const String defaultDns = '8.8.8.8';
 
   static const int minVpnMtu = 576;
   static const int maxVpnMtu = 1450;
@@ -148,13 +204,23 @@ class Profile {
   final String displayName;
   final String server;
   final String user;
-  final String dns;
+  final bool dnsAutomatic;
+  final String dns1Host;
+  final DnsProtocol dns1Protocol;
+  final String dns2Host;
+  final DnsProtocol dns2Protocol;
 
   /// Android VpnService [Builder.setMtu]; clamped [minVpnMtu]–[maxVpnMtu].
   final int mtu;
 
-  List<String> get dnsServers => dnsServersFromText(dns);
-  String? get invalidDnsServer => firstInvalidDnsServer(dns);
+  List<DnsServerConfig> get manualDnsServers => orderedDnsServers(
+    dns1Host: dns1Host,
+    dns1Protocol: dns1Protocol,
+    dns2Host: dns2Host,
+    dns2Protocol: dns2Protocol,
+  );
+  String? get invalidDns1 => invalidDnsServer(dns1Host, dns1Protocol);
+  String? get invalidDns2 => invalidDnsServer(dns2Host, dns2Protocol);
 
   static int normalizeMtu(int value) => value.clamp(minVpnMtu, maxVpnMtu);
 
@@ -165,18 +231,7 @@ class Profile {
     return normalizeMtu(v);
   }
 
-  static List<String> dnsEntriesFromText(String text) {
-    final out = <String>[];
-    final seen = <String>{};
-    for (final raw in text.split(RegExp(r'[,;\n]+'))) {
-      final token = raw.trim();
-      if (token.isEmpty) continue;
-      if (seen.add(token)) out.add(token);
-    }
-    return out;
-  }
-
-  static bool isValidDnsServer(String value) {
+  static bool isValidIpv4DnsServer(String value) {
     final parts = value.trim().split('.');
     if (parts.length != 4) return false;
     for (final part in parts) {
@@ -187,28 +242,96 @@ class Profile {
     return true;
   }
 
-  static String? firstInvalidDnsServer(String text) {
-    for (final token in dnsEntriesFromText(text)) {
-      if (!isValidDnsServer(token)) return token;
+  static String normalizeDnsServer(String text) => text.trim();
+
+  static bool isValidDnsHostname(String value) {
+    final token = value.trim();
+    if (token.isEmpty || token.length > 253) return false;
+    if (token.contains('://') ||
+        token.contains('/') ||
+        token.contains('?') ||
+        token.contains('#') ||
+        token.contains(':') ||
+        token.startsWith('.') ||
+        token.endsWith('.')) {
+      return false;
     }
-    return null;
+    final labels = token.split('.');
+    if (labels.any((label) => label.isEmpty || label.length > 63)) {
+      return false;
+    }
+    final labelPattern = RegExp(
+      r'^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$',
+    );
+    return labels.every(labelPattern.hasMatch);
   }
 
-  static List<String> dnsServersFromText(String text) {
-    final servers = dnsEntriesFromText(text);
-    if (servers.isEmpty) return const [defaultDns];
-    return servers;
+  static String? invalidDnsServer(String text, DnsProtocol protocol) {
+    final token = normalizeDnsServer(text);
+    if (token.isEmpty) return null;
+    if (protocol.requiresHostname) {
+      return !isValidIpv4DnsServer(token) && isValidDnsHostname(token)
+          ? null
+          : token;
+    }
+    return isValidIpv4DnsServer(token) || isValidDnsHostname(token)
+        ? null
+        : token;
   }
 
-  static String normalizeDns(String text) =>
-      dnsServersFromText(text).join(', ');
+  static String validationMessageForDnsServer(
+    String label,
+    String text,
+    DnsProtocol protocol,
+  ) {
+    final invalid = invalidDnsServer(text, protocol);
+    if (invalid == null) return '';
+    final requirement = switch (protocol) {
+      DnsProtocol.dnsOverTcp ||
+      DnsProtocol.dnsOverUdp => 'a hostname or IPv4 address',
+      DnsProtocol.dnsOverTls || DnsProtocol.dnsOverHttps => 'a hostname',
+    };
+    return '$label server "$invalid" must be $requirement for ${protocol.displayLabel}';
+  }
+
+  static List<DnsServerConfig> orderedDnsServers({
+    required String dns1Host,
+    required DnsProtocol dns1Protocol,
+    required String dns2Host,
+    required DnsProtocol dns2Protocol,
+  }) {
+    final out = <String>[];
+    final configs = <DnsServerConfig>[];
+    // Preserve slot priority while dropping empty and duplicate entries.
+    for (final entry in <DnsServerConfig>[
+      DnsServerConfig(
+        host: normalizeDnsServer(dns1Host),
+        protocol: dns1Protocol,
+      ),
+      DnsServerConfig(
+        host: normalizeDnsServer(dns2Host),
+        protocol: dns2Protocol,
+      ),
+    ]) {
+      if (entry.host.isEmpty) continue;
+      final fingerprint = '${entry.protocol.jsonValue}:${entry.host}';
+      if (out.contains(fingerprint)) continue;
+      out.add(fingerprint);
+      configs.add(entry);
+    }
+    return configs;
+  }
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'displayName': displayName,
     'server': server,
     'user': user,
-    'dns': dns,
+    'dnsAutomatic': dnsAutomatic,
+    'dns1Host': normalizeDnsServer(dns1Host),
+    'dns1Protocol': dns1Protocol.jsonValue,
+    'dns2Host': normalizeDnsServer(dns2Host),
+    'dns2Protocol': dns2Protocol.jsonValue,
     'mtu': mtu,
   };
 
@@ -219,12 +342,20 @@ class Profile {
     final displayName = m['displayName'];
     final server = m['server'];
     final user = m['user'];
-    final dns = m['dns'];
+    final dnsAutomatic = m['dnsAutomatic'];
+    final dns1Host = m['dns1Host'];
+    final dns1Protocol = m['dns1Protocol'];
+    final dns2Host = m['dns2Host'];
+    final dns2Protocol = m['dns2Protocol'];
     if (id is! String ||
         displayName is! String ||
         server is! String ||
         user is! String ||
-        dns is! String) {
+        dnsAutomatic is! bool ||
+        dns1Host is! String ||
+        dns2Host is! String ||
+        dns1Protocol is! String ||
+        dns2Protocol is! String) {
       return null;
     }
     if (id.isEmpty || server.isEmpty) return null;
@@ -242,7 +373,11 @@ class Profile {
       displayName: displayName,
       server: server,
       user: user,
-      dns: dns.trim().isEmpty ? defaultDns : dns.trim(),
+      dnsAutomatic: dnsAutomatic,
+      dns1Host: normalizeDnsServer(dns1Host),
+      dns1Protocol: DnsProtocol.fromJson(dns1Protocol),
+      dns2Host: normalizeDnsServer(dns2Host),
+      dns2Protocol: DnsProtocol.fromJson(dns2Protocol),
       mtu: mtu,
     );
   }

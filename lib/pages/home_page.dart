@@ -66,7 +66,11 @@ class _VpnHomePageState extends State<VpnHomePage> {
   final _user = TextEditingController();
   final _password = TextEditingController();
   final _psk = TextEditingController();
-  final _dns = TextEditingController(text: Profile.defaultDns);
+  bool _dnsAutomatic = true;
+  final _dns1 = TextEditingController();
+  DnsProtocol _dns1Protocol = DnsProtocol.dnsOverUdp;
+  final _dns2 = TextEditingController();
+  DnsProtocol _dns2Protocol = DnsProtocol.dnsOverUdp;
   final _mtu = TextEditingController(text: '${Profile.defaultVpnMtu}');
   final _logsScroll = ScrollController();
 
@@ -140,7 +144,8 @@ class _VpnHomePageState extends State<VpnHomePage> {
     _user.dispose();
     _password.dispose();
     _psk.dispose();
-    _dns.dispose();
+    _dns1.dispose();
+    _dns2.dispose();
     _mtu.dispose();
     _logsScroll.removeListener(_syncLogsStickToBottom);
     _logsScroll.dispose();

@@ -47,24 +47,30 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('shows multi-dns helper copy for profile editor', (tester) async {
+  testWidgets('shows automatic dns section for profile editor', (tester) async {
     final store = await buildStore();
     const profile = Profile(
       id: 'profile-1',
       displayName: 'Office',
       server: 'vpn.example.com',
       user: 'alice',
-      dns: '1.1.1.1, 8.8.8.8',
+      dnsAutomatic: false,
+      dns1Host: '1.1.1.1',
+      dns1Protocol: DnsProtocol.dnsOverUdp,
+      dns2Host: 'dns.example.com',
+      dns2Protocol: DnsProtocol.dnsOverTls,
     );
     await store.upsertProfile(profile, password: 'pw', psk: '');
 
     await pumpHost(tester, store: store, profileId: profile.id);
 
-    expect(find.text('DNS servers'), findsOneWidget);
-    expect(
-      find.text('2 resolvers configured. Proxy mode falls back in order.'),
-      findsOneWidget,
-    );
+    expect(find.text('Automatic'), findsOneWidget);
+    expect(find.text('DNS servers'), findsNWidgets(3));
+    expect(find.text('DNS 1 is primary. DNS 2 is fallback.'), findsOneWidget);
+    expect(find.text('DNS 1'), findsOneWidget);
+    expect(find.text('DNS 2'), findsOneWidget);
+    expect(find.text('UDP'), findsOneWidget);
+    expect(find.text('TLS'), findsOneWidget);
   });
 
   testWidgets('shows clearer mtu hint and helper copy', (tester) async {
@@ -74,7 +80,11 @@ void main() {
       displayName: 'Office',
       server: 'vpn.example.com',
       user: 'alice',
-      dns: '1.1.1.1',
+      dnsAutomatic: true,
+      dns1Host: '',
+      dns1Protocol: DnsProtocol.dnsOverUdp,
+      dns2Host: '',
+      dns2Protocol: DnsProtocol.dnsOverUdp,
     );
     await store.upsertProfile(profile, password: 'pw', psk: '');
 
@@ -95,24 +105,49 @@ void main() {
       displayName: 'Office',
       server: 'vpn.example.com',
       user: 'alice',
-      dns: '1.1.1.1',
+      dnsAutomatic: false,
+      dns1Host: '1.1.1.1',
+      dns1Protocol: DnsProtocol.dnsOverUdp,
+      dns2Host: '',
+      dns2Protocol: DnsProtocol.dnsOverUdp,
     );
     await store.upsertProfile(profile, password: 'pw', psk: '');
 
     await pumpHost(tester, store: store, profileId: profile.id);
 
-    await tester.enterText(
-      find.byType(TextField).at(5),
-      '1.1.1.1, example.com',
-    );
+    await tester.enterText(find.byType(TextField).at(6), 'bad/path');
     await tester.pump();
     await tester.tap(find.text('Save'));
     await tester.pump();
 
     expect(find.byKey(const Key('app_toast')), findsOneWidget);
     expect(
-      find.text('DNS server "example.com" is not a valid IPv4 address'),
+      find.text(
+        'DNS 2 server "bad/path" must be a hostname or IPv4 address for DNS-over-UDP',
+      ),
       findsWidgets,
     );
+  });
+
+  testWidgets('automatic dns disables manual dns fields', (tester) async {
+    final store = await buildStore();
+    const profile = Profile(
+      id: 'profile-3',
+      displayName: 'Office',
+      server: 'vpn.example.com',
+      user: 'alice',
+      dnsAutomatic: true,
+      dns1Host: '',
+      dns1Protocol: DnsProtocol.dnsOverUdp,
+      dns2Host: '',
+      dns2Protocol: DnsProtocol.dnsOverUdp,
+    );
+    await store.upsertProfile(profile, password: 'pw', psk: '');
+
+    await pumpHost(tester, store: store, profileId: profile.id);
+
+    final fields = tester.widgetList<TextField>(find.byType(TextField)).toList();
+    expect(fields[5].enabled, isFalse);
+    expect(fields[6].enabled, isFalse);
   });
 }
