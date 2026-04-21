@@ -146,7 +146,9 @@ void main() {
 
     await pumpHost(tester, store: store, profileId: profile.id);
 
-    final fields = tester.widgetList<TextField>(find.byType(TextField)).toList();
+    final fields = tester
+        .widgetList<TextField>(find.byType(TextField))
+        .toList();
     expect(fields[5].enabled, isFalse);
     expect(fields[6].enabled, isFalse);
   });

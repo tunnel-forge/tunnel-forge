@@ -387,7 +387,7 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
                         decoration: _deco(
                           context,
                           label: 'IPsec PSK',
-                          hint: 'Optional if your server does not use IPsec',
+                          hint: 'Leave blank if your server doesn\'t use IPsec',
                         ),
                       ),
                       const SizedBox(height: 12),

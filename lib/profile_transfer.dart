@@ -149,9 +149,13 @@ class ProfileTransferEnvelope {
     final psk = _requireString(map, 'psk');
     final dnsAutomatic = _requireBool(map, 'dnsAutomatic');
     final dns1Host = _requireString(map, 'dns1Host');
-    final dns1Protocol = DnsProtocol.fromJson(_requireString(map, 'dns1Protocol'));
+    final dns1Protocol = DnsProtocol.fromJson(
+      _requireString(map, 'dns1Protocol'),
+    );
     final dns2Host = _requireString(map, 'dns2Host');
-    final dns2Protocol = DnsProtocol.fromJson(_requireString(map, 'dns2Protocol'));
+    final dns2Protocol = DnsProtocol.fromJson(
+      _requireString(map, 'dns2Protocol'),
+    );
     final mtu = _requireInt(map, 'mtu');
     if (server.trim().isEmpty) {
       throw const FormatException('Profile transfer server is required');
@@ -159,21 +163,13 @@ class ProfileTransferEnvelope {
     final invalidDns1 = Profile.invalidDnsServer(dns1Host, dns1Protocol);
     if (invalidDns1 != null) {
       throw FormatException(
-        Profile.validationMessageForDnsServer(
-          'DNS 1',
-          dns1Host,
-          dns1Protocol,
-        ),
+        Profile.validationMessageForDnsServer('DNS 1', dns1Host, dns1Protocol),
       );
     }
     final invalidDns2 = Profile.invalidDnsServer(dns2Host, dns2Protocol);
     if (invalidDns2 != null) {
       throw FormatException(
-        Profile.validationMessageForDnsServer(
-          'DNS 2',
-          dns2Host,
-          dns2Protocol,
-        ),
+        Profile.validationMessageForDnsServer('DNS 2', dns2Host, dns2Protocol),
       );
     }
     if (!dnsAutomatic &&

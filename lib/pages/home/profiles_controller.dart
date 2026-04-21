@@ -258,7 +258,7 @@ extension _VpnHomePageProfiles on _VpnHomePageState {
     final profile = Profile(
       id: id,
       displayName: 'New profile',
-      server: 'example.invalid',
+      server: 'vpn.example.com',
       user: '',
       dnsAutomatic: true,
       dns1Host: '',

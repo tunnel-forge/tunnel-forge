@@ -68,10 +68,7 @@ void main() {
         psk: 's',
         dnsAutomatic: false,
         dnsServers: const [
-          DnsServerConfig(
-            host: '1.1.1.1',
-            protocol: DnsProtocol.dnsOverUdp,
-          ),
+          DnsServerConfig(host: '1.1.1.1', protocol: DnsProtocol.dnsOverUdp),
         ],
       );
       expect(calls.single.method, VpnContract.connect);

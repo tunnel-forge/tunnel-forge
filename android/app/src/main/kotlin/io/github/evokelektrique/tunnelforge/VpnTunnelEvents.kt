@@ -32,7 +32,7 @@ object VpnTunnelEvents {
         val ch =
             channel
                 ?: run {
-                    Log.w(TAG, "event_drop reason=no_channel method=$method")
+                    Log.w(TAG, sanitizeLogMessage("event_drop reason=no_channel method=$method"))
                     return
                 }
         val job =
@@ -40,7 +40,12 @@ object VpnTunnelEvents {
                 try {
                     ch.invokeMethod(method, payload, noopResult)
                 } catch (e: Exception) {
-                    Log.w(TAG, "event_drop reason=invoke_exception method=$method err=${e.javaClass.simpleName}:${e.message}")
+                    Log.w(
+                        TAG,
+                        sanitizeLogMessage(
+                            "event_drop reason=invoke_exception method=$method err=${e.javaClass.simpleName}:${e.message}",
+                        ),
+                    )
                 }
             }
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -67,6 +72,7 @@ object VpnTunnelEvents {
         message: String,
         source: String = VpnContract.LOG_SOURCE_KOTLIN,
     ) {
+        val sanitizedMessage = sanitizeLogMessage(message)
         if (!shouldForwardEngineLog(priority)) return
         invokeOnMain(
             VpnContract.ON_ENGINE_LOG,
@@ -74,7 +80,7 @@ object VpnTunnelEvents {
                 VpnContract.ARG_ENGINE_LOG_LEVEL to priority,
                 VpnContract.ARG_ENGINE_LOG_SOURCE to source,
                 VpnContract.ARG_ENGINE_LOG_TAG to tag,
-                VpnContract.ARG_ENGINE_LOG_MESSAGE to message,
+                VpnContract.ARG_ENGINE_LOG_MESSAGE to sanitizedMessage,
             ),
         )
     }

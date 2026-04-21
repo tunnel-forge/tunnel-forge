@@ -538,6 +538,56 @@ void main() {
     expect(find.text('Log level: WARNING'), findsOneWidget);
   });
 
+  testWidgets('log sink redacts sensitive host fields before display', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final methods = <String>[];
+    installVpnChannelMock(methods);
+    addTearDown(uninstallVpnChannelMock);
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await simulateHostEngineLog(
+      tester,
+      priority: 6,
+      source: 'kotlin',
+      tag: 'TunnelVpnService',
+      message:
+          'connect server=vpn.example.com password=hunter2 target=secure.example.net:443 uri=https://example.com/token dns=a.example[UDP],b.example[TLS] expected=12345',
+    );
+
+    await tester.tap(find.text('Logs'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.textContaining('vpn.example.com'), findsNothing);
+    expect(find.textContaining('hunter2'), findsNothing);
+    expect(find.textContaining('secure.example.net'), findsNothing);
+    expect(find.textContaining('https://example.com/token'), findsNothing);
+    expect(find.textContaining('a.example'), findsNothing);
+    expect(find.textContaining('b.example'), findsNothing);
+    expect(find.textContaining('server=[REDACTED_HOST]'), findsOneWidget);
+    expect(find.textContaining('password=[REDACTED]'), findsOneWidget);
+    expect(find.textContaining('target=[REDACTED_TARGET]:443'), findsOneWidget);
+    expect(find.textContaining('uri=[REDACTED_URI]'), findsOneWidget);
+    expect(find.textContaining('dns=[REDACTED_HOST]'), findsOneWidget);
+    expect(find.textContaining('expected=12345'), findsOneWidget);
+  });
+
   testWidgets('debug log level requires confirmation before enabling', (
     WidgetTester tester,
   ) async {

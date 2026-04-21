@@ -10,23 +10,23 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/evokelektrique/tunnel_forge/actions/workflows/ci.yml" style="text-decoration: none;">
-    <img alt="CI" src="https://img.shields.io/github/actions/workflow/status/evokelektrique/tunnel_forge/ci.yml?branch=main&label=CI">
+  <a href="https://github.com/tunnel-forge/tunnel-forge/actions/workflows/ci.yml" style="text-decoration: none;">
+    <img alt="CI" src="https://img.shields.io/github/actions/workflow/status/tunnel-forge/tunnel-forge/ci.yml?branch=main&label=CI">
   </a>
-  <a href="https://codecov.io/github/evokelektrique/tunnel-forge" style="text-decoration: none;">
-    <img alt="Coverage" src="https://codecov.io/github/evokelektrique/tunnel-forge/graph/badge.svg?token=2GKLO165LD">
+  <a href="https://codecov.io/github/tunnel-forge/tunnel-forge" style="text-decoration: none;">
+    <img alt="Coverage" src="https://codecov.io/github/tunnel-forge/tunnel-forge/graph/badge.svg?token=2GKLO165LD">
   </a>
-  <a href="https://github.com/evokelektrique/tunnel_forge/actions/workflows/codeql.yml" style="text-decoration: none;">
-    <img alt="CodeQL" src="https://img.shields.io/github/actions/workflow/status/evokelektrique/tunnel_forge/codeql.yml?branch=main&label=CodeQL">
+  <a href="https://github.com/tunnel-forge/tunnel-forge/actions/workflows/codeql.yml" style="text-decoration: none;">
+    <img alt="CodeQL" src="https://img.shields.io/github/actions/workflow/status/tunnel-forge/tunnel-forge/codeql.yml?branch=main&label=CodeQL">
   </a>
-  <a href="https://github.com/evokelektrique/tunnel_forge/releases/latest" style="text-decoration: none;">
-    <img alt="Latest Release" src="https://img.shields.io/github/v/release/evokelektrique/tunnel_forge?display_name=tag&label=Release">
+  <a href="https://github.com/tunnel-forge/tunnel-forge/releases/latest" style="text-decoration: none;">
+    <img alt="Latest Release" src="https://img.shields.io/github/v/release/tunnel-forge/tunnel-forge?display_name=tag&label=Release">
   </a>
-  <a href="https://github.com/evokelektrique/tunnel_forge/releases" style="text-decoration: none;">
-    <img alt="Downloads" src="https://img.shields.io/github/downloads/evokelektrique/tunnel_forge/total?label=Downloads">
+  <a href="https://github.com/tunnel-forge/tunnel-forge/releases" style="text-decoration: none;">
+    <img alt="Downloads" src="https://img.shields.io/github/downloads/tunnel-forge/tunnel-forge/total?label=Downloads">
   </a>
-  <a href="https://github.com/evokelektrique/tunnel_forge/blob/main/LICENSE" style="text-decoration: none;">
-    <img alt="License GPL-3.0" src="https://img.shields.io/github/license/evokelektrique/tunnel_forge?label=License">
+  <a href="https://github.com/tunnel-forge/tunnel-forge/blob/main/LICENSE" style="text-decoration: none;">
+    <img alt="License GPL-3.0" src="https://img.shields.io/github/license/tunnel-forge/tunnel-forge?label=License">
   </a>
 </p>
 

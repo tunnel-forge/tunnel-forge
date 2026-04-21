@@ -87,18 +87,9 @@ void main() {
         server: 'x.example',
         dnsAutomatic: false,
         dnsServers: const [
-          DnsServerConfig(
-            host: '1.1.1.1',
-            protocol: DnsProtocol.dnsOverUdp,
-          ),
-          DnsServerConfig(
-            host: '8.8.8.8',
-            protocol: DnsProtocol.dnsOverTcp,
-          ),
-          DnsServerConfig(
-            host: '1.1.1.1',
-            protocol: DnsProtocol.dnsOverUdp,
-          ),
+          DnsServerConfig(host: '1.1.1.1', protocol: DnsProtocol.dnsOverUdp),
+          DnsServerConfig(host: '8.8.8.8', protocol: DnsProtocol.dnsOverTcp),
+          DnsServerConfig(host: '1.1.1.1', protocol: DnsProtocol.dnsOverUdp),
         ],
       );
 
