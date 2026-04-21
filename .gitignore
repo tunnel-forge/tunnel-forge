@@ -45,8 +45,8 @@ app.*.map.json
 /android/app/release
 /android/build/
 
-# VPN server credentials
-vpn.env
+# Root local environment
+.env
 
 # Local VPN debug logs
 .vpn-debug/

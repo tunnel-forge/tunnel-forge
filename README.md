@@ -36,7 +36,6 @@
   <a href="#requirements">Requirements</a> •
   <a href="#development">Development</a> •
   <a href="#debugging">Debugging</a> •
-  <a href="#versioning">Versioning</a> •
   <a href="#feedback">Feedback</a> •
   <a href="#licensing">Licensing</a>
 </p>
@@ -96,7 +95,7 @@ sh tool/run_native_tests.sh
 The included [docker-compose.yml](docker-compose.yml) starts a local
 `hwdsl2/ipsec-vpn-server` setup for Linux hosts.
 
-1. Copy [vpn.env.example](vpn.env.example) to `vpn.env`.
+1. Copy [.env.example](.env.example) to `.env`.
 2. Set `VPN_PUBLIC_IP` to the address your Android client can reach.
 3. Configure `VPN_IPSEC_PSK`, `VPN_USER`, and `VPN_PASSWORD`.
 4. Create a matching profile in the app.
@@ -106,6 +105,8 @@ Start the server:
 ```sh
 docker compose up -d
 ```
+
+The VPN container reads only the `VPN_*` values from the root `.env`.
 
 ## Debugging
 
@@ -123,22 +124,6 @@ Libreswan and container logs:
 ```sh
 sh tool/vpn_debug.sh pluto-logs --container ipsec-vpn-server
 docker exec -it ipsec-vpn-server tail -f /var/log/auth.log
-```
-
-## Versioning
-
-The app version is stored in `pubspec.yaml` as `x.y.z+build`.
-
-- `x.y.z` is the user-facing version
-- `build` is the internal build number
-
-Use the helper script to inspect or bump it:
-
-```sh
-tool/version.sh show
-tool/version.sh bump patch
-tool/version.sh bump build
-tool/version.sh set 0.1.1+2
 ```
 
 ## Feedback

@@ -2,8 +2,8 @@
 # host attaches IKE/xl2tpd to the real LAN. Mapping UDP 500/4500 through docker-proxy
 # often breaks IKE; see README.md for context.
 #
-# Copy vpn.env.example to vpn.env. Set VPN_PUBLIC_IP to this machine's LAN address
-# (e.g. 192.168.1.104) and fill PSK / VPN_USER / VPN_PASSWORD.
+# Copy .env.example to .env. Set VPN_PUBLIC_IP to this machine's LAN address
+# (e.g. 192.168.1.104) and fill the VPN_* values there.
 #
 # Docker Desktop and macOS differ; host networking here matches a typical Linux dev box.
 #
@@ -25,8 +25,11 @@ services:
     image: hwdsl2/ipsec-vpn-server
     restart: always
     network_mode: host
-    env_file:
-      - ./vpn.env
+    environment:
+      VPN_PUBLIC_IP: ${VPN_PUBLIC_IP:?Set VPN_PUBLIC_IP in .env}
+      VPN_IPSEC_PSK: ${VPN_IPSEC_PSK:?Set VPN_IPSEC_PSK in .env}
+      VPN_USER: ${VPN_USER:?Set VPN_USER in .env}
+      VPN_PASSWORD: ${VPN_PASSWORD:?Set VPN_PASSWORD in .env}
     privileged: true
     container_name: ipsec-vpn-server
     volumes:
