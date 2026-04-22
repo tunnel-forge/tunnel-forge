@@ -149,7 +149,7 @@ void main() {
     expect(find.textContaining('warn message'), findsNothing);
     expect(find.textContaining('error message'), findsOneWidget);
     expect(find.textContaining('debug message'), findsNothing);
-    expect(find.text('Log level: ERROR'), findsOneWidget);
+    expect(find.text('Log level: ERROR'), findsNothing);
 
     await tester.tap(find.byTooltip('Log level'));
     await tester.pumpAndSettle();
@@ -160,7 +160,7 @@ void main() {
     expect(find.textContaining('warn message'), findsOneWidget);
     expect(find.textContaining('error message'), findsOneWidget);
     expect(find.textContaining('debug message'), findsNothing);
-    expect(find.text('Log level: WARNING'), findsOneWidget);
+    expect(find.text('Log level: WARNING'), findsNothing);
   });
 
   testWidgets('prepareVpn denied surfaces message and does not connect', (
