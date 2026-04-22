@@ -41,6 +41,8 @@ static atomic_int g_proxy_bridge_active;
 
 void tunnel_loop_stop(void) { atomic_store(&g_stop, 1); }
 
+int tunnel_should_stop(void) { return atomic_load(&g_stop) ? 1 : 0; }
+
 static int set_nonblock(int fd) {
   int flags = fcntl(fd, F_GETFL, 0);
   if (flags < 0) return -1;
@@ -55,6 +57,7 @@ static int tunnel_sanitize_mtu(int tun_mtu) {
 
 int tunnel_negotiate(const char *server, const char *user, const char *password, const char *psk, int tun_mtu) {
   g_state.ready = 0;
+  atomic_store(&g_stop, 0);
   tun_mtu = tunnel_sanitize_mtu(tun_mtu);
   tunnel_log("tunnel negotiate server=%s tun_mtu=%d", server, tun_mtu);
 
@@ -62,6 +65,10 @@ int tunnel_negotiate(const char *server, const char *user, const char *password,
   memset(&g_state.esp, 0, sizeof(g_state.esp));
 
   if (ikev1_connect(server, psk, &g_state.ike, &g_state.esp) != 0) {
+    if (tunnel_should_stop()) {
+      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "tunnel negotiate canceled during IKE");
+      return TUNNEL_EXIT_STOPPED;
+    }
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG,
                         "ikev1_connect failed (IPsec/IKE). Filter logcat: adb logcat -s tunnel_engine:V");
     return TUNNEL_EXIT_IKE_FAILED;
@@ -71,6 +78,11 @@ int tunnel_negotiate(const char *server, const char *user, const char *password,
   if (l2tp_handshake(g_state.ike.esp_fd, &g_state.esp,
                      (struct sockaddr *)&g_state.ike.peer, g_state.ike.peer_len,
                      &g_state.l2tp) != 0) {
+    if (tunnel_should_stop()) {
+      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "tunnel negotiate canceled during L2TP");
+      close(g_state.ike.esp_fd);
+      return TUNNEL_EXIT_STOPPED;
+    }
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "L2TP handshake failed");
     close(g_state.ike.esp_fd);
     return TUNNEL_EXIT_L2TP_FAILED;
@@ -80,6 +92,11 @@ int tunnel_negotiate(const char *server, const char *user, const char *password,
   if (ppp_negotiate(g_state.ike.esp_fd, &g_state.esp,
                     (struct sockaddr *)&g_state.ike.peer, g_state.ike.peer_len,
                     &g_state.l2tp, user, password, tun_mtu, &g_state.ppp) != 0) {
+    if (tunnel_should_stop()) {
+      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "tunnel negotiate canceled during PPP");
+      close(g_state.ike.esp_fd);
+      return TUNNEL_EXIT_STOPPED;
+    }
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "PPP negotiation failed");
     close(g_state.ike.esp_fd);
     return TUNNEL_EXIT_PPP_FAILED;

@@ -64,6 +64,10 @@ static int recv_ppp(int esp_fd, esp_keys_t *esp, l2tp_session_t *l2tp, uint8_t *
   struct timeval start;
   gettimeofday(&start, NULL);
   for (;;) {
+    if (tunnel_should_stop()) {
+      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp recv canceled before poll");
+      return -1;
+    }
     struct timeval now;
     gettimeofday(&now, NULL);
     int elapsed_ms = (int)((now.tv_sec - start.tv_sec) * 1000 + (now.tv_usec - start.tv_usec) / 1000);
@@ -74,8 +78,24 @@ static int recv_ppp(int esp_fd, esp_keys_t *esp, l2tp_session_t *l2tp, uint8_t *
     int slice_ms = ms - elapsed_ms;
     if (slice_ms <= 0) return -1;
     struct pollfd pfd = {.fd = esp_fd, .events = POLLIN};
-    int pr = poll(&pfd, 1, slice_ms);
+    int waited = 0;
+    int pr = 0;
+    while (waited < slice_ms) {
+      if (tunnel_should_stop()) {
+        tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp recv canceled while waiting for frame");
+        return -1;
+      }
+      int poll_slice_ms = slice_ms - waited;
+      if (poll_slice_ms > 200) poll_slice_ms = 200;
+      pr = poll(&pfd, 1, poll_slice_ms);
+      waited += poll_slice_ms;
+      if (pr != 0) break;
+    }
     if (pr <= 0) {
+      if (pr < 0 && errno == EINTR && tunnel_should_stop()) {
+        tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ppp recv canceled after poll interruption");
+        return -1;
+      }
       tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "ppp recv timeout/poll failure slice_ms=%d pr=%d", slice_ms, pr);
       return -1;
     }

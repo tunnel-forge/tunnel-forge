@@ -225,6 +225,10 @@ static int ike_send_recv(int fd, const struct sockaddr *peer, socklen_t peer_len
   int remaining = timeout_ms;
 
   for (int attempt = 0; attempt < attempts && remaining > 0; attempt++) {
+    if (tunnel_should_stop()) {
+      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ike_send_recv: canceled before send");
+      return -1;
+    }
     ssize_t ns = sendto(fd, sendptr, sendlen, 0, peer, peer_len);
     if (ns != (ssize_t)sendlen) {
       tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG,
@@ -236,15 +240,35 @@ static int ike_send_recv(int fd, const struct sockaddr *peer, socklen_t peer_len
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                         "ike_send_recv: attempt %d/%d wait=%d ms remaining=%d ms", attempt + 1, attempts, wait,
                         remaining);
+    int waited = 0;
+    int pr = 0;
     struct pollfd pfd = {.fd = fd, .events = POLLIN};
-    int pr = poll(&pfd, 1, wait);
-    remaining -= wait;
+    while (waited < wait) {
+      if (tunnel_should_stop()) {
+        tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ike_send_recv: canceled while waiting for reply");
+        return -1;
+      }
+      int slice = wait - waited;
+      if (slice > 200) slice = 200;
+      pr = poll(&pfd, 1, slice);
+      waited += slice;
+      if (pr != 0) break;
+    }
+    remaining -= waited;
     if (pr < 0) {
+      if (tunnel_should_stop()) {
+        tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ike_send_recv: canceled after poll interruption");
+        return -1;
+      }
       tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "ike_send_recv: poll errno=%d", errno);
       return -1;
     }
     if (pr == 0) {
-      tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "ike_send_recv: no reply after %d ms (attempt %d)", wait,
+      if (tunnel_should_stop()) {
+        tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ike_send_recv: canceled after wait budget expired");
+        return -1;
+      }
+      tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "ike_send_recv: no reply after %d ms (attempt %d)", waited,
                           attempt + 1);
       continue;
     }
@@ -345,10 +369,18 @@ static int ike_qm3_finish_recv_loop(int fd, const struct sockaddr *peer, socklen
   if (ike_send_qm3_payload(fd, peer, peer_len, qm3_pkt, qm3_len, prefix4500) != 0) return -1;
 
   while (elapsed < total_ms) {
+    if (tunnel_should_stop()) {
+      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "Quick Mode msg3: canceled while waiting for completion");
+      return -1;
+    }
     struct pollfd pfd = {.fd = fd, .events = POLLIN};
     int pr = poll(&pfd, 1, slice_ms);
     if (pr < 0) {
       if (errno == EINTR) continue;
+      if (tunnel_should_stop()) {
+        tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "Quick Mode msg3: canceled after poll interruption");
+        return -1;
+      }
       tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "ike_qm3_finish_recv_loop: poll errno=%d", errno);
       return -1;
     }

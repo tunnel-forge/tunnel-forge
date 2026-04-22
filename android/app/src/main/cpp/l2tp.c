@@ -74,6 +74,10 @@ static int recv_plain(int esp_fd, esp_keys_t *esp, esp_keys_t *esp_alt, int *use
   gettimeofday(&start, NULL);
 
   for (int iter = 0; iter < 256; iter++) {
+    if (tunnel_should_stop()) {
+      tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "l2tp recv_plain: canceled before poll");
+      return -1;
+    }
     struct timeval now;
     gettimeofday(&now, NULL);
     int elapsed_ms = (int)((now.tv_sec - start.tv_sec) * 1000 + (now.tv_usec - start.tv_usec) / 1000);
@@ -88,9 +92,25 @@ static int recv_plain(int esp_fd, esp_keys_t *esp, esp_keys_t *esp_alt, int *use
     if (remaining_ms <= 0) return -1;
 
     struct pollfd pfd = {.fd = esp_fd, .events = POLLIN};
-    int pr = poll(&pfd, 1, remaining_ms);
+    int waited = 0;
+    int pr = 0;
+    while (waited < remaining_ms) {
+      if (tunnel_should_stop()) {
+        tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "l2tp recv_plain: canceled while waiting for control packet");
+        return -1;
+      }
+      int slice_ms = remaining_ms - waited;
+      if (slice_ms > 200) slice_ms = 200;
+      pr = poll(&pfd, 1, slice_ms);
+      waited += slice_ms;
+      if (pr != 0) break;
+    }
     if (pr < 0) {
       if (errno == EINTR) continue;
+      if (tunnel_should_stop()) {
+        tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "l2tp recv_plain: canceled after poll interruption");
+        return -1;
+      }
       tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "l2tp recv_plain: poll errno=%d", errno);
       return -1;
     }

@@ -26,6 +26,7 @@
 #define TUNNEL_EXIT_POLL_ERROR 4
 #define TUNNEL_EXIT_BAD_ARGS 10
 #define TUNNEL_EXIT_PROXY_NOT_IMPLEMENTED 11
+#define TUNNEL_EXIT_STOPPED 12
 
 int util_protect_fd(int fd);
 void engine_set_socket_protection_enabled(int enabled);
@@ -48,6 +49,7 @@ int tunnel_run_proxy_loop(void);
 int tunnel_proxy_is_bridge_active(void);
 int tunnel_proxy_enqueue_outbound_packet(const uint8_t *packet, size_t len);
 ssize_t tunnel_proxy_dequeue_inbound_packet(uint8_t *packet, size_t len);
+int tunnel_should_stop(void);
 
 /* Do not pass secrets as format args. */
 void tunnel_log(const char *fmt, ...);

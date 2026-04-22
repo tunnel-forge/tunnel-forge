@@ -134,6 +134,33 @@ static int tunnel_looks_like_ipv4_host(const char *value, size_t len) {
   return dots == 3 && have_digit && octet_len > 0;
 }
 
+static int tunnel_parse_ipv4_octets(const char *value, size_t len, int octets[4]) {
+  if (len == 0) return 0;
+  int part_index = 0;
+  int octet = 0;
+  int octet_len = 0;
+  for (size_t i = 0; i < len; i++) {
+    unsigned char ch = (unsigned char)value[i];
+    if (isdigit(ch)) {
+      octet = octet * 10 + (int)(ch - '0');
+      octet_len++;
+      if (octet_len > 3 || octet > 255) return 0;
+      continue;
+    }
+    if (ch == '.') {
+      if (octet_len == 0 || part_index >= 3) return 0;
+      octets[part_index++] = octet;
+      octet = 0;
+      octet_len = 0;
+      continue;
+    }
+    return 0;
+  }
+  if (octet_len == 0 || part_index != 3) return 0;
+  octets[part_index] = octet;
+  return 1;
+}
+
 static int tunnel_looks_like_hostname_host(const char *value, size_t len) {
   if (len == 0) return 0;
   int saw_dot = 0;
@@ -167,6 +194,17 @@ static int tunnel_looks_like_target(const char *value, size_t len) {
   size_t port_pos = len;
   tunnel_split_host_port(value, len, &host_len, &port_pos);
   return tunnel_looks_like_ipv4_host(value, host_len) || tunnel_looks_like_hostname_host(value, host_len);
+}
+
+static int tunnel_is_local_ipv4_endpoint(const char *value, size_t len) {
+  size_t host_len = len;
+  size_t port_pos = len;
+  tunnel_split_host_port(value, len, &host_len, &port_pos);
+  if (!tunnel_looks_like_ipv4_host(value, host_len)) return 0;
+  int octets[4];
+  if (!tunnel_parse_ipv4_octets(value, host_len, octets)) return 0;
+  return octets[0] == 10 || octets[0] == 127 || (octets[0] == 169 && octets[1] == 254) ||
+         (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31) || (octets[0] == 192 && octets[1] == 168);
 }
 
 static int tunnel_looks_like_long_hex(const char *value, size_t len) {
@@ -223,6 +261,10 @@ static int tunnel_match_sensitive_key(const char *input, size_t i, size_t *prefi
         continue;
       }
     }
+    if (strcmp(k_sensitive_keys[k].placeholder, "[REDACTED_URI]") != 0 &&
+        tunnel_is_local_ipv4_endpoint(input + pos, *value_end - pos)) {
+      continue;
+    }
     *placeholder = k_sensitive_keys[k].placeholder;
     return 1;
   }
@@ -249,7 +291,7 @@ static void tunnel_append_redacted_token(char *output, size_t output_len, size_t
 
   if (tunnel_looks_like_uri(token, core_len)) {
     tunnel_append_cstr(output, output_len, out_pos, "[REDACTED_URI]");
-  } else if (tunnel_looks_like_target(token, core_len)) {
+  } else if (tunnel_looks_like_target(token, core_len) && !tunnel_is_local_ipv4_endpoint(token, core_len)) {
     tunnel_append_placeholder_with_port(output, output_len, out_pos, token, core_len, "[REDACTED_TARGET]");
   } else if (tunnel_looks_like_long_hex(token, core_len)) {
     tunnel_append_cstr(output, output_len, out_pos, "[REDACTED]");
