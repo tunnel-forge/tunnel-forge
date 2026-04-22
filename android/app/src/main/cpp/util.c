@@ -22,6 +22,7 @@ static int g_socket_protection_enabled = 1;
 static jclass g_vpn_tunnel_events_class;
 static jclass g_tunnel_vpn_service_class;
 static jmethodID g_emit_engine_log_from_native_mid;
+static jmethodID g_on_native_tunnel_ready_mid;
 static jmethodID g_protect_socket_fd_mid;
 
 typedef struct {
@@ -342,6 +343,7 @@ int engine_jni_init(JNIEnv *env) {
   g_vpn_tunnel_events_class = NULL;
   g_tunnel_vpn_service_class = NULL;
   g_emit_engine_log_from_native_mid = NULL;
+  g_on_native_tunnel_ready_mid = NULL;
   g_protect_socket_fd_mid = NULL;
 
   tunnel_events_local = (*env)->FindClass(env, VPN_TUNNEL_EVENTS_CLASS);
@@ -385,6 +387,13 @@ int engine_jni_init(JNIEnv *env) {
     engine_log_direct(ANDROID_LOG_ERROR, "engine_jni_init: could not find protectSocketFd");
     goto fail;
   }
+  g_on_native_tunnel_ready_mid =
+      (*env)->GetStaticMethodID(env, g_tunnel_vpn_service_class, "onNativeTunnelReady", "(Ljava/lang/String;)V");
+  if (g_on_native_tunnel_ready_mid == NULL) {
+    (*env)->ExceptionClear(env);
+    engine_log_direct(ANDROID_LOG_ERROR, "engine_jni_init: could not find onNativeTunnelReady");
+    goto fail;
+  }
 
   return 0;
 
@@ -401,6 +410,7 @@ fail:
 
 void engine_jni_cleanup(JNIEnv *env) {
   g_emit_engine_log_from_native_mid = NULL;
+  g_on_native_tunnel_ready_mid = NULL;
   g_protect_socket_fd_mid = NULL;
   if (g_vpn_tunnel_events_class != NULL) {
     (*env)->DeleteGlobalRef(env, g_vpn_tunnel_events_class);
@@ -463,6 +473,39 @@ void tunnel_engine_log(int prio, const char *tag, const char *fmt, ...) {
   const char *effective_tag = (tag != NULL && tag[0] != '\0') ? tag : LOG_TAG;
   __android_log_print(prio, effective_tag, "%s", redacted);
   tunnel_engine_forward_to_flutter(prio, effective_tag, redacted);
+}
+
+void engine_notify_tunnel_ready(const char *detail) {
+  if (g_tunnel_vpn_service_class == NULL || g_on_native_tunnel_ready_mid == NULL) {
+    return;
+  }
+  JavaVM *vm = engine_get_java_vm();
+  if (vm == NULL) {
+    return;
+  }
+  int need_detach = 0;
+  JNIEnv *env = engine_require_env(vm, &need_detach);
+  if (env == NULL) {
+    return;
+  }
+
+  const char *ready_detail =
+      (detail != NULL && detail[0] != '\0') ? detail : "TUN interface ready; tunnel loop active";
+  jstring jdetail = (*env)->NewStringUTF(env, ready_detail);
+  if (jdetail == NULL) {
+    if ((*env)->ExceptionCheck(env)) {
+      (*env)->ExceptionClear(env);
+    }
+    engine_release_env(vm, need_detach);
+    return;
+  }
+
+  (*env)->CallStaticVoidMethod(env, g_tunnel_vpn_service_class, g_on_native_tunnel_ready_mid, jdetail);
+  if ((*env)->ExceptionCheck(env)) {
+    (*env)->ExceptionClear(env);
+  }
+  (*env)->DeleteLocalRef(env, jdetail);
+  engine_release_env(vm, need_detach);
 }
 
 void engine_set_socket_protection_enabled(int enabled) { g_socket_protection_enabled = enabled ? 1 : 0; }

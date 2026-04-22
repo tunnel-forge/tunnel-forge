@@ -414,6 +414,55 @@ void main() {
     expect(connectivityStatusText(tester), '91 ms');
   });
 
+  testWidgets('connect does not auto-run connectivity check before connected', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      ProfileStore.prefsKeyProfilesJson: jsonEncode([
+        {
+          'id': 'widget_test_connecting_only',
+          'displayName': 'Connecting Only',
+          'server': 'vpn.test.example',
+          'user': '',
+          'dnsAutomatic': true,
+          'dns1Host': '',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
+        },
+      ]),
+      ProfileStore.prefsKeyLastProfileId: 'widget_test_connecting_only',
+    });
+    final methods = <String>[];
+    final checker = FakeConnectivityChecker();
+    installVpnChannelMock(methods);
+    addTearDown(uninstallVpnChannelMock);
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+        connectivityChecker: checker,
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await tester.tap(find.byKey(const Key('vpn_connect')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(statusText(tester), contains('Connecting'));
+    expect(checker.urls, isEmpty);
+    expect(find.byKey(const Key('connectivity_status')), findsNothing);
+  });
+
   testWidgets('successful connect auto-runs connectivity check once', (
     WidgetTester tester,
   ) async {
@@ -913,6 +962,72 @@ void main() {
     final args = Map<Object?, Object?>.from(connectCall!.arguments as Map);
     expect(args[VpnContract.argDnsAutomatic], isTrue);
     expect(args[VpnContract.argDnsServers], isEmpty);
+    expect(find.textContaining('must be'), findsNothing);
+    expect(statusText(tester), contains('Connecting'));
+  });
+
+  testWidgets('dns-over-https accepts fixed path input and normalizes host', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      ProfileStore.prefsKeyProfilesJson: jsonEncode([
+        {
+          'id': 'widget_test_doh_path',
+          'displayName': 'DoH path',
+          'server': 'vpn.test.example',
+          'user': '',
+          'dnsAutomatic': false,
+          'dns1Host': 'wikimedia-dns.org/dns-query',
+          'dns1Protocol': 'dnsOverHttps',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
+        },
+      ]),
+      ProfileStore.prefsKeyLastProfileId: 'widget_test_doh_path',
+    });
+    final methods = <String>[];
+    MethodCall? connectCall;
+    installVpnChannelMock(
+      methods,
+      onConnect: (call) async {
+        connectCall = call;
+        return null;
+      },
+    );
+    addTearDown(uninstallVpnChannelMock);
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 50; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await tester.tap(find.byKey(const Key('vpn_connect')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(methods, [
+      VpnContract.setLogLevel,
+      VpnContract.prepareVpn,
+      VpnContract.connect,
+    ]);
+    final args = Map<Object?, Object?>.from(connectCall!.arguments as Map);
+    expect(args[VpnContract.argDnsAutomatic], isFalse);
+    expect(args[VpnContract.argDnsServers], [
+      {
+        VpnContract.argDnsServerHost: 'wikimedia-dns.org',
+        VpnContract.argDnsServerProtocol: DnsProtocol.dnsOverHttps.jsonValue,
+      },
+    ]);
     expect(find.textContaining('must be'), findsNothing);
     expect(statusText(tester), contains('Connecting'));
   });

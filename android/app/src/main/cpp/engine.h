@@ -54,6 +54,7 @@ void tunnel_log(const char *fmt, ...);
 
 /** Log to logcat and mirror to the Flutter Logs tab (when the VPN channel is attached). */
 void tunnel_engine_log(int prio, const char *tag, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+void engine_notify_tunnel_ready(const char *detail);
 
 void engine_set_java_vm(JavaVM *vm);
 JavaVM *engine_get_java_vm(void);

@@ -36,6 +36,7 @@ class TunnelVpnService : VpnService() {
         }
 
     private val running = AtomicBoolean(false)
+    private val connectedEmitted = AtomicBoolean(false)
     private var tunInterface: ParcelFileDescriptor? = null
     private var engineThread: Thread? = null
     private var localDnsServer: LocalDnsServer? = null
@@ -166,6 +167,7 @@ class TunnelVpnService : VpnService() {
             AppLog.w(TAG, "${prefixAttempt(attemptId)}Tunnel already running")
             return
         }
+        connectedEmitted.set(false)
 
         val perAppPkgs: List<String> =
             if (routingMode == VpnContract.ROUTING_PER_APP_ALLOW_LIST) {
@@ -323,8 +325,11 @@ class TunnelVpnService : VpnService() {
                 TAG,
                 "${prefixAttempt(attemptId)}TUN established",
             )
-            VpnTunnelEvents.emit(VpnContract.TUNNEL_CONNECTED, "TUN interface ready; starting tunnel loop")
-            updateForegroundNotification(connectedNotificationText())
+            VpnTunnelEvents.emitEngineLog(
+                Log.INFO,
+                TAG,
+                "${prefixAttempt(attemptId)}TUN established; waiting for tunnel loop readiness",
+            )
 
             // Phase 3: run the ESP/L2TP poll loop on a background thread.
             engineThread = Thread(
@@ -397,6 +402,7 @@ class TunnelVpnService : VpnService() {
         localDnsServer = null
         activeServer = ""
         activeProfileName = null
+        connectedEmitted.set(false)
         running.set(false)
     }
 
@@ -420,7 +426,20 @@ class TunnelVpnService : VpnService() {
         }
         activeServer = ""
         activeProfileName = null
+        connectedEmitted.set(false)
         schedulePendingStopSelf()
+    }
+
+    private fun handleNativeTunnelReady(detail: String) {
+        if (!running.get()) {
+            AppLog.w(TAG, "Ignoring native tunnel ready after shutdown")
+            return
+        }
+        if (!connectedEmitted.compareAndSet(false, true)) {
+            return
+        }
+        VpnTunnelEvents.emit(VpnContract.TUNNEL_CONNECTED, detail)
+        updateForegroundNotification(connectedNotificationText())
     }
 
     private fun buildNotification(text: String): Notification {
@@ -569,6 +588,16 @@ class TunnelVpnService : VpnService() {
                 AppLog.e(TAG, "protect failed for fd=$fd", e)
                 false
             }
+        }
+
+        @JvmStatic
+        fun onNativeTunnelReady(detail: String?) {
+            val svc = instance ?: return
+            val readyDetail =
+                detail
+                    ?.takeIf { it.isNotBlank() }
+                    ?: "TUN interface ready; tunnel loop active"
+            svc.mainHandler.post { svc.handleNativeTunnelReady(readyDetail) }
         }
     }
 

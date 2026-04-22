@@ -115,6 +115,9 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
   tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "tunnel poll loop: endpoint=%s fd=%d esp_fd=%d udp_encap=%d",
                     endpoint != NULL && endpoint->name != NULL ? endpoint->name : "unknown", endpoint_fd,
                     g_state.ike.esp_fd, g_state.esp.udp_encap ? 1 : 0);
+  if (tun_fd >= 0) {
+    engine_notify_tunnel_ready("TUN interface ready; tunnel loop active");
+  }
 
   uint8_t tun_buf[65536];
   uint8_t esp_buf[65536];

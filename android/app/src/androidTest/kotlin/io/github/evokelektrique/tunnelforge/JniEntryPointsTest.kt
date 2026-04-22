@@ -25,6 +25,15 @@ class JniEntryPointsTest {
         assertTrue(Modifier.isStatic(protect.modifiers))
         protect.isAccessible = true
         assertTrue(protect.invoke(null, -1) is Boolean)
+
+        val ready =
+            TunnelVpnService::class.java.getDeclaredMethod(
+                "onNativeTunnelReady",
+                String::class.java,
+            )
+        assertTrue(Modifier.isStatic(ready.modifiers))
+        ready.isAccessible = true
+        assertNull(ready.invoke(null, "TUN interface ready; tunnel loop active"))
     }
 
     @Test
