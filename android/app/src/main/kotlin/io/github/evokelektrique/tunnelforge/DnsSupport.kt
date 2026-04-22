@@ -13,6 +13,7 @@ import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.URI
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.charset.StandardCharsets
@@ -52,13 +53,25 @@ internal data class ResolvedDnsServerConfig(
     val host: String,
     val protocol: DnsProtocol,
     val resolvedIpv4: String,
+    val tlsHostname: String = host,
+    val requestAuthority: String = host,
+    val requestPath: String = DOH_PATH,
+    val overridePort: Int? = null,
 ) {
     val port: Int
-        get() = protocol.defaultPort
+        get() = overridePort ?: protocol.defaultPort
 
     val dohPath: String
-        get() = DOH_PATH
+        get() = requestPath
 }
+
+private data class ParsedDoHEndpoint(
+    val normalized: String,
+    val hostname: String,
+    val authority: String,
+    val requestTarget: String,
+    val port: Int,
+)
 
 internal object DnsConfigSupport {
     fun sanitize(raw: List<DnsServerConfig>?): List<DnsServerConfig> {
@@ -97,12 +110,23 @@ internal object DnsConfigSupport {
         val sanitized = sanitize(servers)
         val out = mutableListOf<ResolvedDnsServerConfig>()
         sanitized.forEach { server ->
-            val resolvedIpv4 = server.host.toIpv4LiteralOrNull() ?: resolveIpv4Hostname(server.host)
+            val dohEndpoint =
+                if (server.protocol == DnsProtocol.dnsOverHttps) {
+                    parseDoHEndpoint(server.host)
+                } else {
+                    null
+                }
+            val resolveHost = dohEndpoint?.hostname ?: server.host
+            val resolvedIpv4 = resolveHost.toIpv4LiteralOrNull() ?: resolveIpv4Hostname(resolveHost)
             out.add(
                 ResolvedDnsServerConfig(
                     host = server.host,
                     protocol = server.protocol,
                     resolvedIpv4 = resolvedIpv4,
+                    tlsHostname = dohEndpoint?.hostname ?: server.host,
+                    requestAuthority = dohEndpoint?.authority ?: server.host,
+                    requestPath = dohEndpoint?.requestTarget ?: DOH_PATH,
+                    overridePort = dohEndpoint?.port,
                 ),
             )
         }
@@ -113,7 +137,7 @@ internal object DnsConfigSupport {
         val host = normalizeHost(server)
         if (host.isEmpty()) return false
         if (server.protocol == DnsProtocol.dnsOverHttps) {
-            return normalizedDoHHostname(host) != null
+            return parseDoHEndpoint(host) != null
         }
         return if (server.protocol.requiresHostname) {
             host.toIpv4LiteralOrNull() == null && isValidHostname(host)
@@ -126,7 +150,8 @@ internal object DnsConfigSupport {
         val requirement =
             when (server.protocol) {
                 DnsProtocol.dnsOverTcp, DnsProtocol.dnsOverUdp -> "a hostname or IPv4 address"
-                DnsProtocol.dnsOverTls, DnsProtocol.dnsOverHttps -> "a hostname"
+                DnsProtocol.dnsOverTls -> "a hostname"
+                DnsProtocol.dnsOverHttps -> "a hostname or HTTPS URL"
             }
         return "$label must be $requirement for ${server.protocol.displayLabel}"
     }
@@ -135,25 +160,26 @@ internal object DnsConfigSupport {
         val host = server.host.trim()
         if (host.isEmpty()) return ""
         return if (server.protocol == DnsProtocol.dnsOverHttps) {
-            normalizedDoHHostname(host) ?: host
+            parseDoHEndpoint(host)?.normalized ?: host
         } else {
             host
         }
     }
 
-    private fun normalizedDoHHostname(host: String): String? {
-        if (
-            host.contains("://") ||
-                host.contains('?') ||
-                host.contains('#') ||
-                host.contains(':')
-        ) {
+    private fun parseDoHEndpoint(value: String): ParsedDoHEndpoint? {
+        val token = value.trim()
+        if (token.isEmpty()) return null
+        val hasScheme = token.contains("://")
+        val uri =
+            try {
+                URI(if (hasScheme) token else "https://$token")
+            } catch (_: IllegalArgumentException) {
+                return null
+            }
+        if (uri.scheme?.lowercase() != "https" || !uri.userInfo.isNullOrEmpty() || !uri.fragment.isNullOrEmpty()) {
             return null
         }
-        val slash = host.indexOf('/')
-        val normalizedHost = if (slash < 0) host else host.substring(0, slash)
-        val path = if (slash < 0) "" else host.substring(slash)
-        if (path.isNotEmpty() && path != DOH_PATH) return null
+        val normalizedHost = uri.host ?: return null
         if (
             normalizedHost.isEmpty() ||
                 normalizedHost.toIpv4LiteralOrNull() != null ||
@@ -161,7 +187,40 @@ internal object DnsConfigSupport {
         ) {
             return null
         }
-        return normalizedHost
+        val explicitTarget =
+            hasScheme ||
+                token.contains('/') ||
+                token.contains('?') ||
+                token.contains(':')
+        val authority = buildString {
+            append(normalizedHost)
+            if (uri.port >= 0) {
+                append(':')
+                append(uri.port)
+            }
+        }
+        val path =
+            when {
+                !uri.rawPath.isNullOrEmpty() -> uri.rawPath
+                explicitTarget -> "/"
+                else -> DOH_PATH
+            }
+        val query = if (uri.rawQuery.isNullOrEmpty()) "" else "?${uri.rawQuery}"
+        val normalized =
+            if (hasScheme) {
+                "https://$authority$path$query"
+            } else if (explicitTarget) {
+                "$authority$path$query"
+            } else {
+                normalizedHost
+            }
+        return ParsedDoHEndpoint(
+            normalized = normalized,
+            hostname = normalizedHost,
+            authority = authority,
+            requestTarget = path + query,
+            port = if (uri.port >= 0) uri.port else DnsProtocol.dnsOverHttps.defaultPort,
+        )
     }
 
     private fun resolveIpv4Hostname(host: String): String {
@@ -429,7 +488,7 @@ internal fun exchangeDnsOverHttps(
     val headers =
         buildString {
             append("POST ${server.dohPath} HTTP/1.1\r\n")
-            append("Host: ${server.host}\r\n")
+            append("Host: ${server.requestAuthority}\r\n")
             append("Accept: application/dns-message\r\n")
             append("Content-Type: application/dns-message\r\n")
             append("Content-Length: ${query.size}\r\n")
@@ -478,11 +537,11 @@ internal fun exchangeDnsOverHttps(
 
 internal fun openTlsSocket(socket: Socket, server: ResolvedDnsServerConfig): SSLSocket {
     val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
-    val sslSocket = factory.createSocket(socket, server.host, server.port, true) as SSLSocket
+    val sslSocket = factory.createSocket(socket, server.tlsHostname, server.port, true) as SSLSocket
     val parameters = sslSocket.sslParameters
     parameters.endpointIdentificationAlgorithm = "HTTPS"
     try {
-        parameters.serverNames = listOf(SNIHostName(server.host))
+        parameters.serverNames = listOf(SNIHostName(server.tlsHostname))
     } catch (_: IllegalArgumentException) {
     }
     sslSocket.sslParameters = parameters

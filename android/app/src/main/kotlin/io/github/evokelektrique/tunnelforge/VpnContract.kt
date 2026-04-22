@@ -24,10 +24,9 @@ object VpnContract {
     const val ARG_MTU = "mtu"
     const val ARG_PROFILE_NAME = "profileName"
     const val ARG_CONNECTION_MODE = "connectionMode"
-    const val ARG_PROXY_HTTP_ENABLED = "proxyHttpEnabled"
     const val ARG_PROXY_HTTP_PORT = "proxyHttpPort"
-    const val ARG_PROXY_SOCKS_ENABLED = "proxySocksEnabled"
     const val ARG_PROXY_SOCKS_PORT = "proxySocksPort"
+    const val ARG_PROXY_ALLOW_LAN = "proxyAllowLan"
 
     /** `fullTunnel` or `perAppAllowList` - must match Dart `RoutingMode`. */
     const val ARG_ROUTING_MODE = "routingMode"
@@ -56,6 +55,17 @@ object VpnContract {
     const val ARG_ENGINE_LOG_SOURCE = "engineLogSource"
     const val ARG_ENGINE_LOG_TAG = "engineLogTag"
     const val ARG_ENGINE_LOG_MESSAGE = "engineLogMessage"
+
+    const val ON_PROXY_EXPOSURE_CHANGED = "onProxyExposureChanged"
+
+    const val ARG_PROXY_EXPOSURE_ACTIVE = "proxyExposureActive"
+    const val ARG_PROXY_EXPOSURE_BIND_ADDRESS = "proxyExposureBindAddress"
+    const val ARG_PROXY_EXPOSURE_DISPLAY_ADDRESS = "proxyExposureDisplayAddress"
+    const val ARG_PROXY_EXPOSURE_HTTP_PORT = "proxyExposureHttpPort"
+    const val ARG_PROXY_EXPOSURE_SOCKS_PORT = "proxyExposureSocksPort"
+    const val ARG_PROXY_EXPOSURE_LAN_REQUESTED = "proxyExposureLanRequested"
+    const val ARG_PROXY_EXPOSURE_LAN_ACTIVE = "proxyExposureLanActive"
+    const val ARG_PROXY_EXPOSURE_WARNING = "proxyExposureWarning"
 
     const val LOG_SOURCE_DART = "dart"
     const val LOG_SOURCE_KOTLIN = "kotlin"

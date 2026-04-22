@@ -107,7 +107,11 @@ internal fun sanitizeLogMessage(input: String): String {
         }
     output =
         ipv4Pattern.replace(output) { match ->
-            preserveWrapping(match.value, placeholderWithPort(match.value, "[REDACTED_HOST]"))
+            if (isLocalIpv4Endpoint(match.value)) {
+                match.value
+            } else {
+                preserveWrapping(match.value, placeholderWithPort(match.value, "[REDACTED_HOST]"))
+            }
         }
     output = longHexPattern.replace(output, "[REDACTED]")
     return output
@@ -130,6 +134,7 @@ private fun locationPlaceholder(
     key: String,
     value: String,
 ): String? {
+    if (isLocalIpv4Endpoint(value)) return null
     if (key.equals("expected", ignoreCase = true) && !looksLikeSensitiveEndpoint(value)) {
         return null
     }
@@ -145,7 +150,7 @@ private fun locationPlaceholder(
 private fun looksLikeSensitiveEndpoint(rawValue: String): Boolean {
     val value = unwrapLogValue(rawValue)
     if (uriPattern.containsMatchIn(value)) return true
-    if (ipv4EndpointPattern.matches(value)) return true
+    if (ipv4EndpointPattern.matches(value)) return !isLocalIpv4Endpoint(value)
     return hostnameEndpointPattern.matches(value)
 }
 
@@ -184,6 +189,22 @@ private fun unwrapLogValue(value: String): String {
         first == '(' && last == ')' -> value.substring(1, value.lastIndex)
         else -> value
     }
+}
+
+private fun isLocalIpv4Endpoint(rawValue: String): Boolean {
+    val value = unwrapLogValue(rawValue)
+    if (!ipv4EndpointPattern.matches(value)) return false
+    val host = value.substringBefore(':')
+    val octets = host.split('.')
+    if (octets.size != 4) return false
+    val parts = octets.map { it.toIntOrNull() ?: return false }
+    val a = parts[0]
+    val b = parts[1]
+    return a == 10 ||
+        a == 127 ||
+        (a == 169 && b == 254) ||
+        (a == 172 && b in 16..31) ||
+        (a == 192 && b == 168)
 }
 
 private fun keyValuePattern(

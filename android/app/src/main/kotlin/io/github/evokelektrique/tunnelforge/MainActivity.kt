@@ -137,10 +137,14 @@ class MainActivity : FlutterActivity() {
                             if (!s.isNullOrBlank()) allowedPackages.add(s.trim())
                         }
                     }
-                    val proxyHttpEnabled = args[VpnContract.ARG_PROXY_HTTP_ENABLED] as? Boolean ?: true
                     val proxyHttpPort = sanitizePort(args[VpnContract.ARG_PROXY_HTTP_PORT], ProxyTunnelService.DEFAULT_HTTP_PORT)
-                    val proxySocksEnabled = args[VpnContract.ARG_PROXY_SOCKS_ENABLED] as? Boolean ?: true
                     val proxySocksPort = sanitizePort(args[VpnContract.ARG_PROXY_SOCKS_PORT], ProxyTunnelService.DEFAULT_SOCKS_PORT)
+                    val proxyAllowLan = args[VpnContract.ARG_PROXY_ALLOW_LAN] as? Boolean ?: false
+                    if (proxyHttpPort == proxySocksPort) {
+                        AppLog.e(TAG, "vpn_call connect rejected bad_args (duplicate proxy ports) attempt=$attemptId")
+                        result.error("bad_args", "HTTP and SOCKS5 ports must differ", null)
+                        return@setMethodCallHandler
+                    }
                     val serverTrim = server.trim()
                     val hasScheme = serverTrim.contains("://")
                     val hasPort = serverTrim.count { it == ':' } == 1 && !serverTrim.contains("::")
@@ -163,7 +167,7 @@ class MainActivity : FlutterActivity() {
                     }
                     AppLog.d(
                         TAG,
-                        "vpn_call connect start attempt=$attemptId server=$serverTrim userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dnsMode=${if (dnsAutomatic) "automatic" else "manual"} dns=${dnsServers.joinToString(",") { "${it.host}[${it.protocol.shortLabel}]" }} mtu=$mtu mode=$connectionMode routing=$routingMode allowedApps=${allowedPackages.size}",
+                        "vpn_call connect start attempt=$attemptId server=$serverTrim userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dnsMode=${if (dnsAutomatic) "automatic" else "manual"} dns=${dnsServers.joinToString(",") { "${it.host}[${it.protocol.shortLabel}]" }} mtu=$mtu mode=$connectionMode routing=$routingMode allowedApps=${allowedPackages.size} http=$proxyHttpPort socks=$proxySocksPort lan=$proxyAllowLan",
                     )
                     val intent =
                         if (connectionMode == VpnContract.MODE_PROXY_ONLY) {
@@ -178,10 +182,9 @@ class MainActivity : FlutterActivity() {
                                 putDnsServerExtras(this, dnsServers)
                                 putExtra(ProxyTunnelService.EXTRA_MTU, mtu)
                                 putExtra(ProxyTunnelService.EXTRA_PROFILE_NAME, profileName)
-                                putExtra(ProxyTunnelService.EXTRA_PROXY_HTTP_ENABLED, proxyHttpEnabled)
                                 putExtra(ProxyTunnelService.EXTRA_PROXY_HTTP_PORT, proxyHttpPort)
-                                putExtra(ProxyTunnelService.EXTRA_PROXY_SOCKS_ENABLED, proxySocksEnabled)
                                 putExtra(ProxyTunnelService.EXTRA_PROXY_SOCKS_PORT, proxySocksPort)
+                                putExtra(ProxyTunnelService.EXTRA_PROXY_ALLOW_LAN, proxyAllowLan)
                             }
                         } else {
                             Intent(this, TunnelVpnService::class.java).apply {
@@ -196,6 +199,9 @@ class MainActivity : FlutterActivity() {
                                 putExtra(TunnelVpnService.EXTRA_MTU, mtu)
                                 putExtra(TunnelVpnService.EXTRA_PROFILE_NAME, profileName)
                                 putExtra(TunnelVpnService.EXTRA_ROUTING_MODE, routingMode)
+                                putExtra(TunnelVpnService.EXTRA_PROXY_HTTP_PORT, proxyHttpPort)
+                                putExtra(TunnelVpnService.EXTRA_PROXY_SOCKS_PORT, proxySocksPort)
+                                putExtra(TunnelVpnService.EXTRA_PROXY_ALLOW_LAN, proxyAllowLan)
                                 putStringArrayListExtra(
                                     TunnelVpnService.EXTRA_ALLOWED_PACKAGES,
                                     ArrayList(allowedPackages),

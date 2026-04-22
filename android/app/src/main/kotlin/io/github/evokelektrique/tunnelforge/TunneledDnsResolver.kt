@@ -213,16 +213,16 @@ internal class TunneledDnsResolver(
     }
 
     private fun parseResponse(payload: ByteArray, expectedTxId: Int, host: String): ParsedDnsResponse? {
-        if (payload.size < DNS_HEADER_LEN) return ParsedDnsResponse(failureMessage = "Malformed tunneled DNS response for $host.")
+        if (payload.size < DNS_HEADER_LEN) return ParsedDnsResponse(failureMessage = "Malformed tunneled DNS response.")
         val txId = readUint16(payload, 0)
         if (txId != expectedTxId) return null
         val flags = readUint16(payload, 2)
         val isResponse = (flags and 0x8000) != 0
-        if (!isResponse) return ParsedDnsResponse(failureMessage = "Malformed tunneled DNS response for $host.")
+        if (!isResponse) return ParsedDnsResponse(failureMessage = "Malformed tunneled DNS response.")
         val rcode = flags and 0x000f
         if (rcode != 0) {
             return ParsedDnsResponse(
-                failureMessage = "DNS response code $rcode for $host.",
+                failureMessage = "DNS response code $rcode.",
                 terminalFailure = isAuthoritativeNegativeRcode(rcode),
             )
         }
@@ -230,23 +230,23 @@ internal class TunneledDnsResolver(
         val answerCount = readUint16(payload, 6)
         var offset = DNS_HEADER_LEN
         repeat(questionCount) {
-            offset = skipName(payload, offset) ?: return ParsedDnsResponse(failureMessage = "Malformed tunneled DNS response for $host.")
+            offset = skipName(payload, offset) ?: return ParsedDnsResponse(failureMessage = "Malformed tunneled DNS response.")
             if (offset + 4 > payload.size) {
-                return ParsedDnsResponse(failureMessage = "Malformed tunneled DNS response for $host.")
+                return ParsedDnsResponse(failureMessage = "Malformed tunneled DNS response.")
             }
             offset += 4
         }
         repeat(answerCount) {
-            offset = skipName(payload, offset) ?: return ParsedDnsResponse(failureMessage = "Malformed tunneled DNS response for $host.")
+            offset = skipName(payload, offset) ?: return ParsedDnsResponse(failureMessage = "Malformed tunneled DNS response.")
             if (offset + 10 > payload.size) {
-                return ParsedDnsResponse(failureMessage = "Malformed tunneled DNS response for $host.")
+                return ParsedDnsResponse(failureMessage = "Malformed tunneled DNS response.")
             }
             val type = readUint16(payload, offset)
             val recordClass = readUint16(payload, offset + 2)
             val rdLength = readUint16(payload, offset + 8)
             offset += 10
             if (offset + rdLength > payload.size) {
-                return ParsedDnsResponse(failureMessage = "Malformed tunneled DNS response for $host.")
+                return ParsedDnsResponse(failureMessage = "Malformed tunneled DNS response.")
             }
             if (type == TYPE_A && recordClass == CLASS_IN && rdLength == 4) {
                 val answer =
@@ -261,7 +261,7 @@ internal class TunneledDnsResolver(
             offset += rdLength
         }
         return ParsedDnsResponse(
-            failureMessage = "No IPv4 DNS answer returned for $host.",
+            failureMessage = "No IPv4 DNS answer returned.",
             terminalFailure = true,
         )
     }

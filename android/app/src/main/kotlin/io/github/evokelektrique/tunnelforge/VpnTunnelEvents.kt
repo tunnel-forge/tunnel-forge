@@ -55,12 +55,29 @@ object VpnTunnelEvents {
         }
     }
 
-    fun emit(state: String, detail: String?) {
+    fun emit(state: String, detail: String?, attemptId: String? = null) {
         invokeOnMain(
             VpnContract.ON_TUNNEL_STATE,
             mapOf(
+                VpnContract.ARG_ATTEMPT_ID to (attemptId ?: ""),
                 VpnContract.ARG_TUNNEL_STATE to state,
                 VpnContract.ARG_TUNNEL_DETAIL to (detail ?: ""),
+            ),
+        )
+    }
+
+    fun emitProxyExposureChanged(exposure: ProxyExposureInfo) {
+        invokeOnMain(
+            VpnContract.ON_PROXY_EXPOSURE_CHANGED,
+            mapOf(
+                VpnContract.ARG_PROXY_EXPOSURE_ACTIVE to exposure.active,
+                VpnContract.ARG_PROXY_EXPOSURE_BIND_ADDRESS to exposure.bindAddress,
+                VpnContract.ARG_PROXY_EXPOSURE_DISPLAY_ADDRESS to exposure.displayAddress,
+                VpnContract.ARG_PROXY_EXPOSURE_HTTP_PORT to exposure.httpPort,
+                VpnContract.ARG_PROXY_EXPOSURE_SOCKS_PORT to exposure.socksPort,
+                VpnContract.ARG_PROXY_EXPOSURE_LAN_REQUESTED to exposure.lanRequested,
+                VpnContract.ARG_PROXY_EXPOSURE_LAN_ACTIVE to exposure.lanActive,
+                VpnContract.ARG_PROXY_EXPOSURE_WARNING to exposure.warning,
             ),
         )
     }
