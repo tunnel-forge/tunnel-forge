@@ -14,7 +14,6 @@ class LogsPanel extends StatefulWidget {
     required this.onJumpToLatest,
     required this.wordWrap,
     required this.hasAnyLogs,
-    required this.levelLabel,
   });
 
   final List<LogEntry> logs;
@@ -25,7 +24,6 @@ class LogsPanel extends StatefulWidget {
   final VoidCallback onJumpToLatest;
   final bool wordWrap;
   final bool hasAnyLogs;
-  final String levelLabel;
 
   @override
   State<LogsPanel> createState() => _LogsPanelState();
@@ -186,30 +184,6 @@ class _LogsPanelState extends State<LogsPanel> {
     return Stack(
       children: [
         SelectionArea(child: body),
-        Positioned(
-          left: 12,
-          top: 8,
-          child: IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: cs.surfaceContainerHighest.withValues(alpha: 0.86),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
-                child: Text(
-                  'Log level: ${widget.levelLabel}',
-                  style: widget.textTheme.labelSmall?.copyWith(
-                    color: cs.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
         if (!widget.stickToBottom)
           Positioned(
             right: 8,

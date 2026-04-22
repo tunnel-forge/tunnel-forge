@@ -1,11 +1,13 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
+import 'features/app_selector/presentation/bloc/app_selector_bloc.dart';
 import 'profile_models.dart';
 
 /// Full-screen picker for [RoutingMode.perAppAllowList]: search, multi-select, optional icons.
-class AppSelectorPage extends StatefulWidget {
+class AppSelectorPage extends StatelessWidget {
   const AppSelectorPage({
     super.key,
     required this.initialSelection,
@@ -18,21 +20,29 @@ class AppSelectorPage extends StatefulWidget {
   final Future<Uint8List?> Function(String packageName) loadIcon;
 
   @override
-  State<AppSelectorPage> createState() => _AppSelectorPageState();
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (_) =>
+          AppSelectorBloc(
+            loadApps: loadApps,
+            initialSelection: Set<String>.from(initialSelection),
+          )..add(const AppSelectorStarted()),
+      child: _AppSelectorView(loadIcon: loadIcon),
+    );
+  }
 }
 
-class _AppSelectorPageState extends State<AppSelectorPage> {
-  late Set<String> _selected;
-  late final Future<List<CandidateApp>> _future;
-  final _searchController = TextEditingController();
-  String _query = '';
+class _AppSelectorView extends StatefulWidget {
+  const _AppSelectorView({required this.loadIcon});
+
+  final Future<Uint8List?> Function(String packageName) loadIcon;
 
   @override
-  void initState() {
-    super.initState();
-    _selected = Set<String>.from(widget.initialSelection);
-    _future = widget.loadApps();
-  }
+  State<_AppSelectorView> createState() => _AppSelectorViewState();
+}
+
+class _AppSelectorViewState extends State<_AppSelectorView> {
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void dispose() {
@@ -43,138 +53,128 @@ class _AppSelectorPageState extends State<AppSelectorPage> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Apps using VPN'),
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => Navigator.of(context).pop(),
-          tooltip: 'Cancel',
-        ),
-        actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            onSelected: (action) {
-              if (action == 'clear') {
-                setState(_selected.clear);
-              } else if (action == 'all') {
-                _future.then((apps) {
-                  if (!mounted) return;
-                  setState(
-                    () => _selected = apps.map((e) => e.packageName).toSet(),
-                  );
-                });
-              }
-            },
-            itemBuilder: (ctx) => const [
-              PopupMenuItem(value: 'all', child: Text('Select all')),
-              PopupMenuItem(value: 'clear', child: Text('Clear all')),
+    return BlocBuilder<AppSelectorBloc, AppSelectorState>(
+      builder: (context, state) {
+        final filtered = state.filteredApps;
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Apps using VPN'),
+            leading: IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () => Navigator.of(context).pop(),
+              tooltip: 'Cancel',
+            ),
+            actions: [
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert),
+                onSelected: (action) {
+                  if (action == 'clear') {
+                    context.read<AppSelectorBloc>().add(
+                      const AppSelectorClearAllRequested(),
+                    );
+                  } else if (action == 'all') {
+                    context.read<AppSelectorBloc>().add(
+                      const AppSelectorSelectAllRequested(),
+                    );
+                  }
+                },
+                itemBuilder: (ctx) => const [
+                  PopupMenuItem(value: 'all', child: Text('Select all')),
+                  PopupMenuItem(value: 'clear', child: Text('Clear all')),
+                ],
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(
+                  Set<String>.from(state.selected),
+                ),
+                child: const Text('Done'),
+              ),
             ],
-          ),
-          TextButton(
-            onPressed: () =>
-                Navigator.of(context).pop(Set<String>.from(_selected)),
-            child: const Text('Done'),
-          ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(52),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-            child: TextField(
-              controller: _searchController,
-              onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
-              decoration: InputDecoration(
-                hintText: 'Search by name or package',
-                prefixIcon: const Icon(Icons.search, size: 22),
-                isDense: true,
-                filled: true,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(52),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: (value) => context.read<AppSelectorBloc>().add(
+                    AppSelectorQueryChanged(value),
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'Search by name or package',
+                    prefixIcon: const Icon(Icons.search, size: 22),
+                    isDense: true,
+                    filled: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-      ),
-      body: FutureBuilder<List<CandidateApp>>(
-        future: _future,
-        builder: (context, snap) {
-          if (snap.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final apps = snap.data ?? const <CandidateApp>[];
-          if (apps.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(
-                  'No launchable apps found. If this is wrong, check that the app can query other packages on your Android version.',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyLarge?.copyWith(color: cs.onSurfaceVariant),
-                ),
-              ),
-            );
-          }
-
-          final q = _query;
-          final filtered = q.isEmpty
-              ? apps
-              : apps
-                    .where(
-                      (a) =>
-                          a.label.toLowerCase().contains(q) ||
-                          a.packageName.toLowerCase().contains(q),
-                    )
-                    .toList();
-          if (filtered.isEmpty) {
-            return Center(
-              child: Text(
-                'No matches.',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            );
-          }
-
-          return ListView.builder(
-            padding: const EdgeInsets.only(bottom: 16),
-            itemCount: filtered.length,
-            itemBuilder: (_, i) {
-              final app = filtered[i];
-              final selected = _selected.contains(app.packageName);
-              return SwitchListTile(
-                secondary: _SelectorAppIcon(
-                  packageName: app.packageName,
-                  loadIcon: widget.loadIcon,
-                ),
-                title: Text(
-                  app.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  app.packageName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                value: selected,
-                onChanged: (next) {
-                  setState(() {
-                    if (next) {
-                      _selected.add(app.packageName);
-                    } else {
-                      _selected.remove(app.packageName);
-                    }
-                  });
+          body: Builder(
+            builder: (context) {
+              if (state.loading) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (state.apps.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'No launchable apps found. If this is wrong, check that the app can query other packages on your Android version.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyLarge?.copyWith(color: cs.onSurfaceVariant),
+                    ),
+                  ),
+                );
+              }
+              if (filtered.isEmpty) {
+                return Center(
+                  child: Text(
+                    'No matches.',
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                );
+              }
+              return ListView.builder(
+                padding: const EdgeInsets.only(bottom: 16),
+                itemCount: filtered.length,
+                itemBuilder: (_, index) {
+                  final app = filtered[index];
+                  final selected = state.selected.contains(app.packageName);
+                  return SwitchListTile(
+                    secondary: _SelectorAppIcon(
+                      packageName: app.packageName,
+                      loadIcon: widget.loadIcon,
+                    ),
+                    title: Text(
+                      app.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      app.packageName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    value: selected,
+                    onChanged: (next) => context.read<AppSelectorBloc>().add(
+                      AppSelectorToggled(
+                        packageName: app.packageName,
+                        selected: next,
+                      ),
+                    ),
+                  );
                 },
               );
             },
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 }

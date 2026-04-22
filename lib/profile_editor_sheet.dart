@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'app_scaffold_messenger.dart';
+import 'features/home/data/home_repositories_impl.dart';
+import 'features/profile_form/presentation/bloc/profile_form_bloc.dart';
 import 'profile_models.dart';
 import 'profile_store.dart';
 
 /// Modal sheet to view or edit one [Profile] and its stored secrets.
-class ProfileEditorSheet extends StatefulWidget {
+class ProfileEditorSheet extends StatelessWidget {
   static const AnimationStyle _kSheetAnimationStyle = AnimationStyle(
     duration: Duration(milliseconds: 360),
     reverseDuration: Duration(milliseconds: 260),
@@ -38,177 +41,81 @@ class ProfileEditorSheet extends StatefulWidget {
       sheetAnimationStyle: _kSheetAnimationStyle,
       backgroundColor: sheetColor,
       builder: (ctx) => ProfileEditorSheet(profileId: profileId, store: store),
-    ).then((v) => v ?? false);
+    ).then((value) => value ?? false);
   }
 
   @override
-  State<ProfileEditorSheet> createState() => _ProfileEditorSheetState();
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (_) =>
+          ProfileFormBloc(ProfilesRepositoryImpl(store))
+            ..add(ProfileFormStarted(profileId)),
+      child: ProfileEditorView(
+        onClose: () => Navigator.of(context).pop(false),
+        onSaved: (_) => Navigator.of(context).pop(true),
+      ),
+    );
+  }
 }
 
-class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
-  final _displayName = TextEditingController();
-  final _server = TextEditingController();
-  final _user = TextEditingController();
-  final _password = TextEditingController();
-  final _psk = TextEditingController();
-  final _dns1 = TextEditingController();
-  final _dns2 = TextEditingController();
-  final _mtu = TextEditingController();
-  bool _dnsAutomatic = true;
-  DnsProtocol _dns1Protocol = DnsProtocol.dnsOverUdp;
-  DnsProtocol _dns2Protocol = DnsProtocol.dnsOverUdp;
-  bool _loading = true;
-  String? _loadError;
+class ProfileEditorView extends StatefulWidget {
+  const ProfileEditorView({
+    super.key,
+    required this.onClose,
+    required this.onSaved,
+  });
+
+  final VoidCallback onClose;
+  final ValueChanged<String> onSaved;
+
+  @override
+  State<ProfileEditorView> createState() => _ProfileEditorViewState();
+}
+
+class _ProfileEditorViewState extends State<ProfileEditorView> {
+  static const double _kDnsControlHeight = 56;
+  late final TextEditingController _displayNameController;
+  late final TextEditingController _serverController;
+  late final TextEditingController _userController;
+  late final TextEditingController _passwordController;
+  late final TextEditingController _pskController;
+  late final TextEditingController _dns1Controller;
+  late final TextEditingController _dns2Controller;
+  late final TextEditingController _mtuController;
+  int _lastMessageId = 0;
 
   @override
   void initState() {
     super.initState();
-    _dns1.addListener(_onDnsChanged);
-    _dns2.addListener(_onDnsChanged);
-    _load();
-  }
-
-  void _onDnsChanged() {
-    if (!mounted) return;
-    setState(() {});
-  }
-
-  Future<void> _load() async {
-    final row = await widget.store.loadProfileWithSecrets(widget.profileId);
-    if (!mounted) return;
-    if (row == null) {
-      setState(() {
-        _loading = false;
-        _loadError = 'This profile no longer exists.';
-      });
-      return;
-    }
-    final p = row.profile;
-    setState(() {
-      _displayName.text = p.displayName;
-      _server.text = p.server;
-      _user.text = p.user;
-      _password.text = row.password;
-      _psk.text = row.psk;
-      _dnsAutomatic = p.dnsAutomatic;
-      _dns1.text = p.dns1Host;
-      _dns1Protocol = p.dns1Protocol;
-      _dns2.text = p.dns2Host;
-      _dns2Protocol = p.dns2Protocol;
-      _mtu.text = '${p.mtu}';
-      _loading = false;
-    });
+    _displayNameController = TextEditingController();
+    _serverController = TextEditingController();
+    _userController = TextEditingController();
+    _passwordController = TextEditingController();
+    _pskController = TextEditingController();
+    _dns1Controller = TextEditingController();
+    _dns2Controller = TextEditingController();
+    _mtuController = TextEditingController();
   }
 
   @override
   void dispose() {
-    _displayName.dispose();
-    _server.dispose();
-    _user.dispose();
-    _password.dispose();
-    _psk.dispose();
-    _dns1.dispose();
-    _dns2.dispose();
-    _mtu.dispose();
+    _displayNameController.dispose();
+    _serverController.dispose();
+    _userController.dispose();
+    _passwordController.dispose();
+    _pskController.dispose();
+    _dns1Controller.dispose();
+    _dns2Controller.dispose();
+    _mtuController.dispose();
     super.dispose();
   }
 
-  Future<void> _save() async {
-    final serverTrim = _server.text.trim();
-    if (serverTrim.isEmpty) {
-      showAppSnackBar(context, 'Enter a server address', error: true);
-      return;
-    }
-    final mtuParsed = int.tryParse(_mtu.text.trim());
-    if (mtuParsed == null) {
-      showAppSnackBar(
-        context,
-        'MTU must be a number (${Profile.minVpnMtu}–${Profile.maxVpnMtu})',
-        error: true,
-      );
-      return;
-    }
-    if (mtuParsed < Profile.minVpnMtu || mtuParsed > Profile.maxVpnMtu) {
-      showAppSnackBar(
-        context,
-        'MTU must be between ${Profile.minVpnMtu} and ${Profile.maxVpnMtu}',
-        error: true,
-      );
-      return;
-    }
-    if (!_dnsAutomatic) {
-      final invalidDns1 = Profile.invalidDnsServer(_dns1.text, _dns1Protocol);
-      if (invalidDns1 != null) {
-        showAppSnackBar(
-          context,
-          Profile.validationMessageForDnsServer(
-            'DNS 1',
-            _dns1.text,
-            _dns1Protocol,
-          ),
-          error: true,
-        );
-        return;
-      }
-      final invalidDns2 = Profile.invalidDnsServer(_dns2.text, _dns2Protocol);
-      if (invalidDns2 != null) {
-        showAppSnackBar(
-          context,
-          Profile.validationMessageForDnsServer(
-            'DNS 2',
-            _dns2.text,
-            _dns2Protocol,
-          ),
-          error: true,
-        );
-        return;
-      }
-      if (Profile.orderedDnsServers(
-        dns1Host: _dns1.text,
-        dns1Protocol: _dns1Protocol,
-        dns2Host: _dns2.text,
-        dns2Protocol: _dns2Protocol,
-      ).isEmpty) {
-        showAppSnackBar(
-          context,
-          'Enter at least one DNS server or enable Automatic',
-          error: true,
-        );
-        return;
-      }
-    }
-    final profile = Profile(
-      id: widget.profileId,
-      displayName: _displayName.text.trim().isEmpty
-          ? serverTrim
-          : _displayName.text.trim(),
-      server: serverTrim,
-      user: _user.text,
-      dnsAutomatic: _dnsAutomatic,
-      dns1Host: Profile.normalizeDnsServerForProtocol(
-        _dns1.text,
-        _dns1Protocol,
-      ),
-      dns1Protocol: _dns1Protocol,
-      dns2Host: Profile.normalizeDnsServerForProtocol(
-        _dns2.text,
-        _dns2Protocol,
-      ),
-      dns2Protocol: _dns2Protocol,
-      mtu: Profile.normalizeMtu(mtuParsed),
+  void _syncController(TextEditingController controller, String value) {
+    if (controller.text == value) return;
+    controller.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
     );
-    try {
-      await widget.store.upsertProfile(
-        profile,
-        password: _password.text,
-        psk: _psk.text,
-      );
-      if (!mounted) return;
-      Navigator.of(context).pop(true);
-    } catch (_) {
-      if (!mounted) return;
-      showAppSnackBar(context, 'Could not save changes', error: true);
-    }
   }
 
   InputDecoration _deco(BuildContext context, {String? label, String? hint}) {
@@ -230,8 +137,10 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
     required BuildContext context,
     required TextEditingController controller,
     required DnsProtocol protocol,
+    required bool dnsAutomatic,
     required String hint,
     required String? errorText,
+    required ValueChanged<String> onChanged,
     required ValueChanged<DnsProtocol?> onProtocolChanged,
   }) {
     return Row(
@@ -239,9 +148,11 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
       children: [
         Expanded(
           child: TextField(
+            key: ValueKey('dns_input_$hint'),
             controller: controller,
-            enabled: !_dnsAutomatic,
+            enabled: !dnsAutomatic,
             keyboardType: TextInputType.text,
+            onChanged: onChanged,
             decoration: _deco(
               context,
               label: 'DNS servers',
@@ -252,34 +163,101 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
         const SizedBox(width: 12),
         SizedBox(
           width: 118,
-          child: DropdownButtonFormField<DnsProtocol>(
-            initialValue: protocol,
-            isExpanded: true,
-            onChanged: _dnsAutomatic ? null : onProtocolChanged,
+          height: _kDnsControlHeight,
+          child: InputDecorator(
+            key: ValueKey('dns_protocol_$hint'),
+            isEmpty: false,
+            expands: false,
             decoration: _deco(context).copyWith(
               labelText: null,
               hintText: null,
-              isDense: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 14,
+              enabled: !dnsAutomatic,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<DnsProtocol>(
+                value: protocol,
+                isExpanded: true,
+                alignment: Alignment.centerLeft,
+                borderRadius: BorderRadius.circular(12),
+                onChanged: dnsAutomatic ? null : onProtocolChanged,
+                items: DnsProtocol.orderedValues
+                    .map(
+                      (value) => DropdownMenuItem<DnsProtocol>(
+                        value: value,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(value.shortLabel),
+                        ),
+                      ),
+                    )
+                    .toList(growable: false),
               ),
             ),
-            items: DnsProtocol.orderedValues
-                .map(
-                  (value) => DropdownMenuItem<DnsProtocol>(
-                    value: value,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(value.shortLabel),
-                    ),
-                  ),
-                )
-                .toList(growable: false),
           ),
         ),
       ],
+    );
+  }
+
+  Widget _dnsSection(
+    BuildContext context,
+    ProfileFormState state,
+    ThemeData theme,
+    TextTheme tt,
+    Color dnsSectionColor,
+  ) {
+    return Container(
+      key: const Key('dns_servers_section'),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: dnsSectionColor,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('DNS servers', style: tt.titleSmall),
+          const SizedBox(height: 4),
+          Text(
+            'DNS 1 is primary. DNS 2 is fallback.',
+            style: tt.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _dnsRow(
+            context: context,
+            controller: _dns1Controller,
+            protocol: state.dns1Protocol,
+            dnsAutomatic: state.dnsAutomatic,
+            hint: 'DNS 1',
+            errorText: state.dns1ErrorText,
+            onChanged: (value) => context.read<ProfileFormBloc>().add(
+              ProfileFormDns1Changed(value),
+            ),
+            onProtocolChanged: (value) => context.read<ProfileFormBloc>().add(
+              ProfileFormDns1ProtocolChanged(value ?? DnsProtocol.dnsOverUdp),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _dnsRow(
+            context: context,
+            controller: _dns2Controller,
+            protocol: state.dns2Protocol,
+            dnsAutomatic: state.dnsAutomatic,
+            hint: 'DNS 2',
+            errorText: state.dns2ErrorText,
+            onChanged: (value) => context.read<ProfileFormBloc>().add(
+              ProfileFormDns2Changed(value),
+            ),
+            onProtocolChanged: (value) => context.read<ProfileFormBloc>().add(
+              ProfileFormDns2ProtocolChanged(value ?? DnsProtocol.dnsOverUdp),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -293,202 +271,199 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
     final maxH = MediaQuery.sizeOf(context).height * 0.9;
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     final safeBottom = MediaQuery.paddingOf(context).bottom;
-    final dnsInvalid1 = _dnsAutomatic
-        ? null
-        : Profile.invalidDnsServer(_dns1.text, _dns1Protocol);
-    final dnsInvalid2 = _dnsAutomatic
-        ? null
-        : Profile.invalidDnsServer(_dns2.text, _dns2Protocol);
     final dnsSectionColor = theme.colorScheme.surfaceContainerHigh;
     final mtuHelper =
         'Range ${Profile.minVpnMtu}-${Profile.maxVpnMtu}. Use ${Profile.defaultVpnMtu} unless you need a smaller MTU.';
 
-    if (_loadError != null) {
-      return Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(_loadError!, style: tt.bodyLarge),
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Close'),
-            ),
-          ],
-        ),
-      );
-    }
+    return BlocConsumer<ProfileFormBloc, ProfileFormState>(
+      listenWhen: (previous, current) =>
+          previous.messageId != current.messageId ||
+          previous.saved != current.saved,
+      listener: (context, state) {
+        if (state.message != null && state.messageId != _lastMessageId) {
+          _lastMessageId = state.messageId;
+          showAppSnackBar(context, state.message!, error: true);
+        }
+        if (state.saved) {
+          widget.onSaved(state.profileId);
+        }
+      },
+      builder: (context, state) {
+        _syncController(_displayNameController, state.displayName);
+        _syncController(_serverController, state.server);
+        _syncController(_userController, state.user);
+        _syncController(_passwordController, state.password);
+        _syncController(_pskController, state.psk);
+        _syncController(_dns1Controller, state.dns1);
+        _syncController(_dns2Controller, state.dns2);
+        _syncController(_mtuController, state.mtu);
 
-    return AnimatedPadding(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
-      padding: EdgeInsets.only(bottom: keyboard),
-      child: SizedBox(
-        height: maxH,
-        child: Scaffold(
-          backgroundColor: sheetColor,
-          resizeToAvoidBottomInset: false,
-          appBar: AppBar(
-            automaticallyImplyLeading: false,
-            backgroundColor: sheetColor,
-            surfaceTintColor: Colors.transparent,
-            title: const Text('Profile details'),
-            leading: IconButton(
-              icon: const Icon(Icons.close),
-              onPressed: () => Navigator.pop(context, false),
+        if (state.loadError != null) {
+          return Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(state.loadError!, style: tt.bodyLarge),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: widget.onClose,
+                  child: const Text('Close'),
+                ),
+              ],
             ),
-            actions: [
-              TextButton(
-                onPressed: _loading ? null : _save,
-                child: const Text('Save'),
+          );
+        }
+
+        return AnimatedPadding(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          padding: EdgeInsets.only(bottom: keyboard),
+          child: SizedBox(
+            height: maxH,
+            child: Scaffold(
+              backgroundColor: sheetColor,
+              resizeToAvoidBottomInset: false,
+              appBar: AppBar(
+                automaticallyImplyLeading: false,
+                backgroundColor: sheetColor,
+                surfaceTintColor: Colors.transparent,
+                title: const Text('Profile details'),
+                leading: IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: widget.onClose,
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: state.loading || state.saving
+                        ? null
+                        : () => context.read<ProfileFormBloc>().add(
+                            const ProfileFormSaveRequested(),
+                          ),
+                    child: const Text('Save'),
+                  ),
+                ],
               ),
-            ],
-          ),
-          body: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : SingleChildScrollView(
-                  keyboardDismissBehavior:
-                      ScrollViewKeyboardDismissBehavior.onDrag,
-                  padding: EdgeInsets.fromLTRB(16, 8, 16, 24 + safeBottom),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      TextField(
-                        controller: _displayName,
-                        textInputAction: TextInputAction.next,
-                        decoration: _deco(
-                          context,
-                          label: 'Name',
-                          hint: 'e.g. Office VPN',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _server,
-                        textInputAction: TextInputAction.next,
-                        keyboardType: TextInputType.url,
-                        decoration: _deco(
-                          context,
-                          label: 'Server',
-                          hint: 'Hostname or IP address',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _user,
-                        textInputAction: TextInputAction.next,
-                        decoration: _deco(context, label: 'Username'),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _password,
-                        obscureText: true,
-                        decoration: _deco(context, label: 'Password'),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _psk,
-                        obscureText: true,
-                        decoration: _deco(
-                          context,
-                          label: 'IPsec PSK',
-                          hint: 'Leave blank if your server doesn\'t use IPsec',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      CheckboxListTile(
-                        value: _dnsAutomatic,
-                        controlAffinity: ListTileControlAffinity.leading,
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Automatic'),
-                        subtitle: const Text(
-                          'Receive DNS configuration automatically from the VPN server during PPP negotiation.',
-                        ),
-                        onChanged: _loading
-                            ? null
-                            : (value) {
-                                setState(() {
-                                  _dnsAutomatic = value ?? true;
-                                });
-                              },
-                      ),
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: dnsSectionColor,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text('DNS servers', style: tt.titleSmall),
-                            const SizedBox(height: 4),
-                            Text(
-                              'DNS 1 is primary. DNS 2 is fallback.',
-                              style: tt.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
+              body: state.loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : SingleChildScrollView(
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      padding: EdgeInsets.fromLTRB(16, 8, 16, 24 + safeBottom),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          TextField(
+                            controller: _displayNameController,
+                            textInputAction: TextInputAction.next,
+                            onChanged: (value) => context
+                                .read<ProfileFormBloc>()
+                                .add(ProfileFormDisplayNameChanged(value)),
+                            decoration: _deco(
+                              context,
+                              label: 'Name',
+                              hint: 'e.g. Office VPN',
                             ),
-                            const SizedBox(height: 12),
-                            _dnsRow(
-                              context: context,
-                              controller: _dns1,
-                              protocol: _dns1Protocol,
-                              hint: 'DNS 1',
-                              errorText: dnsInvalid1 == null
-                                  ? null
-                                  : Profile.validationMessageForDnsServer(
-                                      'DNS 1',
-                                      _dns1.text,
-                                      _dns1Protocol,
-                                    ),
-                              onProtocolChanged: (value) {
-                                setState(() {
-                                  _dns1Protocol =
-                                      value ?? DnsProtocol.dnsOverUdp;
-                                });
-                              },
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _serverController,
+                            textInputAction: TextInputAction.next,
+                            keyboardType: TextInputType.url,
+                            onChanged: (value) => context
+                                .read<ProfileFormBloc>()
+                                .add(ProfileFormServerChanged(value)),
+                            decoration: _deco(
+                              context,
+                              label: 'Server',
+                              hint: 'Hostname or IP address',
                             ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _userController,
+                            textInputAction: TextInputAction.next,
+                            onChanged: (value) => context
+                                .read<ProfileFormBloc>()
+                                .add(ProfileFormUserChanged(value)),
+                            decoration: _deco(context, label: 'Username'),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _passwordController,
+                            obscureText: true,
+                            onChanged: (value) => context
+                                .read<ProfileFormBloc>()
+                                .add(ProfileFormPasswordChanged(value)),
+                            decoration: _deco(context, label: 'Password'),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _pskController,
+                            obscureText: true,
+                            onChanged: (value) => context
+                                .read<ProfileFormBloc>()
+                                .add(ProfileFormPskChanged(value)),
+                            decoration: _deco(
+                              context,
+                              label: 'IPsec PSK',
+                              hint:
+                                  'Leave blank if your server doesn\'t use IPsec',
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          CheckboxListTile(
+                            value: state.dnsAutomatic,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Automatic'),
+                            subtitle: const Text(
+                              'Receive DNS configuration automatically from the VPN server during PPP negotiation.',
+                            ),
+                            onChanged: state.loading
+                                ? null
+                                : (value) =>
+                                      context.read<ProfileFormBloc>().add(
+                                        ProfileFormDnsAutomaticChanged(
+                                          value ?? true,
+                                        ),
+                                      ),
+                          ),
+                          if (!state.dnsAutomatic) ...[
                             const SizedBox(height: 12),
-                            _dnsRow(
-                              context: context,
-                              controller: _dns2,
-                              protocol: _dns2Protocol,
-                              hint: 'DNS 2',
-                              errorText: dnsInvalid2 == null
-                                  ? null
-                                  : Profile.validationMessageForDnsServer(
-                                      'DNS 2',
-                                      _dns2.text,
-                                      _dns2Protocol,
-                                    ),
-                              onProtocolChanged: (value) {
-                                setState(() {
-                                  _dns2Protocol =
-                                      value ?? DnsProtocol.dnsOverUdp;
-                                });
-                              },
+                            _dnsSection(
+                              context,
+                              state,
+                              theme,
+                              tt,
+                              dnsSectionColor,
                             ),
                           ],
-                        ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _mtuController,
+                            keyboardType: TextInputType.number,
+                            onChanged: (value) => context
+                                .read<ProfileFormBloc>()
+                                .add(ProfileFormMtuChanged(value)),
+                            decoration:
+                                _deco(
+                                  context,
+                                  label: 'MTU',
+                                  hint: '${Profile.defaultVpnMtu}',
+                                ).copyWith(
+                                  errorText: state.mtuErrorText,
+                                  helperText: mtuHelper,
+                                  helperMaxLines: 2,
+                                ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _mtu,
-                        keyboardType: TextInputType.number,
-                        decoration: _deco(
-                          context,
-                          label: 'TUN MTU',
-                          hint: 'Default ${Profile.defaultVpnMtu}',
-                        ).copyWith(helperText: mtuHelper),
-                      ),
-                    ],
-                  ),
-                ),
-        ),
-      ),
+                    ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

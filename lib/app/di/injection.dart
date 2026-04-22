@@ -1,0 +1,92 @@
+import 'dart:async';
+
+import 'package:get_it/get_it.dart';
+
+import '../../connectivity_checker.dart';
+import '../../profile_store.dart';
+import '../../profile_transfer_bridge.dart';
+import '../../vpn_client.dart';
+import '../../features/app_theme/data/shared_prefs_theme_repository.dart';
+import '../../features/app_theme/domain/theme_repository.dart';
+import '../../features/app_theme/presentation/bloc/app_theme_bloc.dart';
+import '../../features/home/data/home_repositories_impl.dart';
+import '../../features/home/domain/home_repositories.dart';
+import '../../features/home/presentation/bloc/connectivity_bloc.dart';
+import '../../features/home/presentation/bloc/home_nav_bloc.dart';
+import '../../features/home/presentation/bloc/logs_bloc.dart';
+import '../../features/home/presentation/bloc/profiles_bloc.dart';
+import '../../features/home/presentation/bloc/settings_bloc.dart';
+import '../../features/home/presentation/bloc/tunnel_bloc.dart';
+
+GetIt createAppLocator({
+  ProfileStore? profileStore,
+  ConnectivityChecker? connectivityChecker,
+  VpnClient? vpnClient,
+  ProfileTransferBridge? profileTransferBridge,
+}) {
+  final locator = GetIt.asNewInstance();
+
+  locator.registerLazySingleton<ProfileStore>(
+    () => profileStore ?? ProfileStore(),
+  );
+  locator.registerLazySingleton<ConnectivityChecker>(
+    () => connectivityChecker ?? HttpConnectivityChecker(),
+  );
+  locator.registerLazySingleton<ThemeRepository>(
+    SharedPrefsThemeRepository.new,
+  );
+  locator.registerLazySingleton<ProfilesRepository>(
+    () => ProfilesRepositoryImpl(locator<ProfileStore>()),
+  );
+  locator.registerLazySingleton<SettingsRepository>(
+    () => SettingsRepositoryImpl(locator<ProfileStore>()),
+  );
+  locator.registerLazySingleton<TunnelRepository>(
+    () => TunnelRepositoryImpl(client: vpnClient),
+    dispose: (repo) => repo.dispose(),
+  );
+  locator.registerLazySingleton<ConnectivityRepository>(
+    () => ConnectivityRepositoryImpl(locator<ConnectivityChecker>()),
+  );
+  locator.registerLazySingleton<ProfileTransferRepository>(
+    () => ProfileTransferRepositoryImpl(bridge: profileTransferBridge),
+    dispose: (repo) => repo.dispose(),
+  );
+  locator.registerLazySingleton<LogsRepository>(LogsRepositoryImpl.new);
+
+  locator.registerFactory<AppThemeBloc>(
+    () => AppThemeBloc(locator<ThemeRepository>()),
+  );
+  locator.registerFactory<HomeNavBloc>(HomeNavBloc.new);
+  locator.registerFactory<ProfilesBloc>(
+    () => ProfilesBloc(
+      locator<ProfilesRepository>(),
+      locator<ProfileTransferRepository>(),
+    ),
+  );
+  locator.registerFactory<SettingsBloc>(
+    () => SettingsBloc(locator<SettingsRepository>()),
+  );
+  locator.registerFactory<LogsBloc>(
+    () => LogsBloc(
+      locator<LogsRepository>(),
+      locator<SettingsRepository>(),
+      locator<TunnelRepository>(),
+    ),
+  );
+  locator.registerFactory<TunnelBloc>(
+    () => TunnelBloc(locator<TunnelRepository>(), locator<LogsRepository>()),
+  );
+  locator.registerFactory<ConnectivityBloc>(
+    () => ConnectivityBloc(
+      locator<ConnectivityRepository>(),
+      locator<LogsRepository>(),
+    ),
+  );
+
+  return locator;
+}
+
+void disposeLocator(GetIt locator) {
+  unawaited(locator.reset(dispose: true));
+}

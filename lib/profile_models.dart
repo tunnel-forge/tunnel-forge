@@ -85,13 +85,12 @@ class DnsServerConfig {
   };
 }
 
-/// Global local-proxy settings; ports are loopback-only in v1.
+/// Global local-proxy settings shared across VPN and local-proxy modes.
 class ProxySettings {
   const ProxySettings({
-    this.httpEnabled = true,
     this.httpPort = defaultHttpPort,
-    this.socksEnabled = true,
     this.socksPort = defaultSocksPort,
+    this.allowLanConnections = false,
   });
 
   static const int defaultHttpPort = 8080;
@@ -99,10 +98,9 @@ class ProxySettings {
   static const int minPort = 1;
   static const int maxPort = 65535;
 
-  final bool httpEnabled;
   final int httpPort;
-  final bool socksEnabled;
   final int socksPort;
+  final bool allowLanConnections;
 
   static int normalizePort(int value, {required int fallback}) {
     if (value < minPort || value > maxPort) return fallback;
@@ -116,18 +114,115 @@ class ProxySettings {
   }
 
   ProxySettings copyWith({
-    bool? httpEnabled,
     int? httpPort,
-    bool? socksEnabled,
     int? socksPort,
+    bool? allowLanConnections,
   }) {
     return ProxySettings(
-      httpEnabled: httpEnabled ?? this.httpEnabled,
       httpPort: httpPort ?? this.httpPort,
-      socksEnabled: socksEnabled ?? this.socksEnabled,
       socksPort: socksPort ?? this.socksPort,
+      allowLanConnections: allowLanConnections ?? this.allowLanConnections,
     );
   }
+}
+
+/// Runtime proxy listener exposure reported by Android after the listeners start.
+class ProxyExposure {
+  const ProxyExposure({
+    required this.active,
+    required this.bindAddress,
+    required this.displayAddress,
+    required this.httpPort,
+    required this.socksPort,
+    required this.lanRequested,
+    required this.lanActive,
+    this.warning,
+  });
+
+  final bool active;
+  final String bindAddress;
+  final String displayAddress;
+  final int httpPort;
+  final int socksPort;
+  final bool lanRequested;
+  final bool lanActive;
+  final String? warning;
+
+  bool get hasWarning => warning != null && warning!.trim().isNotEmpty;
+
+  static ProxyExposure? tryFromMap(
+    Object? raw, {
+    required String activeKey,
+    required String bindAddressKey,
+    required String displayAddressKey,
+    required String httpPortKey,
+    required String socksPortKey,
+    required String lanRequestedKey,
+    required String lanActiveKey,
+    required String warningKey,
+  }) {
+    if (raw is! Map) return null;
+    final bindAddress = raw[bindAddressKey]?.toString() ?? '';
+    final displayAddress = raw[displayAddressKey]?.toString() ?? '';
+    final httpPort = _parsePort(raw[httpPortKey]);
+    final socksPort = _parsePort(raw[socksPortKey]);
+    if (bindAddress.isEmpty ||
+        displayAddress.isEmpty ||
+        httpPort == null ||
+        socksPort == null) {
+      return null;
+    }
+    return ProxyExposure(
+      active: _parseBool(raw[activeKey]),
+      bindAddress: bindAddress,
+      displayAddress: displayAddress,
+      httpPort: httpPort,
+      socksPort: socksPort,
+      lanRequested: _parseBool(raw[lanRequestedKey]),
+      lanActive: _parseBool(raw[lanActiveKey]),
+      warning: raw[warningKey]?.toString(),
+    );
+  }
+
+  static int? _parsePort(Object? raw) {
+    return switch (raw) {
+      int value => value,
+      _ => int.tryParse(raw?.toString() ?? ''),
+    };
+  }
+
+  static bool _parseBool(Object? raw) {
+    return switch (raw) {
+      bool value => value,
+      String value => value.toLowerCase() == 'true',
+      _ => false,
+    };
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is ProxyExposure &&
+        active == other.active &&
+        bindAddress == other.bindAddress &&
+        displayAddress == other.displayAddress &&
+        httpPort == other.httpPort &&
+        socksPort == other.socksPort &&
+        lanRequested == other.lanRequested &&
+        lanActive == other.lanActive &&
+        warning == other.warning;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    active,
+    bindAddress,
+    displayAddress,
+    httpPort,
+    socksPort,
+    lanRequested,
+    lanActive,
+    warning,
+  );
 }
 
 /// Global endpoint used by the connectivity badge for direct reachability checks.
@@ -268,24 +363,33 @@ class Profile {
     return labels.every(labelPattern.hasMatch);
   }
 
-  static String? _normalizedDoHHostname(String text) {
+  static String? _normalizedDoHEndpoint(String text) {
     final token = normalizeDnsServer(text);
     if (token.isEmpty) return null;
-    if (token.contains('://') ||
+    final hasScheme = token.contains('://');
+    final uri = Uri.tryParse(hasScheme ? token : 'https://$token');
+    if (uri == null ||
+        uri.host.isEmpty ||
+        uri.fragment.isNotEmpty ||
+        uri.userInfo.isNotEmpty) {
+      return null;
+    }
+    if (uri.scheme.toLowerCase() != 'https') return null;
+    final host = uri.host;
+    if (isValidIpv4DnsServer(host) || !isValidDnsHostname(host)) {
+      return null;
+    }
+    final hasExplicitTarget =
+        hasScheme ||
+        token.contains('/') ||
         token.contains('?') ||
-        token.contains('#') ||
-        token.contains(':')) {
-      return null;
-    }
-    final slash = token.indexOf('/');
-    final host = slash < 0 ? token : token.substring(0, slash);
-    final path = slash < 0 ? '' : token.substring(slash);
-    if (path.isNotEmpty && path != _dohPath) return null;
-    if (host.isEmpty ||
-        isValidIpv4DnsServer(host) ||
-        !isValidDnsHostname(host)) {
-      return null;
-    }
+        token.contains(':');
+    final authority = uri.hasPort ? '$host:${uri.port}' : host;
+    final path =
+        uri.path.isEmpty ? (hasExplicitTarget ? '/' : _dohPath) : uri.path;
+    final query = uri.hasQuery ? '?${uri.query}' : '';
+    if (hasScheme) return 'https://$authority$path$query';
+    if (hasExplicitTarget) return '$authority$path$query';
     return host;
   }
 
@@ -296,7 +400,7 @@ class Profile {
     final token = normalizeDnsServer(text);
     if (token.isEmpty) return '';
     if (protocol == DnsProtocol.dnsOverHttps) {
-      return _normalizedDoHHostname(token) ?? token;
+      return _normalizedDoHEndpoint(token) ?? token;
     }
     return token;
   }
@@ -305,7 +409,7 @@ class Profile {
     final token = normalizeDnsServer(text);
     if (token.isEmpty) return null;
     if (protocol == DnsProtocol.dnsOverHttps) {
-      return _normalizedDoHHostname(token) == null ? token : null;
+      return _normalizedDoHEndpoint(token) == null ? token : null;
     }
     if (protocol.requiresHostname) {
       return !isValidIpv4DnsServer(token) && isValidDnsHostname(token)
@@ -326,7 +430,8 @@ class Profile {
     final requirement = switch (protocol) {
       DnsProtocol.dnsOverTcp ||
       DnsProtocol.dnsOverUdp => 'a hostname or IPv4 address',
-      DnsProtocol.dnsOverTls || DnsProtocol.dnsOverHttps => 'a hostname',
+      DnsProtocol.dnsOverTls => 'a hostname',
+      DnsProtocol.dnsOverHttps => 'a hostname or HTTPS URL',
     };
     return '$label must be $requirement for ${protocol.displayLabel}';
   }

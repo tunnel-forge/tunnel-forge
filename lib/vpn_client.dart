@@ -5,27 +5,34 @@ import 'profile_models.dart';
 import 'utils/log_entry.dart';
 import 'vpn_contract.dart';
 
-/// Host → Dart: [VpnTunnelState] value and a human-readable [detail] string.
-typedef VpnTunnelHostCallback = void Function(String state, String detail);
+/// Host -> Dart: [VpnTunnelState] value, a human-readable [detail], and the originating [attemptId].
+typedef VpnTunnelHostCallback =
+    void Function(String state, String detail, String attemptId);
 
-/// Host → Dart: one engine log line ([VpnContract.argEngineLogLevel] is an Android log priority).
+/// Host -> Dart: one engine log line ([VpnContract.argEngineLogLevel] is an Android log priority).
 typedef VpnEngineLogCallback =
     void Function(LogLevel level, LogSource source, String tag, String message);
+
+/// Host -> Dart: current proxy listener exposure after startup or shutdown.
+typedef VpnProxyExposureCallback = void Function(ProxyExposure exposure);
 
 class VpnClient {
   VpnClient({
     MethodChannel? channel,
     VpnTunnelHostCallback? onTunnelState,
     VpnEngineLogCallback? onEngineLog,
+    VpnProxyExposureCallback? onProxyExposureChanged,
   }) : _channel = channel ?? MethodChannel(VpnContract.channel),
        _onTunnelState = onTunnelState,
-       _onEngineLog = onEngineLog {
+       _onEngineLog = onEngineLog,
+       _onProxyExposureChanged = onProxyExposureChanged {
     _channel.setMethodCallHandler(_handleHostCall);
   }
 
   final MethodChannel _channel;
   final VpnTunnelHostCallback? _onTunnelState;
   final VpnEngineLogCallback? _onEngineLog;
+  final VpnProxyExposureCallback? _onProxyExposureChanged;
 
   Future<dynamic> _handleHostCall(MethodCall call) async {
     if (call.method == VpnContract.onTunnelState) {
@@ -33,7 +40,8 @@ class VpnClient {
       if (raw is Map) {
         final state = raw[VpnContract.argTunnelState]?.toString() ?? '';
         final detail = raw[VpnContract.argTunnelDetail]?.toString() ?? '';
-        _onTunnelState?.call(state, detail);
+        final attemptId = raw[VpnContract.argAttemptId]?.toString() ?? '';
+        _onTunnelState?.call(state, detail, attemptId);
       }
       return;
     }
@@ -57,6 +65,23 @@ class VpnClient {
           tag,
           message,
         );
+      }
+      return;
+    }
+    if (call.method == VpnContract.onProxyExposureChanged) {
+      final exposure = ProxyExposure.tryFromMap(
+        call.arguments,
+        activeKey: VpnContract.argProxyExposureActive,
+        bindAddressKey: VpnContract.argProxyExposureBindAddress,
+        displayAddressKey: VpnContract.argProxyExposureDisplayAddress,
+        httpPortKey: VpnContract.argProxyExposureHttpPort,
+        socksPortKey: VpnContract.argProxyExposureSocksPort,
+        lanRequestedKey: VpnContract.argProxyExposureLanRequested,
+        lanActiveKey: VpnContract.argProxyExposureLanActive,
+        warningKey: VpnContract.argProxyExposureWarning,
+      );
+      if (exposure != null) {
+        _onProxyExposureChanged?.call(exposure);
       }
     }
   }
@@ -114,16 +139,15 @@ class VpnClient {
       VpnContract.argConnectionMode: connectionMode.jsonValue,
       VpnContract.argRoutingMode: routingMode.jsonValue,
       VpnContract.argAllowedPackages: List<String>.from(allowedAppPackages),
-      VpnContract.argProxyHttpEnabled: proxySettings.httpEnabled,
       VpnContract.argProxyHttpPort: ProxySettings.normalizePort(
         proxySettings.httpPort,
         fallback: ProxySettings.defaultHttpPort,
       ),
-      VpnContract.argProxySocksEnabled: proxySettings.socksEnabled,
       VpnContract.argProxySocksPort: ProxySettings.normalizePort(
         proxySettings.socksPort,
         fallback: ProxySettings.defaultSocksPort,
       ),
+      VpnContract.argProxyAllowLan: proxySettings.allowLanConnections,
     });
   }
 

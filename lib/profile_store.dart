@@ -58,10 +58,10 @@ class ProfileStore {
   static const prefsKeyProfilesJson = 'vpn_profiles_json_v3';
   static const prefsKeyLastProfileId = 'vpn_last_profile_id_v1';
   static const prefsKeyConnectionMode = 'connection_mode_v1';
-  static const prefsKeyProxyHttpEnabled = 'proxy_http_enabled_v1';
   static const prefsKeyProxyHttpPort = 'proxy_http_port_v1';
-  static const prefsKeyProxySocksEnabled = 'proxy_socks_enabled_v1';
   static const prefsKeyProxySocksPort = 'proxy_socks_port_v1';
+  static const prefsKeyProxyAllowLanConnections =
+      'proxy_allow_lan_connections_v1';
   static const prefsKeyConnectivityCheckUrl = 'connectivity_check_url_v1';
   static const prefsKeyLogDisplayLevel = 'log_display_level_v1';
 
@@ -127,22 +127,20 @@ class ProfileStore {
   Future<ProxySettings> loadProxySettings() async {
     final p = await _prefs();
     return ProxySettings(
-      httpEnabled: p.getBool(prefsKeyProxyHttpEnabled) ?? true,
       httpPort: ProxySettings.normalizePort(
         p.getInt(prefsKeyProxyHttpPort) ?? ProxySettings.defaultHttpPort,
         fallback: ProxySettings.defaultHttpPort,
       ),
-      socksEnabled: p.getBool(prefsKeyProxySocksEnabled) ?? true,
       socksPort: ProxySettings.normalizePort(
         p.getInt(prefsKeyProxySocksPort) ?? ProxySettings.defaultSocksPort,
         fallback: ProxySettings.defaultSocksPort,
       ),
+      allowLanConnections: p.getBool(prefsKeyProxyAllowLanConnections) ?? false,
     );
   }
 
   Future<void> saveProxySettings(ProxySettings settings) async {
     final p = await _prefs();
-    await p.setBool(prefsKeyProxyHttpEnabled, settings.httpEnabled);
     await p.setInt(
       prefsKeyProxyHttpPort,
       ProxySettings.normalizePort(
@@ -150,13 +148,16 @@ class ProfileStore {
         fallback: ProxySettings.defaultHttpPort,
       ),
     );
-    await p.setBool(prefsKeyProxySocksEnabled, settings.socksEnabled);
     await p.setInt(
       prefsKeyProxySocksPort,
       ProxySettings.normalizePort(
         settings.socksPort,
         fallback: ProxySettings.defaultSocksPort,
       ),
+    );
+    await p.setBool(
+      prefsKeyProxyAllowLanConnections,
+      settings.allowLanConnections,
     );
   }
 

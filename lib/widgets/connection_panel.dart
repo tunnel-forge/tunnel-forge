@@ -23,6 +23,7 @@ class ConnectionPanel extends StatelessWidget {
     required this.busy,
     required this.tunnelUp,
     required this.awaitingTunnel,
+    required this.stopRequested,
     required this.canStartConnection,
     required this.connectButtonLabel,
     required this.onPrimary,
@@ -41,6 +42,7 @@ class ConnectionPanel extends StatelessWidget {
   final bool busy;
   final bool tunnelUp;
   final bool awaitingTunnel;
+  final bool stopRequested;
   final bool canStartConnection;
   final String connectButtonLabel;
   final VoidCallback onPrimary;
@@ -55,17 +57,20 @@ class ConnectionPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final pickerEnabled = !profilesLoading;
     final profileMissing = !canStartConnection && !tunnelUp;
-    final locked = busy || (awaitingTunnel && !tunnelUp);
-    final showProgress = busy || (awaitingTunnel && !tunnelUp);
+    final waitingToConnect = awaitingTunnel && !tunnelUp;
+    final locked = busy || stopRequested;
+    final showProgress = busy || waitingToConnect || stopRequested;
     final theme = Theme.of(context);
     final semanticColors =
         theme.extension<AppSemanticColors>() ??
         AppSemanticColors.fallback(theme.brightness);
-    final visualState = tunnelUp
+    final visualState = stopRequested
+        ? _ConnectionVisualState.disconnecting
+        : tunnelUp
         ? (busy
               ? _ConnectionVisualState.disconnecting
               : _ConnectionVisualState.connected)
-        : (showProgress
+        : (waitingToConnect || busy
               ? _ConnectionVisualState.connecting
               : (profileMissing
                     ? _ConnectionVisualState.unavailable
@@ -232,7 +237,8 @@ class ConnectionPanel extends StatelessWidget {
                       ConnectivityBadgeState.failure =>
                         semanticColors.disconnect,
                     };
-                    final showConnectivity = tunnelUp && !busy;
+                    final showConnectivity =
+                        tunnelUp && !busy && !stopRequested;
 
                     return Column(
                       children: [

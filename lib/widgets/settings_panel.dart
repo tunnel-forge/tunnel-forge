@@ -13,6 +13,7 @@ class SettingsPanel extends StatefulWidget {
     required this.routingMode,
     required this.allowedAppPackages,
     required this.proxySettings,
+    this.proxyExposure,
     required this.connectivityCheckSettings,
     required this.onConnectionModeChanged,
     required this.onRoutingModeChanged,
@@ -30,6 +31,7 @@ class SettingsPanel extends StatefulWidget {
   final RoutingMode routingMode;
   final List<String> allowedAppPackages;
   final ProxySettings proxySettings;
+  final ProxyExposure? proxyExposure;
   final ConnectivityCheckSettings connectivityCheckSettings;
   final ValueChanged<ConnectionMode> onConnectionModeChanged;
   final ValueChanged<RoutingMode> onRoutingModeChanged;
@@ -126,6 +128,27 @@ class _SettingsPanelState extends State<SettingsPanel> {
         ? 'No apps selected. Choose at least one app to connect.'
         : '${widget.allowedAppPackages.length} app${widget.allowedAppPackages.length == 1 ? '' : 's'} will use VPN';
     final proxyMode = widget.connectionMode == ConnectionMode.proxyOnly;
+    final proxySummary = proxyMode
+        ? 'Tunnel Forge always starts both local proxy listeners in local proxy mode.'
+        : 'Tunnel Forge always starts both local proxy listeners in VPN mode. They stay in the background unless LAN access is enabled.';
+    final activeProxyExposure = widget.proxyExposure?.active == true
+        ? widget.proxyExposure
+        : null;
+    final proxyDisplayHost = activeProxyExposure?.displayAddress ?? '127.0.0.1';
+    final proxyHttpPort =
+        activeProxyExposure?.httpPort ?? widget.proxySettings.httpPort;
+    final proxySocksPort =
+        activeProxyExposure?.socksPort ?? widget.proxySettings.socksPort;
+    final proxyEndpointStatus = switch (activeProxyExposure) {
+      ProxyExposure exposure when exposure.hasWarning => exposure.warning!,
+      ProxyExposure exposure when exposure.lanActive =>
+        'LAN clients on the same Wi-Fi or hotspot can use this address.',
+      ProxyExposure exposure when exposure.lanRequested =>
+        'LAN sharing is enabled for this session.',
+      _ when widget.proxySettings.allowLanConnections =>
+        'Connect to detect the current LAN IP for other devices.',
+      _ => 'LAN access is disabled.',
+    };
     final semanticColors =
         Theme.of(context).extension<AppSemanticColors>() ??
         AppSemanticColors.fallback(widget.colorScheme.brightness);
@@ -187,159 +210,173 @@ class _SettingsPanelState extends State<SettingsPanel> {
         ),
         const SizedBox(height: 22),
         if (!proxyMode) ...[
-          _sectionTitle('Traffic routing'),
+          _sectionTitle('Split tunneling'),
           const SizedBox(height: 8),
           Card(
             margin: EdgeInsets.zero,
             clipBehavior: Clip.antiAlias,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SwitchListTile(
-                  contentPadding: _kCardTilePadding,
-                  title: _cardTitle('VPN for all apps'),
-                  subtitle: _cardText(
+            child: Padding(
+              padding: _kCardContentPadding,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _cardTitle('Mode'),
+                  _cardText(
                     allAppsVpn
-                        ? 'Route all device traffic through the VPN.'
-                        : 'Only the apps you choose will use the VPN.',
+                        ? 'Exclusive routes all device traffic through the VPN.'
+                        : 'Inclusive routes only the apps you choose through the VPN.',
                     color: widget.colorScheme.onSurfaceVariant,
                   ),
-                  value: allAppsVpn,
-                  onChanged: widget.routingLocked
-                      ? null
-                      : (v) => widget.onRoutingModeChanged(
-                          v
-                              ? RoutingMode.fullTunnel
-                              : RoutingMode.perAppAllowList,
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<RoutingMode>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment<RoutingMode>(
+                          value: RoutingMode.perAppAllowList,
+                          label: Text('Inclusive'),
                         ),
-                ),
-                if (!allAppsVpn) ...[
-                  const Divider(height: 1),
-                  ListTile(
-                    enabled: !widget.routingLocked,
-                    contentPadding: _kCardTilePadding,
-                    leading: Icon(
-                      Icons.tune,
-                      color: widget.colorScheme.onSurfaceVariant,
+                        ButtonSegment<RoutingMode>(
+                          value: RoutingMode.fullTunnel,
+                          label: Text('Exclusive'),
+                        ),
+                      ],
+                      selected: {widget.routingMode},
+                      onSelectionChanged: widget.routingLocked
+                          ? null
+                          : (next) {
+                              if (next.isEmpty) return;
+                              widget.onRoutingModeChanged(next.first);
+                            },
                     ),
-                    title: _cardTitle('Select apps'),
-                    subtitle: _cardText(
-                      perAppSubtitle,
-                      color: widget.allowedAppPackages.isEmpty
-                          ? widget.colorScheme.error
-                          : widget.colorScheme.onSurfaceVariant,
-                    ),
-                    trailing: Icon(
-                      Icons.chevron_right,
-                      color: widget.colorScheme.onSurfaceVariant,
-                    ),
-                    onTap: widget.onChooseApps,
                   ),
+                  if (!allAppsVpn) ...[
+                    const SizedBox(height: 16),
+                    ListTile(
+                      enabled: !widget.routingLocked,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        Icons.tune,
+                        color: widget.colorScheme.onSurfaceVariant,
+                      ),
+                      title: _cardTitle('Select apps'),
+                      subtitle: _cardText(
+                        perAppSubtitle,
+                        color: widget.allowedAppPackages.isEmpty
+                            ? widget.colorScheme.error
+                            : widget.colorScheme.onSurfaceVariant,
+                      ),
+                      trailing: Icon(
+                        Icons.chevron_right,
+                        color: widget.colorScheme.onSurfaceVariant,
+                      ),
+                      onTap: widget.onChooseApps,
+                    ),
+                  ],
                 ],
-              ],
-            ),
-          ),
-        ] else ...[
-          _sectionTitle('Proxy settings'),
-          const SizedBox(height: 8),
-          Card(
-            margin: EdgeInsets.zero,
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                SwitchListTile(
-                  contentPadding: _kCardTilePadding,
-                  title: _cardTitle('HTTP proxy'),
-                  subtitle: _cardText(
-                    'Apps that support manual HTTP proxy settings can use 127.0.0.1:${widget.proxySettings.httpPort}',
-                    color: widget.colorScheme.onSurfaceVariant,
-                  ),
-                  value: widget.proxySettings.httpEnabled,
-                  onChanged: widget.routingLocked
-                      ? null
-                      : (v) => widget.onProxySettingsChanged(
-                          widget.proxySettings.copyWith(httpEnabled: v),
-                        ),
-                ),
-                Padding(
-                  padding: _kCardFieldPadding,
-                  child: TextFormField(
-                    key: const Key('proxy_http_port_field'),
-                    controller: _httpPortController,
-                    enabled:
-                        !widget.routingLocked &&
-                        widget.proxySettings.httpEnabled,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'HTTP port'),
-                    onChanged: (value) => widget.onProxySettingsChanged(
-                      widget.proxySettings.copyWith(
-                        httpPort: ProxySettings.portFromText(
-                          value,
-                          fallback: widget.proxySettings.httpPort,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const Divider(height: 1),
-                SwitchListTile(
-                  contentPadding: _kCardTilePadding,
-                  title: _cardTitle('SOCKS5 proxy'),
-                  subtitle: _cardText(
-                    'Apps that support SOCKS5 can use 127.0.0.1:${widget.proxySettings.socksPort}',
-                    color: widget.colorScheme.onSurfaceVariant,
-                  ),
-                  value: widget.proxySettings.socksEnabled,
-                  onChanged: widget.routingLocked
-                      ? null
-                      : (v) => widget.onProxySettingsChanged(
-                          widget.proxySettings.copyWith(socksEnabled: v),
-                        ),
-                ),
-                Padding(
-                  padding: _kCardFieldPadding,
-                  child: TextFormField(
-                    key: const Key('proxy_socks_port_field'),
-                    controller: _socksPortController,
-                    enabled:
-                        !widget.routingLocked &&
-                        widget.proxySettings.socksEnabled,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'SOCKS5 port'),
-                    onChanged: (value) => widget.onProxySettingsChanged(
-                      widget.proxySettings.copyWith(
-                        socksPort: ProxySettings.portFromText(
-                          value,
-                          fallback: widget.proxySettings.socksPort,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            margin: EdgeInsets.zero,
-            child: ListTile(
-              contentPadding: _kCardTilePadding,
-              leading: Icon(Icons.info_outline, color: semanticColors.info),
-              title: _cardTitle('Proxy endpoints'),
-              subtitle: _cardText(
-                [
-                  if (widget.proxySettings.httpEnabled)
-                    'HTTP: 127.0.0.1:${widget.proxySettings.httpPort}',
-                  if (widget.proxySettings.socksEnabled)
-                    'SOCKS5: 127.0.0.1:${widget.proxySettings.socksPort}',
-                  if (!widget.proxySettings.httpEnabled &&
-                      !widget.proxySettings.socksEnabled)
-                    'Enable at least one listener before connecting.',
-                ].join('\n'),
               ),
             ),
           ),
         ],
+        _sectionTitle('Local proxy'),
+        const SizedBox(height: 8),
+        Card(
+          margin: EdgeInsets.zero,
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: _kCardContentPadding,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _cardTitle('Always on'),
+                _cardText(
+                  proxySummary,
+                  color: widget.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  key: const Key('proxy_http_port_field'),
+                  controller: _httpPortController,
+                  enabled: !widget.routingLocked,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'HTTP port'),
+                  onChanged: (value) => widget.onProxySettingsChanged(
+                    widget.proxySettings.copyWith(
+                      httpPort: ProxySettings.portFromText(
+                        value,
+                        fallback: widget.proxySettings.httpPort,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  key: const Key('proxy_socks_port_field'),
+                  controller: _socksPortController,
+                  enabled: !widget.routingLocked,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'SOCKS5 port'),
+                  onChanged: (value) => widget.onProxySettingsChanged(
+                    widget.proxySettings.copyWith(
+                      socksPort: ProxySettings.portFromText(
+                        value,
+                        fallback: widget.proxySettings.socksPort,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  key: const Key('proxy_allow_lan_switch'),
+                  contentPadding: EdgeInsets.zero,
+                  title: _cardTitle('Allow connections from LAN'),
+                  subtitle: _cardText(
+                    widget.proxySettings.allowLanConnections
+                        ? 'Detect a shareable local IPv4 and expose both listeners to devices on the same Wi-Fi or hotspot when available.'
+                        : 'Keep both listeners on this device only.',
+                    color: widget.colorScheme.onSurfaceVariant,
+                  ),
+                  value: widget.proxySettings.allowLanConnections,
+                  onChanged: widget.routingLocked
+                      ? null
+                      : (value) => widget.onProxySettingsChanged(
+                          widget.proxySettings.copyWith(
+                            allowLanConnections: value,
+                          ),
+                        ),
+                ),
+                if (widget.proxySettings.httpPort ==
+                    widget.proxySettings.socksPort)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      'HTTP and SOCKS5 ports must be different before connecting.',
+                      style: widget.textTheme.bodySmall?.copyWith(
+                        color: widget.colorScheme.error,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          margin: EdgeInsets.zero,
+          child: ListTile(
+            contentPadding: _kCardTilePadding,
+            leading: Icon(Icons.info_outline, color: semanticColors.info),
+            title: _cardTitle('Proxy endpoints'),
+            subtitle: _cardText(
+              [
+                'HTTP: $proxyDisplayHost:$proxyHttpPort',
+                'SOCKS5: $proxyDisplayHost:$proxySocksPort',
+                proxyEndpointStatus,
+              ].join('\n'),
+            ),
+          ),
+        ),
         const SizedBox(height: 22),
         _sectionTitle('Connectivity check'),
         const SizedBox(height: 8),
@@ -353,7 +390,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
               children: [
                 _cardTitle('Status check URL'),
                 _cardText(
-                  'Set the address used for the status check after you connect. Tap the badge again anytime while connected to refresh it.',
+                  'Used for the status check after you connect. Tap the badge anytime to refresh.',
                   color: widget.colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(height: 14),

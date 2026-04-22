@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:equatable/equatable.dart';
+
 import 'profile_models.dart';
 
 class ConnectivityPingResult {
@@ -36,12 +38,47 @@ class ConnectivityPingResult {
   }
 }
 
-abstract class ConnectivityChecker {
-  Future<ConnectivityPingResult> ping(String url);
+enum ConnectivityPingRoute { direct, localHttpProxy }
+
+class ConnectivityPingRequest extends Equatable {
+  const ConnectivityPingRequest._({
+    required this.url,
+    required this.route,
+    this.proxyHost,
+    this.proxyPort,
+  });
+
+  const ConnectivityPingRequest.direct(String url)
+    : this._(url: url, route: ConnectivityPingRoute.direct);
+
+  const ConnectivityPingRequest.localHttpProxy({
+    required String url,
+    String proxyHost = _defaultProxyHost,
+    required int proxyPort,
+  }) : this._(
+         url: url,
+         route: ConnectivityPingRoute.localHttpProxy,
+         proxyHost: proxyHost,
+         proxyPort: proxyPort,
+       );
+
+  static const String _defaultProxyHost = '127.0.0.1';
+
+  final String url;
+  final ConnectivityPingRoute route;
+  final String? proxyHost;
+  final int? proxyPort;
+
+  @override
+  List<Object?> get props => [url, route, proxyHost, proxyPort];
 }
 
-class DirectConnectivityChecker implements ConnectivityChecker {
-  DirectConnectivityChecker({
+abstract class ConnectivityChecker {
+  Future<ConnectivityPingResult> ping(ConnectivityPingRequest request);
+}
+
+class HttpConnectivityChecker implements ConnectivityChecker {
+  HttpConnectivityChecker({
     this.timeout = const Duration(seconds: 6),
     HttpClient Function()? clientFactory,
   }) : _clientFactory = clientFactory ?? HttpClient.new;
@@ -50,8 +87,8 @@ class DirectConnectivityChecker implements ConnectivityChecker {
   final HttpClient Function() _clientFactory;
 
   @override
-  Future<ConnectivityPingResult> ping(String url) async {
-    final normalizedUrl = ConnectivityCheckSettings.normalizeUrl(url);
+  Future<ConnectivityPingResult> ping(ConnectivityPingRequest request) async {
+    final normalizedUrl = ConnectivityCheckSettings.normalizeUrl(request.url);
     final validationError = ConnectivityCheckSettings.validateUrl(
       normalizedUrl,
     );
@@ -62,14 +99,14 @@ class DirectConnectivityChecker implements ConnectivityChecker {
     final uri = Uri.parse(normalizedUrl);
     final client = _clientFactory();
     client.connectionTimeout = timeout;
-    client.findProxy = (_) => 'DIRECT';
+    client.findProxy = (_) => _proxyDirectiveFor(request);
 
     final watch = Stopwatch()..start();
 
     try {
-      final request = await client.getUrl(uri).timeout(timeout);
-      request.followRedirects = true;
-      final response = await request.close().timeout(timeout);
+      final httpRequest = await client.getUrl(uri).timeout(timeout);
+      httpRequest.followRedirects = true;
+      final response = await httpRequest.close().timeout(timeout);
       await response.drain<void>().timeout(timeout);
       watch.stop();
 
@@ -95,5 +132,23 @@ class DirectConnectivityChecker implements ConnectivityChecker {
     } finally {
       client.close(force: true);
     }
+  }
+
+  String _proxyDirectiveFor(ConnectivityPingRequest request) {
+    return switch (request.route) {
+      ConnectivityPingRoute.direct => 'DIRECT',
+      ConnectivityPingRoute.localHttpProxy => () {
+        final host = request.proxyHost?.trim();
+        final port = request.proxyPort;
+        if (host == null ||
+            host.isEmpty ||
+            port == null ||
+            port < ProxySettings.minPort ||
+            port > ProxySettings.maxPort) {
+          throw SocketException('Invalid local HTTP proxy configuration');
+        }
+        return 'PROXY $host:$port';
+      }(),
+    };
   }
 }

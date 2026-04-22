@@ -25,10 +25,9 @@ abstract final class VpnContract {
   static const String argMtu = 'mtu';
   static const String argProfileName = 'profileName';
   static const String argConnectionMode = 'connectionMode';
-  static const String argProxyHttpEnabled = 'proxyHttpEnabled';
   static const String argProxyHttpPort = 'proxyHttpPort';
-  static const String argProxySocksEnabled = 'proxySocksEnabled';
   static const String argProxySocksPort = 'proxySocksPort';
+  static const String argProxyAllowLan = 'proxyAllowLan';
 
   /// `fullTunnel` or `perAppAllowList` — same values as [RoutingMode.jsonValue].
   static const String argRoutingMode = 'routingMode';
@@ -50,13 +49,27 @@ abstract final class VpnContract {
   static const String argTunnelState = 'tunnelState';
   static const String argTunnelDetail = 'tunnelDetail';
 
-  /// Android → Dart: engine log lines; [argEngineLogLevel] uses `android.util.Log` priorities.
+  /// Android -> Dart: engine log lines; [argEngineLogLevel] uses `android.util.Log` priorities.
   static const String onEngineLog = 'onEngineLog';
 
   static const String argEngineLogLevel = 'engineLogLevel';
   static const String argEngineLogSource = 'engineLogSource';
   static const String argEngineLogTag = 'engineLogTag';
   static const String argEngineLogMessage = 'engineLogMessage';
+
+  /// Android -> Dart: active local-proxy listener address/port exposure.
+  static const String onProxyExposureChanged = 'onProxyExposureChanged';
+
+  static const String argProxyExposureActive = 'proxyExposureActive';
+  static const String argProxyExposureBindAddress = 'proxyExposureBindAddress';
+  static const String argProxyExposureDisplayAddress =
+      'proxyExposureDisplayAddress';
+  static const String argProxyExposureHttpPort = 'proxyExposureHttpPort';
+  static const String argProxyExposureSocksPort = 'proxyExposureSocksPort';
+  static const String argProxyExposureLanRequested =
+      'proxyExposureLanRequested';
+  static const String argProxyExposureLanActive = 'proxyExposureLanActive';
+  static const String argProxyExposureWarning = 'proxyExposureWarning';
 }
 
 /// Tunnel lifecycle strings sent with [VpnContract.onTunnelState] / [VpnContract.argTunnelState].
