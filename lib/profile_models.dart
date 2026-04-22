@@ -244,6 +244,8 @@ class Profile {
 
   static String normalizeDnsServer(String text) => text.trim();
 
+  static const String _dohPath = '/dns-query';
+
   static bool isValidDnsHostname(String value) {
     final token = value.trim();
     if (token.isEmpty || token.length > 253) return false;
@@ -266,9 +268,45 @@ class Profile {
     return labels.every(labelPattern.hasMatch);
   }
 
+  static String? _normalizedDoHHostname(String text) {
+    final token = normalizeDnsServer(text);
+    if (token.isEmpty) return null;
+    if (token.contains('://') ||
+        token.contains('?') ||
+        token.contains('#') ||
+        token.contains(':')) {
+      return null;
+    }
+    final slash = token.indexOf('/');
+    final host = slash < 0 ? token : token.substring(0, slash);
+    final path = slash < 0 ? '' : token.substring(slash);
+    if (path.isNotEmpty && path != _dohPath) return null;
+    if (host.isEmpty ||
+        isValidIpv4DnsServer(host) ||
+        !isValidDnsHostname(host)) {
+      return null;
+    }
+    return host;
+  }
+
+  static String normalizeDnsServerForProtocol(
+    String text,
+    DnsProtocol protocol,
+  ) {
+    final token = normalizeDnsServer(text);
+    if (token.isEmpty) return '';
+    if (protocol == DnsProtocol.dnsOverHttps) {
+      return _normalizedDoHHostname(token) ?? token;
+    }
+    return token;
+  }
+
   static String? invalidDnsServer(String text, DnsProtocol protocol) {
     final token = normalizeDnsServer(text);
     if (token.isEmpty) return null;
+    if (protocol == DnsProtocol.dnsOverHttps) {
+      return _normalizedDoHHostname(token) == null ? token : null;
+    }
     if (protocol.requiresHostname) {
       return !isValidIpv4DnsServer(token) && isValidDnsHostname(token)
           ? null
@@ -284,14 +322,13 @@ class Profile {
     String text,
     DnsProtocol protocol,
   ) {
-    final invalid = invalidDnsServer(text, protocol);
-    if (invalid == null) return '';
+    if (invalidDnsServer(text, protocol) == null) return '';
     final requirement = switch (protocol) {
       DnsProtocol.dnsOverTcp ||
       DnsProtocol.dnsOverUdp => 'a hostname or IPv4 address',
       DnsProtocol.dnsOverTls || DnsProtocol.dnsOverHttps => 'a hostname',
     };
-    return '$label server "$invalid" must be $requirement for ${protocol.displayLabel}';
+    return '$label must be $requirement for ${protocol.displayLabel}';
   }
 
   static List<DnsServerConfig> orderedDnsServers({
@@ -305,11 +342,11 @@ class Profile {
     // Preserve slot priority while dropping empty and duplicate entries.
     for (final entry in <DnsServerConfig>[
       DnsServerConfig(
-        host: normalizeDnsServer(dns1Host),
+        host: normalizeDnsServerForProtocol(dns1Host, dns1Protocol),
         protocol: dns1Protocol,
       ),
       DnsServerConfig(
-        host: normalizeDnsServer(dns2Host),
+        host: normalizeDnsServerForProtocol(dns2Host, dns2Protocol),
         protocol: dns2Protocol,
       ),
     ]) {
@@ -328,9 +365,9 @@ class Profile {
     'server': server,
     'user': user,
     'dnsAutomatic': dnsAutomatic,
-    'dns1Host': normalizeDnsServer(dns1Host),
+    'dns1Host': normalizeDnsServerForProtocol(dns1Host, dns1Protocol),
     'dns1Protocol': dns1Protocol.jsonValue,
-    'dns2Host': normalizeDnsServer(dns2Host),
+    'dns2Host': normalizeDnsServerForProtocol(dns2Host, dns2Protocol),
     'dns2Protocol': dns2Protocol.jsonValue,
     'mtu': mtu,
   };
@@ -361,6 +398,8 @@ class Profile {
     if (id.isEmpty || server.isEmpty) return null;
     int mtu = defaultVpnMtu;
     final mtuRaw = m['mtu'];
+    final parsedDns1Protocol = DnsProtocol.fromJson(dns1Protocol);
+    final parsedDns2Protocol = DnsProtocol.fromJson(dns2Protocol);
     if (mtuRaw is int) {
       mtu = normalizeMtu(mtuRaw);
     } else if (mtuRaw is num) {
@@ -374,10 +413,10 @@ class Profile {
       server: server,
       user: user,
       dnsAutomatic: dnsAutomatic,
-      dns1Host: normalizeDnsServer(dns1Host),
-      dns1Protocol: DnsProtocol.fromJson(dns1Protocol),
-      dns2Host: normalizeDnsServer(dns2Host),
-      dns2Protocol: DnsProtocol.fromJson(dns2Protocol),
+      dns1Host: normalizeDnsServerForProtocol(dns1Host, parsedDns1Protocol),
+      dns1Protocol: parsedDns1Protocol,
+      dns2Host: normalizeDnsServerForProtocol(dns2Host, parsedDns2Protocol),
+      dns2Protocol: parsedDns2Protocol,
       mtu: mtu,
     );
   }

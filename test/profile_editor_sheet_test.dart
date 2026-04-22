@@ -122,9 +122,7 @@ void main() {
 
     expect(find.byKey(const Key('app_toast')), findsOneWidget);
     expect(
-      find.text(
-        'DNS 2 server "bad/path" must be a hostname or IPv4 address for DNS-over-UDP',
-      ),
+      find.text('DNS 2 must be a hostname or IPv4 address for DNS-over-UDP'),
       findsWidgets,
     );
   });

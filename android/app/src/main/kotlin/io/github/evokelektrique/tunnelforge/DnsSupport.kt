@@ -57,7 +57,7 @@ internal data class ResolvedDnsServerConfig(
         get() = protocol.defaultPort
 
     val dohPath: String
-        get() = "/dns-query"
+        get() = DOH_PATH
 }
 
 internal object DnsConfigSupport {
@@ -65,7 +65,7 @@ internal object DnsConfigSupport {
         val out = mutableListOf<DnsServerConfig>()
         val seen = linkedSetOf<String>()
         raw.orEmpty().forEach { entry ->
-            val host = entry.host.trim()
+            val host = normalizeHost(entry)
             if (host.isEmpty()) return@forEach
             if (!isValid(entry.copy(host = host))) return@forEach
             val fingerprint = "${entry.protocol.wireValue}:$host"
@@ -110,8 +110,11 @@ internal object DnsConfigSupport {
     }
 
     fun isValid(server: DnsServerConfig): Boolean {
-        val host = server.host.trim()
+        val host = normalizeHost(server)
         if (host.isEmpty()) return false
+        if (server.protocol == DnsProtocol.dnsOverHttps) {
+            return normalizedDoHHostname(host) != null
+        }
         return if (server.protocol.requiresHostname) {
             host.toIpv4LiteralOrNull() == null && isValidHostname(host)
         } else {
@@ -125,7 +128,40 @@ internal object DnsConfigSupport {
                 DnsProtocol.dnsOverTcp, DnsProtocol.dnsOverUdp -> "a hostname or IPv4 address"
                 DnsProtocol.dnsOverTls, DnsProtocol.dnsOverHttps -> "a hostname"
             }
-        return "$label server \"${server.host}\" must be $requirement for ${server.protocol.displayLabel}"
+        return "$label must be $requirement for ${server.protocol.displayLabel}"
+    }
+
+    private fun normalizeHost(server: DnsServerConfig): String {
+        val host = server.host.trim()
+        if (host.isEmpty()) return ""
+        return if (server.protocol == DnsProtocol.dnsOverHttps) {
+            normalizedDoHHostname(host) ?: host
+        } else {
+            host
+        }
+    }
+
+    private fun normalizedDoHHostname(host: String): String? {
+        if (
+            host.contains("://") ||
+                host.contains('?') ||
+                host.contains('#') ||
+                host.contains(':')
+        ) {
+            return null
+        }
+        val slash = host.indexOf('/')
+        val normalizedHost = if (slash < 0) host else host.substring(0, slash)
+        val path = if (slash < 0) "" else host.substring(slash)
+        if (path.isNotEmpty() && path != DOH_PATH) return null
+        if (
+            normalizedHost.isEmpty() ||
+                normalizedHost.toIpv4LiteralOrNull() != null ||
+                !isValidHostname(normalizedHost)
+        ) {
+            return null
+        }
+        return normalizedHost
     }
 
     private fun resolveIpv4Hostname(host: String): String {
@@ -499,3 +535,4 @@ internal fun readFully(input: InputStream, length: Int): ByteArray {
 private const val DNS_CONNECT_TIMEOUT_MS = 5_000
 private const val DNS_READ_TIMEOUT_MS = 5_000
 private const val MAX_DNS_PACKET_LEN = 65_535
+private const val DOH_PATH = "/dns-query"

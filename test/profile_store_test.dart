@@ -107,6 +107,52 @@ void main() {
         Profile.invalidDnsServer('example.com', DnsProtocol.dnsOverUdp),
         isNull,
       );
+      expect(
+        Profile.invalidDnsServer(
+          'wikimedia-dns.org/dns-query',
+          DnsProtocol.dnsOverHttps,
+        ),
+        isNull,
+      );
+      expect(
+        Profile.invalidDnsServer(
+          'wikimedia-dns.org/custom-path',
+          DnsProtocol.dnsOverHttps,
+        ),
+        'wikimedia-dns.org/custom-path',
+      );
+      expect(
+        Profile.invalidDnsServer(
+          'https://wikimedia-dns.org/dns-query',
+          DnsProtocol.dnsOverHttps,
+        ),
+        'https://wikimedia-dns.org/dns-query',
+      );
+    });
+
+    test('normalizes dns-over-https host and fixed path inputs', () {
+      expect(
+        Profile.normalizeDnsServerForProtocol(
+          ' wikimedia-dns.org/dns-query ',
+          DnsProtocol.dnsOverHttps,
+        ),
+        'wikimedia-dns.org',
+      );
+      expect(
+        Profile.normalizeDnsServerForProtocol(
+          'wikimedia-dns.org',
+          DnsProtocol.dnsOverHttps,
+        ),
+        'wikimedia-dns.org',
+      );
+      expect(
+        Profile.validationMessageForDnsServer(
+          'DNS 1',
+          'bad/path',
+          DnsProtocol.dnsOverUdp,
+        ),
+        'DNS 1 must be a hostname or IPv4 address for DNS-over-UDP',
+      );
     });
   });
 

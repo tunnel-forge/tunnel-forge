@@ -81,6 +81,26 @@ void main() {
         throwsFormatException,
       );
     });
+
+    test('normalizes dns-over-https host plus fixed path on import', () {
+      final decoded = ProfileTransferEnvelope.fromJsonMap({
+        'v': ProfileTransferEnvelope.currentVersion,
+        'displayName': 'Office',
+        'server': 'vpn.example.com',
+        'user': 'alice',
+        'password': 'pw',
+        'psk': 'psk',
+        'dnsAutomatic': false,
+        'dns1Host': 'wikimedia-dns.org/dns-query',
+        'dns1Protocol': 'dnsOverHttps',
+        'dns2Host': '',
+        'dns2Protocol': 'dnsOverUdp',
+        'mtu': 1400,
+      });
+
+      expect(decoded.dns1Host, 'wikimedia-dns.org');
+      expect(decoded.dns1Protocol, DnsProtocol.dnsOverHttps);
+    });
   });
 
   group('ProfileStore imported profiles', () {

@@ -185,9 +185,15 @@ class _ProfileEditorSheetState extends State<ProfileEditorSheet> {
       server: serverTrim,
       user: _user.text,
       dnsAutomatic: _dnsAutomatic,
-      dns1Host: Profile.normalizeDnsServer(_dns1.text),
+      dns1Host: Profile.normalizeDnsServerForProtocol(
+        _dns1.text,
+        _dns1Protocol,
+      ),
       dns1Protocol: _dns1Protocol,
-      dns2Host: Profile.normalizeDnsServer(_dns2.text),
+      dns2Host: Profile.normalizeDnsServerForProtocol(
+        _dns2.text,
+        _dns2Protocol,
+      ),
       dns2Protocol: _dns2Protocol,
       mtu: Profile.normalizeMtu(mtuParsed),
     );
