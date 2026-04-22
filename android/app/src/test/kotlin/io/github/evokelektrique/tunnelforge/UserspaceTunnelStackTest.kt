@@ -781,7 +781,7 @@ class UserspaceTunnelStackTest {
 
         worker.join(1000)
         assertTrue(failure is IOException)
-        assertTrue((failure as IOException).message!!.contains("DNS response code 3"))
+        assertEquals("DNS response code 3.", (failure as IOException).message)
         assertEquals(1, backend.outboundPackets.size)
 
         stack.stop()

@@ -63,7 +63,24 @@ class AppLogTest {
             )
 
         assertFalse(rendered.contains("8.8.8.8"))
+        assertTrue(rendered.contains("source=10.0.0.2:5353"))
         assertTrue(rendered.contains("expected=[REDACTED_HOST]:53"))
+    }
+
+    @Test
+    fun renderForwardedMessageKeepsLocalIpv4FieldsVisible() {
+        val rendered =
+            AppLog.renderForwardedMessage(
+                "tunnel ready clientIpv4=192.168.1.20 source=10.0.0.2:5353 next=172.16.0.4 host=127.0.0.1 public=8.8.8.8",
+                null,
+            )
+
+        assertTrue(rendered.contains("clientIpv4=192.168.1.20"))
+        assertTrue(rendered.contains("source=10.0.0.2:5353"))
+        assertTrue(rendered.contains("next=172.16.0.4"))
+        assertTrue(rendered.contains("host=127.0.0.1"))
+        assertFalse(rendered.contains("public=8.8.8.8"))
+        assertTrue(rendered.contains("public=[REDACTED_HOST]"))
     }
 
     @Test

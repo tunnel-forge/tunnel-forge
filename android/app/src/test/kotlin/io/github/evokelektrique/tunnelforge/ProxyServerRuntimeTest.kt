@@ -2,6 +2,7 @@ package io.github.evokelektrique.tunnelforge
 
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
+import java.io.InputStream
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
@@ -24,6 +25,50 @@ class ProxyServerRuntimeTest {
             )
 
         assertEquals("HTTP 127.0.0.1:8080, SOCKS5 127.0.0.1:1080", runtime.endpointSummary())
+    }
+
+    @Test
+    fun endpointSummaryReflectsLanBinding() {
+        val runtime =
+            ProxyServerRuntime(
+                config =
+                    ProxyRuntimeConfig(
+                        httpEnabled = true,
+                        httpPort = 8080,
+                        socksEnabled = true,
+                        socksPort = 1080,
+                        allowLanConnections = true,
+                        exposure =
+                            ProxyExposureInfo(
+                                active = true,
+                                bindAddress = "192.168.1.24",
+                                displayAddress = "192.168.1.24",
+                                httpPort = 8080,
+                                socksPort = 1080,
+                                lanRequested = true,
+                                lanActive = true,
+                            ),
+                    ),
+                logger = {},
+            )
+
+        assertEquals("HTTP 192.168.1.24:8080, SOCKS5 192.168.1.24:1080", runtime.endpointSummary())
+    }
+
+    @Test
+    fun lanBindingAlsoKeepsLoopbackListenerAvailable() {
+        val exposure =
+            ProxyExposureInfo(
+                active = true,
+                bindAddress = "192.168.1.24",
+                displayAddress = "192.168.1.24",
+                httpPort = 8080,
+                socksPort = 1080,
+                lanRequested = true,
+                lanActive = true,
+            )
+
+        assertEquals(listOf("127.0.0.1", "192.168.1.24"), exposure.listenerBindAddresses())
     }
 
     @Test
@@ -229,6 +274,373 @@ class ProxyServerRuntimeTest {
             assertEquals("example.com", requests.first().host)
             assertEquals(443, requests.first().port)
             assertEquals("http-connect", requests.first().protocol)
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun httpProxyForwardsAbsoluteFormRequestsInOriginForm() {
+        val requests = CopyOnWriteArrayList<ProxyConnectRequest>()
+        val forwarded = CopyOnWriteArrayList<String>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
+                    requests.add(request)
+                    return object : ProxyTransportSession {
+                        override val descriptor = ProxySessionDescriptor(1, request, 0)
+
+                        override fun awaitConnected(timeoutMs: Long) = Unit
+
+                        override fun pumpBidirectional(client: ProxyClientConnection) {
+                            forwarded.add(readForwardedRequest(client.input))
+                            client.output.write("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
+                            client.output.flush()
+                        }
+
+                        override fun close() = Unit
+                    }
+                }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config = ProxyRuntimeConfig(httpEnabled = true, httpPort = port, socksEnabled = false, socksPort = 1080),
+                logger = {},
+                transport = transport,
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            Socket("127.0.0.1", port).use { socket ->
+                val output = BufferedOutputStream(socket.getOutputStream())
+                val input = BufferedInputStream(socket.getInputStream())
+                output.write(
+                    "GET http://example.com/generate_204 HTTP/1.1\r\nHost: wrong.example\r\nProxy-Connection: keep-alive\r\nUser-Agent: proxy-test\r\n\r\n"
+                        .toByteArray(StandardCharsets.US_ASCII),
+                )
+                output.flush()
+                val response = readResponse(input)
+                assertTrue(response.startsWith("HTTP/1.1 204 No Content"))
+            }
+            assertEquals(1, requests.size)
+            assertEquals("example.com", requests.first().host)
+            assertEquals(80, requests.first().port)
+            assertEquals("http-proxy", requests.first().protocol)
+            assertTrue(forwarded.first().startsWith("GET /generate_204 HTTP/1.1\r\n"))
+            assertTrue(forwarded.first().contains("Host: example.com\r\n"))
+            assertTrue(forwarded.first().contains("Connection: close\r\n"))
+            assertTrue(!forwarded.first().contains("Proxy-Connection:"))
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun httpProxyForwardsExplicitPortTargets() {
+        val requests = CopyOnWriteArrayList<ProxyConnectRequest>()
+        val forwarded = CopyOnWriteArrayList<String>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
+                    requests.add(request)
+                    return object : ProxyTransportSession {
+                        override val descriptor = ProxySessionDescriptor(1, request, 0)
+
+                        override fun awaitConnected(timeoutMs: Long) = Unit
+
+                        override fun pumpBidirectional(client: ProxyClientConnection) {
+                            forwarded.add(readForwardedRequest(client.input))
+                            client.output.write("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
+                            client.output.flush()
+                        }
+
+                        override fun close() = Unit
+                    }
+                }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config = ProxyRuntimeConfig(httpEnabled = true, httpPort = port, socksEnabled = false, socksPort = 1080),
+                logger = {},
+                transport = transport,
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            Socket("127.0.0.1", port).use { socket ->
+                val output = BufferedOutputStream(socket.getOutputStream())
+                val input = BufferedInputStream(socket.getInputStream())
+                output.write(
+                    "GET http://example.com:8080/status?ok=1 HTTP/1.1\r\nHost: example.com:8080\r\n\r\n"
+                        .toByteArray(StandardCharsets.US_ASCII),
+                )
+                output.flush()
+                val response = readResponse(input)
+                assertTrue(response.startsWith("HTTP/1.1 204 No Content"))
+            }
+            assertEquals(1, requests.size)
+            assertEquals("example.com", requests.first().host)
+            assertEquals(8080, requests.first().port)
+            assertTrue(forwarded.first().startsWith("GET /status?ok=1 HTTP/1.1\r\n"))
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun httpProxyAcceptsOriginFormRequestsWithHostHeader() {
+        val requests = CopyOnWriteArrayList<ProxyConnectRequest>()
+        val forwarded = CopyOnWriteArrayList<String>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
+                    requests.add(request)
+                    return object : ProxyTransportSession {
+                        override val descriptor = ProxySessionDescriptor(1, request, 0)
+
+                        override fun awaitConnected(timeoutMs: Long) = Unit
+
+                        override fun pumpBidirectional(client: ProxyClientConnection) {
+                            forwarded.add(readForwardedRequest(client.input))
+                            client.output.write("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
+                            client.output.flush()
+                        }
+
+                        override fun close() = Unit
+                    }
+                }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config = ProxyRuntimeConfig(httpEnabled = true, httpPort = port, socksEnabled = false, socksPort = 1080),
+                logger = {},
+                transport = transport,
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            Socket("127.0.0.1", port).use { socket ->
+                val output = BufferedOutputStream(socket.getOutputStream())
+                val input = BufferedInputStream(socket.getInputStream())
+                output.write(
+                    "GET /status HTTP/1.1\r\nHost: example.com:8080\r\n\r\n".toByteArray(StandardCharsets.US_ASCII),
+                )
+                output.flush()
+                val response = readResponse(input)
+                assertTrue(response.startsWith("HTTP/1.1 204 No Content"))
+            }
+            assertEquals(1, requests.size)
+            assertEquals("example.com", requests.first().host)
+            assertEquals(8080, requests.first().port)
+            assertTrue(forwarded.first().startsWith("GET /status HTTP/1.1\r\n"))
+            assertTrue(forwarded.first().contains("Host: example.com:8080\r\n"))
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun httpProxyPreservesRequestBodies() {
+        val forwarded = CopyOnWriteArrayList<String>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession =
+                    object : ProxyTransportSession {
+                        override val descriptor = ProxySessionDescriptor(1, request, 0)
+
+                        override fun awaitConnected(timeoutMs: Long) = Unit
+
+                        override fun pumpBidirectional(client: ProxyClientConnection) {
+                            forwarded.add(readForwardedRequest(client.input, bodyBytes = 5))
+                            client.output.write("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
+                            client.output.flush()
+                        }
+
+                        override fun close() = Unit
+                    }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config = ProxyRuntimeConfig(httpEnabled = true, httpPort = port, socksEnabled = false, socksPort = 1080),
+                logger = {},
+                transport = transport,
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            Socket("127.0.0.1", port).use { socket ->
+                val output = BufferedOutputStream(socket.getOutputStream())
+                val input = BufferedInputStream(socket.getInputStream())
+                output.write(
+                    "POST http://example.com/upload HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\n\r\nhello"
+                        .toByteArray(StandardCharsets.US_ASCII),
+                )
+                output.flush()
+                val response = readResponse(input)
+                assertTrue(response.startsWith("HTTP/1.1 204 No Content"))
+            }
+            assertTrue(forwarded.first().startsWith("POST /upload HTTP/1.1\r\n"))
+            assertTrue(forwarded.first().endsWith("\r\n\r\nhello"))
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun httpProxyForwardsHttpsAbsoluteFormRequestsThroughSecureSocket() {
+        val requests = CopyOnWriteArrayList<ProxyConnectRequest>()
+        val forwarded = CopyOnWriteArrayList<String>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
+                    requests.add(request)
+                    return object : ProxyTransportSession {
+                        override val descriptor = ProxySessionDescriptor(1, request, 0)
+
+                        override fun awaitConnected(timeoutMs: Long) = Unit
+
+                        override fun pumpBidirectional(client: ProxyClientConnection) {
+                            forwarded.add(readForwardedRequest(client.input))
+                            client.output.write("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
+                            client.output.flush()
+                        }
+
+                        override fun close() = Unit
+                    }
+                }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config = ProxyRuntimeConfig(httpEnabled = true, httpPort = port, socksEnabled = false, socksPort = 1080),
+                logger = {},
+                transport = transport,
+                secureSocketFactory = PassthroughSecureSocketFactory,
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            Socket("127.0.0.1", port).use { socket ->
+                val output = BufferedOutputStream(socket.getOutputStream())
+                val input = BufferedInputStream(socket.getInputStream())
+                output.write(
+                    "GET https://example.com/status HTTP/1.1\r\nHost: wrong.example\r\nProxy-Connection: keep-alive\r\n\r\n".toByteArray(StandardCharsets.US_ASCII),
+                )
+                output.flush()
+                val response = readResponse(input)
+                assertTrue(response.startsWith("HTTP/1.1 204 No Content"))
+            }
+            assertEquals(1, requests.size)
+            assertEquals("example.com", requests.first().host)
+            assertEquals(443, requests.first().port)
+            assertEquals("https-proxy", requests.first().protocol)
+            assertTrue(forwarded.first().startsWith("GET /status HTTP/1.1\r\n"))
+            assertTrue(forwarded.first().contains("Host: example.com\r\n"))
+            assertTrue(forwarded.first().contains("Connection: close\r\n"))
+            assertTrue(!forwarded.first().contains("Proxy-Connection:"))
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun httpProxyForwardsHttpsAbsoluteFormRequestsWithExplicitPort() {
+        val requests = CopyOnWriteArrayList<ProxyConnectRequest>()
+        val forwarded = CopyOnWriteArrayList<String>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
+                    requests.add(request)
+                    return object : ProxyTransportSession {
+                        override val descriptor = ProxySessionDescriptor(1, request, 0)
+
+                        override fun awaitConnected(timeoutMs: Long) = Unit
+
+                        override fun pumpBidirectional(client: ProxyClientConnection) {
+                            forwarded.add(readForwardedRequest(client.input, bodyBytes = 5))
+                            client.output.write("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
+                            client.output.flush()
+                        }
+
+                        override fun close() = Unit
+                    }
+                }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config = ProxyRuntimeConfig(httpEnabled = true, httpPort = port, socksEnabled = false, socksPort = 1080),
+                logger = {},
+                transport = transport,
+                secureSocketFactory = PassthroughSecureSocketFactory,
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            Socket("127.0.0.1", port).use { socket ->
+                val output = BufferedOutputStream(socket.getOutputStream())
+                val input = BufferedInputStream(socket.getInputStream())
+                output.write(
+                    "POST https://example.com:8443/upload HTTP/1.1\r\nHost: wrong.example\r\nContent-Length: 5\r\n\r\nhello".toByteArray(StandardCharsets.US_ASCII),
+                )
+                output.flush()
+                val response = readResponse(input)
+                assertTrue(response.startsWith("HTTP/1.1 204 No Content"))
+            }
+            assertEquals(1, requests.size)
+            assertEquals("example.com", requests.first().host)
+            assertEquals(8443, requests.first().port)
+            assertEquals("https-proxy", requests.first().protocol)
+            assertTrue(forwarded.first().startsWith("POST /upload HTTP/1.1\r\n"))
+            assertTrue(forwarded.first().contains("Host: example.com:8443\r\n"))
+            assertTrue(forwarded.first().endsWith("\r\n\r\nhello"))
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun httpProxyReturnsServiceUnavailableWhenSecureSocketSetupFails() {
+        val requests = CopyOnWriteArrayList<ProxyConnectRequest>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
+                    requests.add(request)
+                    return successfulSession(request)
+                }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config = ProxyRuntimeConfig(httpEnabled = true, httpPort = port, socksEnabled = false, socksPort = 1080),
+                logger = {},
+                transport = transport,
+                secureSocketFactory =
+                    object : ProxySecureSocketFactory {
+                        override fun create(socket: Socket, host: String, port: Int): Socket {
+                            throw java.io.IOException("handshake failed")
+                        }
+                    },
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            Socket("127.0.0.1", port).use { socket ->
+                val output = BufferedOutputStream(socket.getOutputStream())
+                val input = BufferedInputStream(socket.getInputStream())
+                output.write(
+                    "GET https://example.com/status HTTP/1.1\r\nHost: example.com\r\n\r\n".toByteArray(StandardCharsets.US_ASCII),
+                )
+                output.flush()
+                val response = readResponse(input)
+                assertTrue(response.startsWith("HTTP/1.1 503 Service Unavailable"))
+            }
+            assertEquals(1, requests.size)
+            assertEquals("https-proxy", requests.first().protocol)
         } finally {
             runtime.stop()
         }
@@ -789,5 +1201,28 @@ class ProxyServerRuntimeTest {
             if (match == terminator.size) break
         }
         return bytes.toByteArray().toString(StandardCharsets.US_ASCII)
+    }
+
+    private fun readForwardedRequest(
+        input: InputStream,
+        bodyBytes: Int = 0,
+    ): String {
+        val headerBytes = ArrayList<Byte>()
+        var match = 0
+        val terminator = byteArrayOf('\r'.code.toByte(), '\n'.code.toByte(), '\r'.code.toByte(), '\n'.code.toByte())
+        while (true) {
+            val next = input.read()
+            if (next < 0) break
+            val byte = next.toByte()
+            headerBytes.add(byte)
+            match = if (byte == terminator[match]) match + 1 else if (byte == terminator[0]) 1 else 0
+            if (match == terminator.size) break
+        }
+        val body = if (bodyBytes > 0) input.readNBytes(bodyBytes) else ByteArray(0)
+        return (headerBytes.toByteArray() + body).toString(StandardCharsets.US_ASCII)
+    }
+
+    private object PassthroughSecureSocketFactory : ProxySecureSocketFactory {
+        override fun create(socket: Socket, host: String, port: Int): Socket = socket
     }
 }

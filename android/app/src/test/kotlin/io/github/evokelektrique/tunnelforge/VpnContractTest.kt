@@ -25,10 +25,9 @@ class VpnContractTest {
         assertEquals("mtu", VpnContract.ARG_MTU)
         assertEquals("profileName", VpnContract.ARG_PROFILE_NAME)
         assertEquals("connectionMode", VpnContract.ARG_CONNECTION_MODE)
-        assertEquals("proxyHttpEnabled", VpnContract.ARG_PROXY_HTTP_ENABLED)
         assertEquals("proxyHttpPort", VpnContract.ARG_PROXY_HTTP_PORT)
-        assertEquals("proxySocksEnabled", VpnContract.ARG_PROXY_SOCKS_ENABLED)
         assertEquals("proxySocksPort", VpnContract.ARG_PROXY_SOCKS_PORT)
+        assertEquals("proxyAllowLan", VpnContract.ARG_PROXY_ALLOW_LAN)
         assertEquals("routingMode", VpnContract.ARG_ROUTING_MODE)
         assertEquals("allowedPackages", VpnContract.ARG_ALLOWED_PACKAGES)
         assertEquals("vpnTunnel", VpnContract.MODE_VPN_TUNNEL)
@@ -57,5 +56,18 @@ class VpnContractTest {
         assertEquals("dart", VpnContract.LOG_SOURCE_DART)
         assertEquals("kotlin", VpnContract.LOG_SOURCE_KOTLIN)
         assertEquals("native", VpnContract.LOG_SOURCE_NATIVE)
+    }
+
+    @Test
+    fun proxyExposureChannel() {
+        assertEquals("onProxyExposureChanged", VpnContract.ON_PROXY_EXPOSURE_CHANGED)
+        assertEquals("proxyExposureActive", VpnContract.ARG_PROXY_EXPOSURE_ACTIVE)
+        assertEquals("proxyExposureBindAddress", VpnContract.ARG_PROXY_EXPOSURE_BIND_ADDRESS)
+        assertEquals("proxyExposureDisplayAddress", VpnContract.ARG_PROXY_EXPOSURE_DISPLAY_ADDRESS)
+        assertEquals("proxyExposureHttpPort", VpnContract.ARG_PROXY_EXPOSURE_HTTP_PORT)
+        assertEquals("proxyExposureSocksPort", VpnContract.ARG_PROXY_EXPOSURE_SOCKS_PORT)
+        assertEquals("proxyExposureLanRequested", VpnContract.ARG_PROXY_EXPOSURE_LAN_REQUESTED)
+        assertEquals("proxyExposureLanActive", VpnContract.ARG_PROXY_EXPOSURE_LAN_ACTIVE)
+        assertEquals("proxyExposureWarning", VpnContract.ARG_PROXY_EXPOSURE_WARNING)
     }
 }
