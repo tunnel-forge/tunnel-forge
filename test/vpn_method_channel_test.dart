@@ -13,6 +13,27 @@ void main() {
     test('channel', () {
       expect(VpnContract.channel, 'io.github.evokelektrique.tunnelforge/vpn');
     });
+
+    test('proxy exposure event contract', () {
+      expect(VpnContract.onProxyExposureChanged, 'onProxyExposureChanged');
+      expect(VpnContract.argProxyExposureActive, 'proxyExposureActive');
+      expect(
+        VpnContract.argProxyExposureBindAddress,
+        'proxyExposureBindAddress',
+      );
+      expect(
+        VpnContract.argProxyExposureDisplayAddress,
+        'proxyExposureDisplayAddress',
+      );
+      expect(VpnContract.argProxyExposureHttpPort, 'proxyExposureHttpPort');
+      expect(VpnContract.argProxyExposureSocksPort, 'proxyExposureSocksPort');
+      expect(
+        VpnContract.argProxyExposureLanRequested,
+        'proxyExposureLanRequested',
+      );
+      expect(VpnContract.argProxyExposureLanActive, 'proxyExposureLanActive');
+      expect(VpnContract.argProxyExposureWarning, 'proxyExposureWarning');
+    });
   });
 
   group('VpnClient', () {
@@ -95,13 +116,12 @@ void main() {
       );
       expect(args[VpnContract.argAllowedPackages], isA<List<Object?>>());
       expect((args[VpnContract.argAllowedPackages] as List).isEmpty, isTrue);
-      expect(args[VpnContract.argProxyHttpEnabled], isTrue);
       expect(args[VpnContract.argProxyHttpPort], ProxySettings.defaultHttpPort);
-      expect(args[VpnContract.argProxySocksEnabled], isTrue);
       expect(
         args[VpnContract.argProxySocksPort],
         ProxySettings.defaultSocksPort,
       );
+      expect(args[VpnContract.argProxyAllowLan], isFalse);
     });
 
     test('connect map includes per-app routing', () async {
@@ -128,10 +148,9 @@ void main() {
         server: '10.0.0.1',
         connectionMode: ConnectionMode.proxyOnly,
         proxySettings: const ProxySettings(
-          httpEnabled: true,
           httpPort: 18080,
-          socksEnabled: false,
           socksPort: 11080,
+          allowLanConnections: true,
         ),
       );
       final args = calls.single.arguments as Map;
@@ -139,10 +158,9 @@ void main() {
         args[VpnContract.argConnectionMode],
         ConnectionMode.proxyOnly.jsonValue,
       );
-      expect(args[VpnContract.argProxyHttpEnabled], isTrue);
       expect(args[VpnContract.argProxyHttpPort], 18080);
-      expect(args[VpnContract.argProxySocksEnabled], isFalse);
       expect(args[VpnContract.argProxySocksPort], 11080);
+      expect(args[VpnContract.argProxyAllowLan], isTrue);
     });
 
     test('listVpnCandidateApps maps rows', () async {
@@ -183,6 +201,35 @@ void main() {
       final client = VpnClient();
       await client.disconnect();
       expect(calls.single.method, VpnContract.disconnect);
+    });
+
+    test('tunnel state callback parses attempt id when present', () async {
+      String? seenState;
+      String? seenDetail;
+      String? seenAttemptId;
+      final client = VpnClient(
+        onTunnelState: (state, detail, attemptId) {
+          seenState = state;
+          seenDetail = detail;
+          seenAttemptId = attemptId;
+        },
+      );
+      const codec = StandardMethodCodec();
+      final data = codec.encodeMethodCall(
+        const MethodCall(VpnContract.onTunnelState, <String, Object?>{
+          VpnContract.argTunnelState: VpnTunnelState.failed,
+          VpnContract.argTunnelDetail: 'L2TP handshake failed.',
+          VpnContract.argAttemptId: 'attempt-2',
+        }),
+      );
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(VpnContract.channel, data, (ByteData? _) {});
+      await Future<void>.delayed(Duration.zero);
+      client.dispose();
+
+      expect(seenState, VpnTunnelState.failed);
+      expect(seenDetail, 'L2TP handshake failed.');
+      expect(seenAttemptId, 'attempt-2');
     });
 
     test('setLogLevel', () async {
@@ -250,6 +297,45 @@ void main() {
       client.dispose();
 
       expect(seenSource, LogSource.kotlin);
+    });
+
+    test('proxy exposure callback parses runtime address', () async {
+      ProxyExposure? seenExposure;
+      final client = VpnClient(
+        onProxyExposureChanged: (exposure) {
+          seenExposure = exposure;
+        },
+      );
+      const codec = StandardMethodCodec();
+      final data = codec.encodeMethodCall(
+        const MethodCall(VpnContract.onProxyExposureChanged, <String, Object?>{
+          VpnContract.argProxyExposureActive: true,
+          VpnContract.argProxyExposureBindAddress: '192.168.1.24',
+          VpnContract.argProxyExposureDisplayAddress: '192.168.1.24',
+          VpnContract.argProxyExposureHttpPort: 18080,
+          VpnContract.argProxyExposureSocksPort: 11080,
+          VpnContract.argProxyExposureLanRequested: true,
+          VpnContract.argProxyExposureLanActive: true,
+          VpnContract.argProxyExposureWarning: null,
+        }),
+      );
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(VpnContract.channel, data, (ByteData? _) {});
+      await Future<void>.delayed(Duration.zero);
+      client.dispose();
+
+      expect(
+        seenExposure,
+        const ProxyExposure(
+          active: true,
+          bindAddress: '192.168.1.24',
+          displayAddress: '192.168.1.24',
+          httpPort: 18080,
+          socksPort: 11080,
+          lanRequested: true,
+          lanActive: true,
+        ),
+      );
     });
   });
 }

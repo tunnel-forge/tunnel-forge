@@ -82,7 +82,7 @@ void main() {
       );
     });
 
-    test('normalizes dns-over-https host plus fixed path on import', () {
+    test('preserves dns-over-https endpoint path on import', () {
       final decoded = ProfileTransferEnvelope.fromJsonMap({
         'v': ProfileTransferEnvelope.currentVersion,
         'displayName': 'Office',
@@ -98,7 +98,7 @@ void main() {
         'mtu': 1400,
       });
 
-      expect(decoded.dns1Host, 'wikimedia-dns.org');
+      expect(decoded.dns1Host, 'wikimedia-dns.org/dns-query');
       expect(decoded.dns1Protocol, DnsProtocol.dnsOverHttps);
     });
   });

@@ -47,7 +47,9 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('shows automatic dns section for profile editor', (tester) async {
+  testWidgets('shows dns section when automatic dns is disabled', (
+    tester,
+  ) async {
     final store = await buildStore();
     const profile = Profile(
       id: 'profile-1',
@@ -64,6 +66,7 @@ void main() {
 
     await pumpHost(tester, store: store, profileId: profile.id);
 
+    expect(find.byKey(const Key('dns_servers_section')), findsOneWidget);
     expect(find.text('Automatic'), findsOneWidget);
     expect(find.text('DNS servers'), findsNWidgets(3));
     expect(find.text('DNS 1 is primary. DNS 2 is fallback.'), findsOneWidget);
@@ -71,6 +74,33 @@ void main() {
     expect(find.text('DNS 2'), findsOneWidget);
     expect(find.text('UDP'), findsOneWidget);
     expect(find.text('TLS'), findsOneWidget);
+  });
+
+  testWidgets('dns dropdown height matches dns text field', (tester) async {
+    final store = await buildStore();
+    const profile = Profile(
+      id: 'profile-dns-size',
+      displayName: 'Office',
+      server: 'vpn.example.com',
+      user: 'alice',
+      dnsAutomatic: false,
+      dns1Host: '1.1.1.1',
+      dns1Protocol: DnsProtocol.dnsOverUdp,
+      dns2Host: '8.8.8.8',
+      dns2Protocol: DnsProtocol.dnsOverTls,
+    );
+    await store.upsertProfile(profile, password: 'pw', psk: '');
+
+    await pumpHost(tester, store: store, profileId: profile.id);
+
+    final dnsFieldSize = tester.getSize(
+      find.byKey(const ValueKey('dns_input_DNS 1')),
+    );
+    final dnsDropdownSize = tester.getSize(
+      find.byKey(const ValueKey('dns_protocol_DNS 1')),
+    );
+
+    expect(dnsDropdownSize.height, dnsFieldSize.height);
   });
 
   testWidgets('shows clearer mtu hint and helper copy', (tester) async {
@@ -91,10 +121,40 @@ void main() {
     await pumpHost(tester, store: store, profileId: profile.id);
 
     final mtuField = tester.widgetList<TextField>(find.byType(TextField)).last;
-    expect(mtuField.decoration?.hintText, 'Default ${Profile.defaultVpnMtu}');
+    expect(mtuField.decoration?.labelText, 'MTU');
+    expect(mtuField.decoration?.hintText, '${Profile.defaultVpnMtu}');
+    expect(mtuField.decoration?.helperMaxLines, 2);
     expect(
       mtuField.decoration?.helperText,
       'Range ${Profile.minVpnMtu}-${Profile.maxVpnMtu}. Use ${Profile.defaultVpnMtu} unless you need a smaller MTU.',
+    );
+  });
+
+  testWidgets('shows inline error when mtu is invalid', (tester) async {
+    final store = await buildStore();
+    const profile = Profile(
+      id: 'profile-invalid-mtu',
+      displayName: 'Office',
+      server: 'vpn.example.com',
+      user: 'alice',
+      dnsAutomatic: true,
+      dns1Host: '',
+      dns1Protocol: DnsProtocol.dnsOverUdp,
+      dns2Host: '',
+      dns2Protocol: DnsProtocol.dnsOverUdp,
+    );
+    await store.upsertProfile(profile, password: 'pw', psk: '');
+
+    await pumpHost(tester, store: store, profileId: profile.id);
+
+    await tester.enterText(find.byType(TextField).last, 'abc');
+    await tester.pump();
+
+    expect(
+      find.text(
+        'MTU must be a number (${Profile.minVpnMtu}-${Profile.maxVpnMtu})',
+      ),
+      findsOneWidget,
     );
   });
 
@@ -127,7 +187,7 @@ void main() {
     );
   });
 
-  testWidgets('automatic dns disables manual dns fields', (tester) async {
+  testWidgets('automatic dns hides manual dns section', (tester) async {
     final store = await buildStore();
     const profile = Profile(
       id: 'profile-3',
@@ -144,10 +204,41 @@ void main() {
 
     await pumpHost(tester, store: store, profileId: profile.id);
 
-    final fields = tester
-        .widgetList<TextField>(find.byType(TextField))
-        .toList();
-    expect(fields[5].enabled, isFalse);
-    expect(fields[6].enabled, isFalse);
+    expect(find.byKey(const Key('dns_servers_section')), findsNothing);
+    expect(find.text('DNS 1 is primary. DNS 2 is fallback.'), findsNothing);
+    expect(find.text('DNS 1'), findsNothing);
+    expect(find.text('DNS 2'), findsNothing);
+  });
+
+  testWidgets('automatic dns toggle hides and shows dns section', (
+    tester,
+  ) async {
+    final store = await buildStore();
+    const profile = Profile(
+      id: 'profile-4',
+      displayName: 'Office',
+      server: 'vpn.example.com',
+      user: 'alice',
+      dnsAutomatic: false,
+      dns1Host: '1.1.1.1',
+      dns1Protocol: DnsProtocol.dnsOverUdp,
+      dns2Host: '8.8.8.8',
+      dns2Protocol: DnsProtocol.dnsOverTls,
+    );
+    await store.upsertProfile(profile, password: 'pw', psk: '');
+
+    await pumpHost(tester, store: store, profileId: profile.id);
+
+    expect(find.byKey(const Key('dns_servers_section')), findsOneWidget);
+
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('dns_servers_section')), findsNothing);
+
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('dns_servers_section')), findsOneWidget);
   });
 }

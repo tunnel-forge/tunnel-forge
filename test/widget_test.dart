@@ -18,16 +18,18 @@ import '../integration_test/support/host_to_dart_channel.dart';
 import '../integration_test/support/vpn_channel_mock.dart';
 
 class FakeConnectivityChecker implements ConnectivityChecker {
-  final List<String> urls = <String>[];
+  final List<ConnectivityPingRequest> requests = <ConnectivityPingRequest>[];
   ConnectivityPingResult nextResult = ConnectivityPingResult.success(
     latencyMs: 84,
     statusCode: 204,
   );
   Completer<ConnectivityPingResult>? completer;
 
+  List<String> get urls => requests.map((request) => request.url).toList();
+
   @override
-  Future<ConnectivityPingResult> ping(String url) {
-    urls.add(url);
+  Future<ConnectivityPingResult> ping(ConnectivityPingRequest request) {
+    requests.add(request);
     final pending = completer;
     if (pending != null) return pending.future;
     return Future<ConnectivityPingResult>.value(nextResult);
@@ -54,6 +56,7 @@ void main() {
     bool busy = false,
     bool tunnelUp = false,
     bool awaitingTunnel = false,
+    bool stopRequested = false,
     bool canStartConnection = true,
     String label = 'Ready',
     ConnectivityBadgeState connectivityBadgeState = ConnectivityBadgeState.idle,
@@ -75,6 +78,7 @@ void main() {
               busy: busy,
               tunnelUp: tunnelUp,
               awaitingTunnel: awaitingTunnel,
+              stopRequested: stopRequested,
               canStartConnection: canStartConnection,
               connectButtonLabel: label,
               onPrimary: () {},
@@ -158,6 +162,7 @@ void main() {
                   busy: false,
                   tunnelUp: false,
                   awaitingTunnel: false,
+                  stopRequested: false,
                   canStartConnection: true,
                   connectButtonLabel: 'Ready',
                   onPrimary: () {},
@@ -359,6 +364,68 @@ void main() {
     expect(statusText(tester), 'Ready');
   });
 
+  testWidgets('connecting state lets the user cancel before TUN comes up', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      ProfileStore.prefsKeyProfilesJson: jsonEncode([
+        {
+          'id': 'widget_test_cancel_connect',
+          'displayName': 'Test',
+          'server': 'vpn.test.example',
+          'user': '',
+          'dnsAutomatic': true,
+          'dns1Host': '',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
+        },
+      ]),
+      ProfileStore.prefsKeyLastProfileId: 'widget_test_cancel_connect',
+    });
+    final methods = <String>[];
+    installVpnChannelMock(methods);
+    addTearDown(uninstallVpnChannelMock);
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await tester.tap(find.byKey(const Key('vpn_connect')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(statusText(tester), contains('Connecting'));
+
+    await tester.tap(find.byKey(const Key('vpn_connect')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(methods, [
+      VpnContract.setLogLevel,
+      VpnContract.prepareVpn,
+      VpnContract.connect,
+      VpnContract.disconnect,
+    ]);
+    expect(statusText(tester), 'Canceling...');
+
+    await simulateHostTunnelState(tester, VpnTunnelState.stopped, 'Canceled');
+    await tester.pump();
+
+    expect(statusText(tester), 'Ready');
+  });
+
   testWidgets('tapping merged status badge while connected updates latency', (
     WidgetTester tester,
   ) async {
@@ -400,9 +467,13 @@ void main() {
       find.byKey(const Key('connectivity_status_spinner')),
       findsOneWidget,
     );
-    expect(checker.urls, [
-      ConnectivityCheckSettings.defaultUrl,
-      ConnectivityCheckSettings.defaultUrl,
+    expect(checker.requests, [
+      const ConnectivityPingRequest.direct(
+        ConnectivityCheckSettings.defaultUrl,
+      ),
+      const ConnectivityPingRequest.direct(
+        ConnectivityCheckSettings.defaultUrl,
+      ),
     ]);
 
     checker.completer!.complete(
@@ -509,8 +580,253 @@ void main() {
     await simulateHostTunnelState(tester, VpnTunnelState.connected, 'tun0');
     await tester.pump();
 
-    expect(checker.urls, [ConnectivityCheckSettings.defaultUrl]);
+    expect(checker.requests, [
+      const ConnectivityPingRequest.direct(
+        ConnectivityCheckSettings.defaultUrl,
+      ),
+    ]);
     expect(connectivityStatusText(tester), '84 ms');
+  });
+
+  testWidgets('per-app VPN auto-runs connectivity check directly', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      ProfileStore.prefsKeyProfilesJson: jsonEncode([
+        {
+          'id': 'widget_test_per_app_connectivity',
+          'displayName': 'Per-App Connectivity',
+          'server': 'vpn.test.example',
+          'user': '',
+          'dnsAutomatic': true,
+          'dns1Host': '',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
+        },
+      ]),
+      ProfileStore.prefsKeyLastProfileId: 'widget_test_per_app_connectivity',
+    });
+    final checker = FakeConnectivityChecker();
+    installVpnChannelMock(<String>[]);
+    addTearDown(uninstallVpnChannelMock);
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+        connectivityChecker: checker,
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Inclusive'));
+    await tester.pumpAndSettle();
+    await simulateHostTunnelState(tester, VpnTunnelState.connected, 'tun0');
+    await tester.pump();
+
+    expect(checker.requests, [
+      const ConnectivityPingRequest.direct(
+        ConnectivityCheckSettings.defaultUrl,
+      ),
+    ]);
+  });
+
+  testWidgets('proxy-only auto-runs connectivity check through HTTP proxy', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      ProfileStore.prefsKeyProfilesJson: jsonEncode([
+        {
+          'id': 'widget_test_proxy_connectivity',
+          'displayName': 'Proxy Connectivity',
+          'server': 'vpn.test.example',
+          'user': '',
+          'dnsAutomatic': true,
+          'dns1Host': '',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
+        },
+      ]),
+      ProfileStore.prefsKeyLastProfileId: 'widget_test_proxy_connectivity',
+      ProfileStore.prefsKeyConnectionMode: 'proxyOnly',
+      ProfileStore.prefsKeyProxyHttpPort: 18080,
+    });
+    final checker = FakeConnectivityChecker();
+    installVpnChannelMock(<String>[]);
+    addTearDown(uninstallVpnChannelMock);
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+        connectivityChecker: checker,
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await simulateHostTunnelState(tester, VpnTunnelState.connected, 'proxy0');
+    await tester.pump();
+
+    expect(checker.requests, [
+      const ConnectivityPingRequest.localHttpProxy(
+        url: ConnectivityCheckSettings.defaultUrl,
+        proxyPort: 18080,
+      ),
+    ]);
+    expect(connectivityStatusText(tester), '84 ms');
+  });
+
+  testWidgets('closing editor for another profile returns to the picker list', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      ProfileStore.prefsKeyProfilesJson: jsonEncode([
+        {
+          'id': 'active_profile',
+          'displayName': 'Primary',
+          'server': 'primary.example.com',
+          'user': '',
+          'dnsAutomatic': true,
+          'dns1Host': '',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
+        },
+        {
+          'id': 'other_profile',
+          'displayName': 'Secondary',
+          'server': 'secondary.example.com',
+          'user': '',
+          'dnsAutomatic': true,
+          'dns1Host': '',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
+        },
+      ]),
+      ProfileStore.prefsKeyLastProfileId: 'active_profile',
+    });
+    final methods = <String>[];
+    installVpnChannelMock(methods);
+    addTearDown(uninstallVpnChannelMock);
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+      ),
+    );
+    await tester.pump();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(find.text('Primary'), findsOneWidget);
+    expect(find.text('primary.example.com'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('profile_picker_tile')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Edit profile').at(1));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.close).first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Profiles'), findsOneWidget);
+    expect(find.text('Primary'), findsNWidgets(2));
+    expect(find.text('primary.example.com'), findsNWidgets(2));
+    expect(find.text('Secondary'), findsOneWidget);
+  });
+
+  testWidgets('new profile draft does not persist until save', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    installVpnChannelMock(<String>[]);
+    addTearDown(uninstallVpnChannelMock);
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    final store = ProfileStore(secretsOverride: MemorySecretStore());
+    await tester.pumpWidget(TunnelForgeApp(profileStore: store));
+    await tester.pump();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await tester.tap(find.byKey(const Key('profile_picker_tile')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Add profile'));
+    await tester.pumpAndSettle();
+    expect(find.text('Create new profile'), findsOneWidget);
+    expect(find.text('Import from file'), findsOneWidget);
+    expect(find.text('Import from clipboard'), findsOneWidget);
+
+    await tester.tap(find.text('Create new profile').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Profile details'), findsOneWidget);
+    expect(await store.loadProfiles(), isEmpty);
+
+    await tester.tap(find.byIcon(Icons.close).first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Profiles'), findsOneWidget);
+    expect(
+      find.text(
+        'No profiles yet. Tap + to create or import your first profile.',
+      ),
+      findsOneWidget,
+    );
+    expect(await store.loadProfiles(), isEmpty);
+  });
+
+  testWidgets('saving a new profile stays in the picker flow and selects it', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    installVpnChannelMock(<String>[]);
+    addTearDown(uninstallVpnChannelMock);
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    final store = ProfileStore(secretsOverride: MemorySecretStore());
+    await tester.pumpWidget(TunnelForgeApp(profileStore: store));
+    await tester.pump();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await tester.tap(find.byKey(const Key('profile_picker_tile')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Add profile'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Create new profile').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final profiles = await store.loadProfiles();
+    expect(profiles, hasLength(1));
+    expect(profiles.single.displayName, 'New profile');
+    expect(profiles.single.server, 'vpn.example.com');
+    expect(find.text('Profiles'), findsOneWidget);
+    expect(find.text('Profile saved'), findsOneWidget);
+    expect(find.text('New profile'), findsWidgets);
+    expect(find.text('vpn.example.com'), findsWidgets);
   });
 
   testWidgets('logs default to error level and use cumulative filtering', (
@@ -584,7 +900,7 @@ void main() {
     expect(find.textContaining('warn message'), findsOneWidget);
     expect(find.textContaining('error message'), findsOneWidget);
     expect(find.textContaining('debug message'), findsNothing);
-    expect(find.text('Log level: WARNING'), findsOneWidget);
+    expect(find.text('Log level: WARNING'), findsNothing);
   });
 
   testWidgets('log sink redacts sensitive host fields before display', (
@@ -616,7 +932,7 @@ void main() {
       source: 'kotlin',
       tag: 'TunnelVpnService',
       message:
-          'connect server=vpn.example.com password=hunter2 target=secure.example.net:443 uri=https://example.com/token dns=a.example[UDP],b.example[TLS] expected=12345',
+          'connect server=vpn.example.com password=hunter2 target=secure.example.net:443 uri=https://example.com/token dns=a.example[UDP],b.example[TLS] expected=12345 clientIpv4=192.168.1.20 source=10.0.0.2:5353 public=8.8.8.8',
     );
 
     await tester.tap(find.text('Logs'));
@@ -629,15 +945,19 @@ void main() {
     expect(find.textContaining('https://example.com/token'), findsNothing);
     expect(find.textContaining('a.example'), findsNothing);
     expect(find.textContaining('b.example'), findsNothing);
+    expect(find.textContaining('8.8.8.8'), findsNothing);
     expect(find.textContaining('server=[REDACTED_HOST]'), findsOneWidget);
     expect(find.textContaining('password=[REDACTED]'), findsOneWidget);
     expect(find.textContaining('target=[REDACTED_TARGET]:443'), findsOneWidget);
     expect(find.textContaining('uri=[REDACTED_URI]'), findsOneWidget);
     expect(find.textContaining('dns=[REDACTED_HOST]'), findsOneWidget);
     expect(find.textContaining('expected=12345'), findsOneWidget);
+    expect(find.textContaining('clientIpv4=192.168.1.20'), findsOneWidget);
+    expect(find.textContaining('source=10.0.0.2:5353'), findsOneWidget);
+    expect(find.textContaining('public=[REDACTED_HOST]'), findsOneWidget);
   });
 
-  testWidgets('debug log level requires confirmation before enabling', (
+  testWidgets('debug log level enables immediately without confirmation', (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
@@ -669,28 +989,11 @@ void main() {
     await tester.tap(find.text('DEBUG').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Enable debug logs?'), findsOneWidget);
+    expect(find.text('Enable debug logs?'), findsNothing);
     expect(
       find.textContaining('may slow down the tunnel and the device'),
-      findsOneWidget,
+      findsNothing,
     );
-
-    await tester.tap(find.text('Cancel'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Enable debug logs?'), findsNothing);
-    expect(find.text('ERROR'), findsOneWidget);
-    expect(methods.where((method) => method == VpnContract.setLogLevel), [
-      VpnContract.setLogLevel,
-    ]);
-
-    await tester.tap(find.byTooltip('Log level'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('DEBUG').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Enable Debug'));
-    await tester.pumpAndSettle();
-
     expect(find.text('DEBUG'), findsOneWidget);
     expect(methods.where((method) => method == VpnContract.setLogLevel), [
       VpnContract.setLogLevel,
@@ -809,6 +1112,132 @@ void main() {
     }
 
     expect(find.byKey(const Key('profile_picker_tile')), findsOneWidget);
+  });
+
+  testWidgets('deleting a profile refreshes the picker list immediately', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      ProfileStore.prefsKeyProfilesJson: jsonEncode([
+        {
+          'id': 'widget_test_delete_primary',
+          'displayName': 'Primary',
+          'server': 'primary.example.com',
+          'user': '',
+          'dnsAutomatic': true,
+          'dns1Host': '',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
+        },
+        {
+          'id': 'widget_test_delete_secondary',
+          'displayName': 'Secondary',
+          'server': 'secondary.example.com',
+          'user': '',
+          'dnsAutomatic': true,
+          'dns1Host': '',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
+        },
+      ]),
+      ProfileStore.prefsKeyLastProfileId: 'widget_test_delete_primary',
+    });
+    final methods = <String>[];
+    installVpnChannelMock(methods);
+    addTearDown(uninstallVpnChannelMock);
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 50; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await tester.tap(find.byKey(const Key('profile_picker_tile')));
+    await tester.pumpAndSettle();
+    expect(find.text('Primary'), findsWidgets);
+    expect(find.text('Secondary'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Delete profile').at(1));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Primary'), findsWidgets);
+    expect(find.text('Secondary'), findsNothing);
+    expect(find.text('secondary.example.com'), findsNothing);
+  });
+
+  testWidgets('canceling profile delete keeps the picker list unchanged', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      ProfileStore.prefsKeyProfilesJson: jsonEncode([
+        {
+          'id': 'widget_test_delete_cancel_primary',
+          'displayName': 'Primary',
+          'server': 'primary.example.com',
+          'user': '',
+          'dnsAutomatic': true,
+          'dns1Host': '',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
+        },
+        {
+          'id': 'widget_test_delete_cancel_secondary',
+          'displayName': 'Secondary',
+          'server': 'secondary.example.com',
+          'user': '',
+          'dnsAutomatic': true,
+          'dns1Host': '',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
+        },
+      ]),
+      ProfileStore.prefsKeyLastProfileId: 'widget_test_delete_cancel_primary',
+    });
+    final methods = <String>[];
+    installVpnChannelMock(methods);
+    addTearDown(uninstallVpnChannelMock);
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(const Size(480, 1200));
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 50; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await tester.tap(find.byKey(const Key('profile_picker_tile')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Delete profile').at(1));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Primary'), findsWidgets);
+    expect(find.text('Secondary'), findsOneWidget);
+    expect(find.text('secondary.example.com'), findsOneWidget);
   });
 
   testWidgets('cold start with empty prefs shows no saved profile state', (
@@ -966,7 +1395,7 @@ void main() {
     expect(statusText(tester), contains('Connecting'));
   });
 
-  testWidgets('dns-over-https accepts fixed path input and normalizes host', (
+  testWidgets('dns-over-https accepts endpoint path input and preserves it', (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues({
@@ -1024,7 +1453,7 @@ void main() {
     expect(args[VpnContract.argDnsAutomatic], isFalse);
     expect(args[VpnContract.argDnsServers], [
       {
-        VpnContract.argDnsServerHost: 'wikimedia-dns.org',
+        VpnContract.argDnsServerHost: 'wikimedia-dns.org/dns-query',
         VpnContract.argDnsServerProtocol: DnsProtocol.dnsOverHttps.jsonValue,
       },
     ]);

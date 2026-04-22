@@ -119,24 +119,24 @@ void main() {
           'wikimedia-dns.org/custom-path',
           DnsProtocol.dnsOverHttps,
         ),
-        'wikimedia-dns.org/custom-path',
+        isNull,
       );
       expect(
         Profile.invalidDnsServer(
           'https://wikimedia-dns.org/dns-query',
           DnsProtocol.dnsOverHttps,
         ),
-        'https://wikimedia-dns.org/dns-query',
+        isNull,
       );
     });
 
-    test('normalizes dns-over-https host and fixed path inputs', () {
+    test('normalizes dns-over-https host and url inputs', () {
       expect(
         Profile.normalizeDnsServerForProtocol(
           ' wikimedia-dns.org/dns-query ',
           DnsProtocol.dnsOverHttps,
         ),
-        'wikimedia-dns.org',
+        'wikimedia-dns.org/dns-query',
       );
       expect(
         Profile.normalizeDnsServerForProtocol(
@@ -146,12 +146,19 @@ void main() {
         'wikimedia-dns.org',
       );
       expect(
+        Profile.normalizeDnsServerForProtocol(
+          ' https://wikimedia-dns.org/custom-path?dns=1 ',
+          DnsProtocol.dnsOverHttps,
+        ),
+        'https://wikimedia-dns.org/custom-path?dns=1',
+      );
+      expect(
         Profile.validationMessageForDnsServer(
           'DNS 1',
-          'bad/path',
-          DnsProtocol.dnsOverUdp,
+          'ftp://bad.example/dns-query',
+          DnsProtocol.dnsOverHttps,
         ),
-        'DNS 1 must be a hostname or IPv4 address for DNS-over-UDP',
+        'DNS 1 must be a hostname or HTTPS URL for DNS-over-HTTPS',
       );
     });
   });
@@ -203,19 +210,17 @@ void main() {
       await store.saveConnectionMode(ConnectionMode.proxyOnly);
       await store.saveProxySettings(
         const ProxySettings(
-          httpEnabled: false,
           httpPort: 18080,
-          socksEnabled: true,
           socksPort: 11080,
+          allowLanConnections: true,
         ),
       );
 
       expect(await store.loadConnectionMode(), ConnectionMode.proxyOnly);
       final proxy = await store.loadProxySettings();
-      expect(proxy.httpEnabled, isFalse);
       expect(proxy.httpPort, 18080);
-      expect(proxy.socksEnabled, isTrue);
       expect(proxy.socksPort, 11080);
+      expect(proxy.allowLanConnections, isTrue);
     });
 
     test('persists global connectivity check settings', () async {
