@@ -14,16 +14,6 @@ class OnboardingPage extends StatefulWidget {
 class _OnboardingPageState extends State<OnboardingPage>
     with SingleTickerProviderStateMixin {
   @override
-  void initState() {
-    super.initState();
-  }
-
-  @override
-  void dispose() {
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     return BlocBuilder<OnboardingBloc, OnboardingState>(
       builder: (context, state) {
@@ -121,7 +111,6 @@ class _OnboardingContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final titleStyle = compact
         ? textTheme.headlineLarge
@@ -459,7 +448,6 @@ class _ActionSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isExiting = state.status == OnboardingFlowStatus.exiting;
-    final colorScheme = Theme.of(context).colorScheme;
     final brightness = Theme.of(context).brightness;
     final semanticColors =
         Theme.of(context).extension<AppSemanticColors>() ??
@@ -472,7 +460,7 @@ class _ActionSection extends StatelessWidget {
         : const Color(0xFFB4BEC8);
     final isVisuallyEnabled =
         !isExiting && (state.isReadOnly || isIntro || state.canAgree);
-    final primaryAction = () {
+    void primaryAction() {
       if (isExiting) return;
       if (state.isReadOnly) {
         onCancel();
@@ -485,7 +473,7 @@ class _ActionSection extends StatelessWidget {
       if (state.canAgree) {
         onAgree();
       }
-    };
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
