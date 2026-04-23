@@ -468,11 +468,13 @@ void main() {
       findsOneWidget,
     );
     expect(checker.requests, [
-      const ConnectivityPingRequest.direct(
-        ConnectivityCheckSettings.defaultUrl,
+      const ConnectivityPingRequest.directWithTimeout(
+        url: ConnectivityCheckSettings.defaultUrl,
+        timeoutMs: ConnectivityCheckSettings.defaultTimeoutMs,
       ),
-      const ConnectivityPingRequest.direct(
-        ConnectivityCheckSettings.defaultUrl,
+      const ConnectivityPingRequest.directWithTimeout(
+        url: ConnectivityCheckSettings.defaultUrl,
+        timeoutMs: ConnectivityCheckSettings.defaultTimeoutMs,
       ),
     ]);
 
@@ -581,11 +583,59 @@ void main() {
     await tester.pump();
 
     expect(checker.requests, [
-      const ConnectivityPingRequest.direct(
-        ConnectivityCheckSettings.defaultUrl,
+      const ConnectivityPingRequest.directWithTimeout(
+        url: ConnectivityCheckSettings.defaultUrl,
+        timeoutMs: ConnectivityCheckSettings.defaultTimeoutMs,
       ),
     ]);
     expect(connectivityStatusText(tester), '84 ms');
+  });
+
+  testWidgets('saved connectivity timeout is applied to ping requests', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      ProfileStore.prefsKeyProfilesJson: jsonEncode([
+        {
+          'id': 'widget_test_connectivity_timeout',
+          'displayName': 'Connectivity Timeout',
+          'server': 'vpn.test.example',
+          'user': '',
+          'dnsAutomatic': true,
+          'dns1Host': '',
+          'dns1Protocol': 'dnsOverUdp',
+          'dns2Host': '',
+          'dns2Protocol': 'dnsOverUdp',
+        },
+      ]),
+      ProfileStore.prefsKeyLastProfileId: 'widget_test_connectivity_timeout',
+      ProfileStore.prefsKeyConnectivityCheckTimeoutMs: 3200,
+    });
+    final checker = FakeConnectivityChecker();
+    installVpnChannelMock(<String>[]);
+    addTearDown(uninstallVpnChannelMock);
+
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
+        connectivityChecker: checker,
+      ),
+    );
+
+    await tester.pump();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await simulateHostTunnelState(tester, VpnTunnelState.connected, 'tun0');
+    await tester.pump();
+
+    expect(checker.requests, [
+      const ConnectivityPingRequest.directWithTimeout(
+        url: ConnectivityCheckSettings.defaultUrl,
+        timeoutMs: 3200,
+      ),
+    ]);
   });
 
   testWidgets('per-app VPN auto-runs connectivity check directly', (
@@ -631,8 +681,9 @@ void main() {
     await tester.pump();
 
     expect(checker.requests, [
-      const ConnectivityPingRequest.direct(
-        ConnectivityCheckSettings.defaultUrl,
+      const ConnectivityPingRequest.directWithTimeout(
+        url: ConnectivityCheckSettings.defaultUrl,
+        timeoutMs: ConnectivityCheckSettings.defaultTimeoutMs,
       ),
     ]);
   });
@@ -680,6 +731,7 @@ void main() {
     expect(checker.requests, [
       const ConnectivityPingRequest.localHttpProxy(
         url: ConnectivityCheckSettings.defaultUrl,
+        timeoutMs: ConnectivityCheckSettings.defaultTimeoutMs,
         proxyPort: 18080,
       ),
     ]);

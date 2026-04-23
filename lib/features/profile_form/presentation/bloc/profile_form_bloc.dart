@@ -238,9 +238,13 @@ class ProfileFormState extends Equatable {
 }
 
 String? _mtuValidationMessage(String value) {
-  final mtuParsed = int.tryParse(value.trim());
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return 'Enter an MTU value';
+  }
+  final mtuParsed = int.tryParse(normalized);
   if (mtuParsed == null) {
-    return 'MTU must be a number (${Profile.minVpnMtu}-${Profile.maxVpnMtu})';
+    return 'MTU must be a whole number';
   }
   if (mtuParsed < Profile.minVpnMtu || mtuParsed > Profile.maxVpnMtu) {
     return 'MTU must be between ${Profile.minVpnMtu} and ${Profile.maxVpnMtu}';
@@ -287,7 +291,8 @@ class ProfileFormBloc extends Bloc<ProfileFormEvent, ProfileFormState> {
           emit(state.copyWith(dns2Protocol: event.value, saved: false)),
     );
     on<ProfileFormMtuChanged>(
-      (event, emit) => emit(state.copyWith(mtu: event.value, saved: false)),
+      (event, emit) =>
+          emit(state.copyWith(mtu: event.value.trim(), saved: false)),
     );
     on<ProfileFormSaveRequested>(_onSaveRequested);
   }

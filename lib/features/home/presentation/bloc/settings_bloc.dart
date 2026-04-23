@@ -42,13 +42,13 @@ final class SettingsProxySettingsChanged extends SettingsEvent {
   List<Object?> get props => [settings];
 }
 
-final class SettingsConnectivityUrlChanged extends SettingsEvent {
-  const SettingsConnectivityUrlChanged(this.url);
+final class SettingsConnectivityCheckSettingsChanged extends SettingsEvent {
+  const SettingsConnectivityCheckSettingsChanged(this.settings);
 
-  final String url;
+  final ConnectivityCheckSettings settings;
 
   @override
-  List<Object?> get props => [url];
+  List<Object?> get props => [settings];
 }
 
 final class SettingsAllowedAppsChanged extends SettingsEvent {
@@ -121,7 +121,9 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
     on<SettingsConnectionModeChanged>(_onConnectionModeChanged);
     on<SettingsRoutingModeChanged>(_onRoutingModeChanged);
     on<SettingsProxySettingsChanged>(_onProxySettingsChanged);
-    on<SettingsConnectivityUrlChanged>(_onConnectivityUrlChanged);
+    on<SettingsConnectivityCheckSettingsChanged>(
+      _onConnectivityCheckSettingsChanged,
+    );
     on<SettingsAllowedAppsChanged>(_onAllowedAppsChanged);
   }
 
@@ -169,16 +171,22 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
     await _settingsRepository.saveProxySettings(event.settings);
   }
 
-  Future<void> _onConnectivityUrlChanged(
-    SettingsConnectivityUrlChanged event,
+  Future<void> _onConnectivityCheckSettingsChanged(
+    SettingsConnectivityCheckSettingsChanged event,
     Emitter<SettingsState> emit,
   ) async {
-    final error = ConnectivityCheckSettings.validateUrl(event.url);
-    if (error != null) {
-      emit(state.copyWith(connectivityUrlError: error));
+    final urlError = ConnectivityCheckSettings.validateUrl(event.settings.url);
+    final timeoutError = ConnectivityCheckSettings.validateTimeoutMs(
+      '${event.settings.timeoutMs}',
+    );
+    if (urlError != null || timeoutError != null) {
+      emit(state.copyWith(connectivityUrlError: urlError ?? timeoutError));
       return;
     }
-    final settings = state.connectivityCheckSettings.copyWith(url: event.url);
+    final settings = state.connectivityCheckSettings.copyWith(
+      url: event.settings.url,
+      timeoutMs: event.settings.timeoutMs,
+    );
     emit(
       state.copyWith(
         connectivityCheckSettings: settings,

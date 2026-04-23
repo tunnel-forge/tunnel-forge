@@ -147,14 +147,74 @@ void main() {
 
     await pumpHost(tester, store: store, profileId: profile.id);
 
-    await tester.enterText(find.byType(TextField).last, 'abc');
+    await tester.enterText(find.byKey(const Key('mtu_field')), '');
+    await tester.pump();
+
+    expect(find.text('Enter an MTU value'), findsOneWidget);
+  });
+
+  testWidgets('shows inline error when mtu is out of range', (tester) async {
+    final store = await buildStore();
+    const profile = Profile(
+      id: 'profile-invalid-mtu-range',
+      displayName: 'Office',
+      server: 'vpn.example.com',
+      user: 'alice',
+      dnsAutomatic: true,
+      dns1Host: '',
+      dns1Protocol: DnsProtocol.dnsOverUdp,
+      dns2Host: '',
+      dns2Protocol: DnsProtocol.dnsOverUdp,
+    );
+    await store.upsertProfile(profile, password: 'pw', psk: '');
+
+    await pumpHost(tester, store: store, profileId: profile.id);
+
+    await tester.enterText(
+      find.byKey(const Key('mtu_field')),
+      '${Profile.maxVpnMtu + 1}',
+    );
     await tester.pump();
 
     expect(
       find.text(
-        'MTU must be a number (${Profile.minVpnMtu}-${Profile.maxVpnMtu})',
+        'MTU must be between ${Profile.minVpnMtu} and ${Profile.maxVpnMtu}',
       ),
       findsOneWidget,
+    );
+  });
+
+  testWidgets('invalid mtu blocks save with a clear toast', (tester) async {
+    final store = await buildStore();
+    const profile = Profile(
+      id: 'profile-invalid-mtu-save',
+      displayName: 'Office',
+      server: 'vpn.example.com',
+      user: 'alice',
+      dnsAutomatic: true,
+      dns1Host: '',
+      dns1Protocol: DnsProtocol.dnsOverUdp,
+      dns2Host: '',
+      dns2Protocol: DnsProtocol.dnsOverUdp,
+    );
+    await store.upsertProfile(profile, password: 'pw', psk: '');
+
+    await pumpHost(tester, store: store, profileId: profile.id);
+
+    await tester.enterText(
+      find.byKey(const Key('mtu_field')),
+      '${Profile.minVpnMtu - 1}',
+    );
+    await tester.pump();
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+
+    expect(find.byKey(const Key('app_toast')), findsOneWidget);
+    expect(
+      find.text(
+        'MTU must be between ${Profile.minVpnMtu} and ${Profile.maxVpnMtu}',
+      ),
+      findsWidgets,
     );
   });
 
@@ -181,10 +241,7 @@ void main() {
     await tester.pump();
 
     expect(find.byKey(const Key('app_toast')), findsOneWidget);
-    expect(
-      find.text('DNS 2 must be a hostname or IPv4 address for DNS-over-UDP'),
-      findsWidgets,
-    );
+    expect(find.text('DNS 2: use hostname or IPv4'), findsWidgets);
   });
 
   testWidgets('automatic dns hides manual dns section', (tester) async {

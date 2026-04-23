@@ -158,7 +158,7 @@ void main() {
           'ftp://bad.example/dns-query',
           DnsProtocol.dnsOverHttps,
         ),
-        'DNS 1 must be a hostname or HTTPS URL for DNS-over-HTTPS',
+        'DNS 1: use hostname or HTTPS URL',
       );
     });
   });
@@ -224,19 +224,20 @@ void main() {
     });
 
     test('persists global connectivity check settings', () async {
-      expect(
-        (await store.loadConnectivityCheckSettings()).url,
-        ConnectivityCheckSettings.defaultUrl,
-      );
+      final initial = await store.loadConnectivityCheckSettings();
+      expect(initial.url, ConnectivityCheckSettings.defaultUrl);
+      expect(initial.timeoutMs, ConnectivityCheckSettings.defaultTimeoutMs);
 
       await store.saveConnectivityCheckSettings(
-        const ConnectivityCheckSettings(url: 'https://example.com/health'),
+        const ConnectivityCheckSettings(
+          url: 'https://example.com/health',
+          timeoutMs: 3200,
+        ),
       );
 
-      expect(
-        (await store.loadConnectivityCheckSettings()).url,
-        'https://example.com/health',
-      );
+      final saved = await store.loadConnectivityCheckSettings();
+      expect(saved.url, 'https://example.com/health');
+      expect(saved.timeoutMs, 3200);
     });
 
     test('defaults log display level to error and persists updates', () async {

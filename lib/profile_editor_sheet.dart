@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'app_scaffold_messenger.dart';
@@ -157,7 +158,7 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
               context,
               label: 'DNS servers',
               hint: hint,
-            ).copyWith(errorText: errorText),
+            ).copyWith(errorText: errorText, errorMaxLines: 2),
           ),
         ),
         const SizedBox(width: 12),
@@ -441,8 +442,12 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
                           ],
                           const SizedBox(height: 12),
                           TextField(
+                            key: const Key('mtu_field'),
                             controller: _mtuController,
                             keyboardType: TextInputType.number,
+                            inputFormatters: <TextInputFormatter>[
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
                             onChanged: (value) => context
                                 .read<ProfileFormBloc>()
                                 .add(ProfileFormMtuChanged(value)),
@@ -453,6 +458,7 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
                                   hint: '${Profile.defaultVpnMtu}',
                                 ).copyWith(
                                   errorText: state.mtuErrorText,
+                                  errorMaxLines: 2,
                                   helperText: mtuHelper,
                                   helperMaxLines: 2,
                                 ),

@@ -129,18 +129,24 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
     SettingsState settingsState,
     TunnelState tunnelState,
   ) {
-    final url = settingsState.connectivityCheckSettings.url;
+    final connectivitySettings = settingsState.connectivityCheckSettings;
+    final url = connectivitySettings.url;
+    final timeoutMs = connectivitySettings.timeoutMs;
     if (settingsState.connectionMode == ConnectionMode.proxyOnly) {
       final proxyPort = tunnelState.proxyExposure?.httpPort;
       return ConnectivityPingRequest.localHttpProxy(
         url: url,
+        timeoutMs: timeoutMs,
         proxyPort: ProxySettings.normalizePort(
           proxyPort ?? settingsState.proxySettings.httpPort,
           fallback: ProxySettings.defaultHttpPort,
         ),
       );
     }
-    return ConnectivityPingRequest.direct(url);
+    return ConnectivityPingRequest.directWithTimeout(
+      url: url,
+      timeoutMs: timeoutMs,
+    );
   }
 
   Future<void> _handleTunnelStateChange(TunnelState current) async {
@@ -594,7 +600,7 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
                   proxyExposure: tunnelState.proxyExposure,
                   onConnectivityCheckSettingsChanged: (settings) => context
                       .read<SettingsBloc>()
-                      .add(SettingsConnectivityUrlChanged(settings.url)),
+                      .add(SettingsConnectivityCheckSettingsChanged(settings)),
                   onChooseApps: _pickAppsForVpn,
                   routingLocked:
                       profilesState.loading ||

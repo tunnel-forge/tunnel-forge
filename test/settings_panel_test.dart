@@ -6,6 +6,8 @@ import 'package:tunnel_forge/widgets/settings_panel.dart';
 void main() {
   Finder connectivityUrlField() =>
       find.byKey(const Key('connectivity_url_field'));
+  Finder connectivityTimeoutField() =>
+      find.byKey(const Key('connectivity_timeout_field'));
   Finder settingsScrollView() => find.byType(Scrollable).first;
   Finder proxyEndpointsTitle() => find.text('Proxy endpoints');
 
@@ -95,7 +97,6 @@ void main() {
       ),
     );
 
-    expect(find.text('Always on'), findsOneWidget);
     expect(find.byKey(const Key('proxy_allow_lan_switch')), findsOneWidget);
   });
 
@@ -193,6 +194,10 @@ void main() {
       scrollable: settingsScrollView(),
     );
     expect(find.text(ConnectivityCheckSettings.defaultUrl), findsWidgets);
+    expect(
+      find.text('${ConnectivityCheckSettings.defaultTimeoutMs}'),
+      findsWidgets,
+    );
 
     await tester.pumpWidget(
       buildPanel(
@@ -200,12 +205,14 @@ void main() {
         connectionMode: ConnectionMode.vpnTunnel,
         connectivityCheckSettings: const ConnectivityCheckSettings(
           url: 'https://example.com/ping',
+          timeoutMs: 3200,
         ),
       ),
     );
     await tester.pump();
 
     expect(find.text('https://example.com/ping'), findsWidgets);
+    expect(find.text('3200'), findsWidgets);
   });
 
   testWidgets('editing connectivity URL emits parsed global settings', (
@@ -235,6 +242,34 @@ void main() {
     await tester.pump();
 
     expect(changed?.url, 'https://example.com/health');
+    expect(changed?.timeoutMs, ConnectivityCheckSettings.defaultTimeoutMs);
+  });
+
+  testWidgets('editing connectivity timeout emits parsed global settings', (
+    tester,
+  ) async {
+    ConnectivityCheckSettings? changed;
+
+    await tester.pumpWidget(
+      buildPanel(
+        proxySettings: const ProxySettings(),
+        connectionMode: ConnectionMode.vpnTunnel,
+        onConnectivityCheckSettingsChanged: (value) {
+          changed = value;
+        },
+      ),
+    );
+
+    await tester.scrollUntilVisible(
+      connectivityTimeoutField(),
+      200,
+      scrollable: settingsScrollView(),
+    );
+    await tester.enterText(connectivityTimeoutField(), '3200');
+    await tester.pump();
+
+    expect(changed?.url, ConnectivityCheckSettings.defaultUrl);
+    expect(changed?.timeoutMs, 3200);
   });
 
   testWidgets('invalid connectivity URL shows validation error', (
@@ -256,6 +291,27 @@ void main() {
     await tester.pump();
 
     expect(find.text('Only HTTP and HTTPS URLs are supported'), findsOneWidget);
+  });
+
+  testWidgets('invalid connectivity timeout shows validation error', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildPanel(
+        proxySettings: const ProxySettings(),
+        connectionMode: ConnectionMode.vpnTunnel,
+      ),
+    );
+
+    await tester.scrollUntilVisible(
+      connectivityTimeoutField(),
+      200,
+      scrollable: settingsScrollView(),
+    );
+    await tester.enterText(connectivityTimeoutField(), '0');
+    await tester.pump();
+
+    expect(find.text('Enter a timeout greater than 0 ms'), findsOneWidget);
   });
 
   testWidgets('connectivity help text stays short and actionable', (
@@ -280,6 +336,12 @@ void main() {
     );
     expect(
       find.textContaining('Tap the badge anytime to refresh'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining(
+        'Maximum time to wait before marking the check unreachable',
+      ),
       findsOneWidget,
     );
   });

@@ -43,20 +43,36 @@ enum ConnectivityPingRoute { direct, localHttpProxy }
 class ConnectivityPingRequest extends Equatable {
   const ConnectivityPingRequest._({
     required this.url,
+    required this.timeoutMs,
     required this.route,
     this.proxyHost,
     this.proxyPort,
   });
 
   const ConnectivityPingRequest.direct(String url)
-    : this._(url: url, route: ConnectivityPingRoute.direct);
+    : this._(
+        url: url,
+        timeoutMs: ConnectivityCheckSettings.defaultTimeoutMs,
+        route: ConnectivityPingRoute.direct,
+      );
+
+  const ConnectivityPingRequest.directWithTimeout({
+    required String url,
+    required int timeoutMs,
+  }) : this._(
+         url: url,
+         timeoutMs: timeoutMs,
+         route: ConnectivityPingRoute.direct,
+       );
 
   const ConnectivityPingRequest.localHttpProxy({
     required String url,
+    int timeoutMs = ConnectivityCheckSettings.defaultTimeoutMs,
     String proxyHost = _defaultProxyHost,
     required int proxyPort,
   }) : this._(
          url: url,
+         timeoutMs: timeoutMs,
          route: ConnectivityPingRoute.localHttpProxy,
          proxyHost: proxyHost,
          proxyPort: proxyPort,
@@ -65,12 +81,13 @@ class ConnectivityPingRequest extends Equatable {
   static const String _defaultProxyHost = '127.0.0.1';
 
   final String url;
+  final int timeoutMs;
   final ConnectivityPingRoute route;
   final String? proxyHost;
   final int? proxyPort;
 
   @override
-  List<Object?> get props => [url, route, proxyHost, proxyPort];
+  List<Object?> get props => [url, timeoutMs, route, proxyHost, proxyPort];
 }
 
 abstract class ConnectivityChecker {
@@ -79,7 +96,7 @@ abstract class ConnectivityChecker {
 
 class HttpConnectivityChecker implements ConnectivityChecker {
   HttpConnectivityChecker({
-    this.timeout = const Duration(seconds: 6),
+    this.timeout = const Duration(milliseconds: 5000),
     HttpClient Function()? clientFactory,
   }) : _clientFactory = clientFactory ?? HttpClient.new;
 
@@ -97,17 +114,24 @@ class HttpConnectivityChecker implements ConnectivityChecker {
     }
 
     final uri = Uri.parse(normalizedUrl);
+    final effectiveTimeout = request.timeoutMs > 0
+        ? Duration(
+            milliseconds: ConnectivityCheckSettings.normalizeTimeoutMs(
+              request.timeoutMs,
+            ),
+          )
+        : timeout;
     final client = _clientFactory();
-    client.connectionTimeout = timeout;
+    client.connectionTimeout = effectiveTimeout;
     client.findProxy = (_) => _proxyDirectiveFor(request);
 
     final watch = Stopwatch()..start();
 
     try {
-      final httpRequest = await client.getUrl(uri).timeout(timeout);
+      final httpRequest = await client.getUrl(uri).timeout(effectiveTimeout);
       httpRequest.followRedirects = true;
-      final response = await httpRequest.close().timeout(timeout);
-      await response.drain<void>().timeout(timeout);
+      final response = await httpRequest.close().timeout(effectiveTimeout);
+      await response.drain<void>().timeout(effectiveTimeout);
       watch.stop();
 
       final code = response.statusCode;

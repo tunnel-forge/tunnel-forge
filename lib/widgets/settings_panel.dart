@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../profile_models.dart';
 import '../theme.dart';
@@ -70,7 +71,9 @@ class _SettingsPanelState extends State<SettingsPanel> {
   late final TextEditingController _httpPortController;
   late final TextEditingController _socksPortController;
   late final TextEditingController _connectivityUrlController;
+  late final TextEditingController _connectivityTimeoutController;
   String? _connectivityUrlError;
+  String? _connectivityTimeoutError;
 
   @override
   void initState() {
@@ -83,6 +86,9 @@ class _SettingsPanelState extends State<SettingsPanel> {
     );
     _connectivityUrlController = TextEditingController(
       text: widget.connectivityCheckSettings.url,
+    );
+    _connectivityTimeoutController = TextEditingController(
+      text: '${widget.connectivityCheckSettings.timeoutMs}',
     );
   }
 
@@ -111,6 +117,16 @@ class _SettingsPanelState extends State<SettingsPanel> {
         _connectivityUrlError = null;
       }
     }
+    if (oldWidget.connectivityCheckSettings.timeoutMs !=
+        widget.connectivityCheckSettings.timeoutMs) {
+      final nextText = '${widget.connectivityCheckSettings.timeoutMs}';
+      if (_connectivityTimeoutController.text != nextText) {
+        _connectivityTimeoutController.text = nextText;
+      }
+      if (_connectivityTimeoutError != null) {
+        _connectivityTimeoutError = null;
+      }
+    }
   }
 
   @override
@@ -118,6 +134,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
     _httpPortController.dispose();
     _socksPortController.dispose();
     _connectivityUrlController.dispose();
+    _connectivityTimeoutController.dispose();
     super.dispose();
   }
 
@@ -128,9 +145,6 @@ class _SettingsPanelState extends State<SettingsPanel> {
         ? 'No apps selected. Choose at least one app to connect.'
         : '${widget.allowedAppPackages.length} app${widget.allowedAppPackages.length == 1 ? '' : 's'} will use VPN';
     final proxyMode = widget.connectionMode == ConnectionMode.proxyOnly;
-    final proxySummary = proxyMode
-        ? 'Tunnel Forge always starts both local proxy listeners in local proxy mode.'
-        : 'Tunnel Forge always starts both local proxy listeners in VPN mode. They stay in the background unless LAN access is enabled.';
     final activeProxyExposure = widget.proxyExposure?.active == true
         ? widget.proxyExposure
         : null;
@@ -289,12 +303,6 @@ class _SettingsPanelState extends State<SettingsPanel> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _cardTitle('Always on'),
-                _cardText(
-                  proxySummary,
-                  color: widget.colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(height: 14),
                 TextFormField(
                   key: const Key('proxy_http_port_field'),
                   controller: _httpPortController,
@@ -413,6 +421,40 @@ class _SettingsPanelState extends State<SettingsPanel> {
                       widget.connectivityCheckSettings.copyWith(url: value),
                     );
                   },
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  key: const Key('connectivity_timeout_field'),
+                  controller: _connectivityTimeoutController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: InputDecoration(
+                    labelText: 'Connectivity timeout (ms)',
+                    hintText: '${ConnectivityCheckSettings.defaultTimeoutMs}',
+                    errorText: _connectivityTimeoutError,
+                  ),
+                  onChanged: (value) {
+                    final error = ConnectivityCheckSettings.validateTimeoutMs(
+                      value,
+                    );
+                    if (_connectivityTimeoutError != error) {
+                      setState(() => _connectivityTimeoutError = error);
+                    }
+                    if (error != null) return;
+                    final timeoutMs = ConnectivityCheckSettings.parseTimeoutMs(
+                      value,
+                    );
+                    if (timeoutMs == null) return;
+                    widget.onConnectivityCheckSettingsChanged(
+                      widget.connectivityCheckSettings.copyWith(
+                        timeoutMs: timeoutMs,
+                      ),
+                    );
+                  },
+                ),
+                _cardText(
+                  'Maximum time to wait before marking the check unreachable.',
+                  color: widget.colorScheme.onSurfaceVariant,
                 ),
               ],
             ),

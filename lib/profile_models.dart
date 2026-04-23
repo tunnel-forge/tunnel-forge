@@ -227,15 +227,32 @@ class ProxyExposure {
 
 /// Global endpoint used by the connectivity badge for direct reachability checks.
 class ConnectivityCheckSettings {
-  const ConnectivityCheckSettings({this.url = defaultUrl});
+  const ConnectivityCheckSettings({
+    this.url = defaultUrl,
+    this.timeoutMs = defaultTimeoutMs,
+  });
 
-  static const String defaultUrl = 'http://www.gstatic.com/generate_204';
+  static const String defaultUrl = 'https://www.gstatic.com/generate_204';
+  static const int defaultTimeoutMs = 5000;
 
   final String url;
+  final int timeoutMs;
 
   static String normalizeUrl(String text) {
     final trimmed = text.trim();
     return trimmed.isEmpty ? defaultUrl : trimmed;
+  }
+
+  static int normalizeTimeoutMs(int value) {
+    return value > 0 ? value : defaultTimeoutMs;
+  }
+
+  static int? parseTimeoutMs(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return defaultTimeoutMs;
+    final value = int.tryParse(trimmed);
+    if (value == null || value <= 0) return null;
+    return value;
   }
 
   static String? validateUrl(String text) {
@@ -251,9 +268,34 @@ class ConnectivityCheckSettings {
     return null;
   }
 
-  ConnectivityCheckSettings copyWith({String? url}) {
-    return ConnectivityCheckSettings(url: normalizeUrl(url ?? this.url));
+  static String? validateTimeoutMs(String text) {
+    if (text.trim().isEmpty) return null;
+    final value = int.tryParse(text.trim());
+    if (value == null) {
+      return 'Enter a whole number of milliseconds';
+    }
+    if (value <= 0) {
+      return 'Enter a timeout greater than 0 ms';
+    }
+    return null;
   }
+
+  ConnectivityCheckSettings copyWith({String? url, int? timeoutMs}) {
+    return ConnectivityCheckSettings(
+      url: normalizeUrl(url ?? this.url),
+      timeoutMs: normalizeTimeoutMs(timeoutMs ?? this.timeoutMs),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is ConnectivityCheckSettings &&
+        url == other.url &&
+        timeoutMs == other.timeoutMs;
+  }
+
+  @override
+  int get hashCode => Object.hash(url, timeoutMs);
 }
 
 /// One launchable app row from [VpnClient.listVpnCandidateApps].
@@ -385,8 +427,9 @@ class Profile {
         token.contains('?') ||
         token.contains(':');
     final authority = uri.hasPort ? '$host:${uri.port}' : host;
-    final path =
-        uri.path.isEmpty ? (hasExplicitTarget ? '/' : _dohPath) : uri.path;
+    final path = uri.path.isEmpty
+        ? (hasExplicitTarget ? '/' : _dohPath)
+        : uri.path;
     final query = uri.hasQuery ? '?${uri.query}' : '';
     if (hasScheme) return 'https://$authority$path$query';
     if (hasExplicitTarget) return '$authority$path$query';
@@ -428,12 +471,11 @@ class Profile {
   ) {
     if (invalidDnsServer(text, protocol) == null) return '';
     final requirement = switch (protocol) {
-      DnsProtocol.dnsOverTcp ||
-      DnsProtocol.dnsOverUdp => 'a hostname or IPv4 address',
-      DnsProtocol.dnsOverTls => 'a hostname',
-      DnsProtocol.dnsOverHttps => 'a hostname or HTTPS URL',
+      DnsProtocol.dnsOverTcp || DnsProtocol.dnsOverUdp => 'hostname or IPv4',
+      DnsProtocol.dnsOverTls => 'hostname',
+      DnsProtocol.dnsOverHttps => 'hostname or HTTPS URL',
     };
-    return '$label must be $requirement for ${protocol.displayLabel}';
+    return '$label: use $requirement';
   }
 
   static List<DnsServerConfig> orderedDnsServers({

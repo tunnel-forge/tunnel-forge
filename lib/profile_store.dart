@@ -63,6 +63,8 @@ class ProfileStore {
   static const prefsKeyProxyAllowLanConnections =
       'proxy_allow_lan_connections_v1';
   static const prefsKeyConnectivityCheckUrl = 'connectivity_check_url_v1';
+  static const prefsKeyConnectivityCheckTimeoutMs =
+      'connectivity_check_timeout_ms_v1';
   static const prefsKeyLogDisplayLevel = 'log_display_level_v1';
 
   final SharedPreferences? _prefsOverride;
@@ -168,6 +170,10 @@ class ProfileStore {
         p.getString(prefsKeyConnectivityCheckUrl) ??
             ConnectivityCheckSettings.defaultUrl,
       ),
+      timeoutMs: ConnectivityCheckSettings.normalizeTimeoutMs(
+        p.getInt(prefsKeyConnectivityCheckTimeoutMs) ??
+            ConnectivityCheckSettings.defaultTimeoutMs,
+      ),
     );
   }
 
@@ -178,6 +184,10 @@ class ProfileStore {
     await p.setString(
       prefsKeyConnectivityCheckUrl,
       ConnectivityCheckSettings.normalizeUrl(settings.url),
+    );
+    await p.setInt(
+      prefsKeyConnectivityCheckTimeoutMs,
+      ConnectivityCheckSettings.normalizeTimeoutMs(settings.timeoutMs),
     );
   }
 
