@@ -242,9 +242,7 @@ class _HeroSection extends StatelessWidget {
     final heroBackgroundColor = state.isReadOnly
         ? Colors.transparent
         : isDarkHero
-        ? (isInvertedHero
-              ? Colors.white
-              : const Color(0xFF111315))
+        ? (isInvertedHero ? Colors.white : const Color(0xFF111315))
         : colorScheme.surfaceContainer;
     final heroPrimaryTextColor = state.isReadOnly
         ? colorScheme.onSurface
@@ -259,15 +257,14 @@ class _HeroSection extends StatelessWidget {
               : Colors.white.withValues(alpha: 0.84))
         : colorScheme.onSurfaceVariant;
     final paragraphs = _paragraphs();
-    final brandLineStyle = (compact
-            ? textTheme.headlineSmall
-            : textTheme.headlineMedium)
-        ?.copyWith(
-      color: heroPrimaryTextColor,
-      fontWeight: FontWeight.w800,
-      letterSpacing: -0.7,
-      height: 1.08,
-    );
+    final brandLineStyle =
+        (compact ? textTheme.headlineSmall : textTheme.headlineMedium)
+            ?.copyWith(
+              color: heroPrimaryTextColor,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.7,
+              height: 1.08,
+            );
     final supportingTextStyle = textTheme.bodyMedium?.copyWith(
       color: heroSecondaryTextColor,
       height: 1.45,
@@ -301,12 +298,7 @@ class _HeroSection extends StatelessWidget {
           SizedBox(height: compact ? 12 : 14),
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  subtitle,
-                  style: supportingTextStyle,
-                ),
-              ),
+              Expanded(child: Text(subtitle, style: supportingTextStyle)),
             ],
           ),
           for (final paragraph in paragraphs) ...[
@@ -409,8 +401,7 @@ class _NoticePanel extends StatelessWidget {
                           borderRadius: BorderRadius.circular(5),
                         ),
                         visualDensity: VisualDensity.compact,
-                        materialTapTargetSize:
-                            MaterialTapTargetSize.shrinkWrap,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -533,11 +524,12 @@ class _ActionSection extends StatelessWidget {
                           )
                         : Text(
                             _primaryLabel,
-                            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                              color: isVisuallyEnabled
-                                  ? semanticColors.onConnected
-                                  : disabledLabelColor,
-                            ),
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(
+                                  color: isVisuallyEnabled
+                                      ? semanticColors.onConnected
+                                      : disabledLabelColor,
+                                ),
                           ),
                   ),
                 ),
