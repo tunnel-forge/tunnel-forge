@@ -126,7 +126,7 @@ jobs:
 
       - name: Run Android JVM tests
         working-directory: android
-        run: ./gradlew --stacktrace :app:testDebugUnitTest
+        run: ./gradlew --no-daemon --console=plain --info --stacktrace -Dorg.gradle.vfs.watch=false :app:testDebugUnitTest
 
       - name: Upload Android test results to Codecov
         if: ${{ !cancelled() }}
@@ -197,12 +197,12 @@ jobs:
           } > local.properties
 
       - name: Configure Android release signing
-        working-directory: android
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          TUNNEL_FORGE_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
         run: |
           for var in \
             ANDROID_KEYSTORE_BASE64 \
@@ -215,11 +215,12 @@ jobs:
             fi
           done
 
-          printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > upload-keystore.jks
+          printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${TUNNEL_FORGE_ANDROID_KEYSTORE_PATH}"
+          chmod 600 "${TUNNEL_FORGE_ANDROID_KEYSTORE_PATH}"
 
       - name: Build release APK
         env:
-          TUNNEL_FORGE_ANDROID_KEYSTORE_PATH: android/upload-keystore.jks
+          TUNNEL_FORGE_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
           TUNNEL_FORGE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           TUNNEL_FORGE_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           TUNNEL_FORGE_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
