@@ -189,12 +189,14 @@ bool _isLocalIpv4Endpoint(String value) {
   final host = token.split(':').first;
   final octets = host.split('.');
   if (octets.length != 4) return false;
-  final parts = octets.map(int.tryParse).toList(growable: false);
-  if (parts.any((part) => part == null || part! < 0 || part > 255)) {
+  final parsedParts = octets.map(int.tryParse).toList(growable: false);
+  if (parsedParts.contains(null)) {
     return false;
   }
-  final a = parts[0]!;
-  final b = parts[1]!;
+  final parts = parsedParts.cast<int>();
+  if (parts.any((part) => part < 0 || part > 255)) return false;
+  final a = parts[0];
+  final b = parts[1];
   return a == 10 ||
       a == 127 ||
       (a == 169 && b == 254) ||

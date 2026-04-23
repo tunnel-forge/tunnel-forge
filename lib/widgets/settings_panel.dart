@@ -55,12 +55,6 @@ class _SettingsPanelState extends State<SettingsPanel> {
     16,
     12,
   );
-  static const EdgeInsets _kCardFieldPadding = EdgeInsets.fromLTRB(
-    16,
-    12,
-    16,
-    20,
-  );
   static const EdgeInsets _kCardContentPadding = EdgeInsets.fromLTRB(
     16,
     16,
