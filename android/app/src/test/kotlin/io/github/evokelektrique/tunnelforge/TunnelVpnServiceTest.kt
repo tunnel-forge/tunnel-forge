@@ -8,11 +8,12 @@ import org.junit.Test
 class TunnelVpnServiceTest {
 
     @Test
-    fun effectivePerAppPackagesAddsTunnelForgePackage() {
+    fun effectiveInclusivePackagesAddsTunnelForgePackage() {
         val effective =
-            TunnelVpnService.effectivePerAppPackages(
-                routingMode = VpnContract.ROUTING_PER_APP_ALLOW_LIST,
-                allowedPackages = listOf(" com.example.alpha ", "com.example.beta"),
+            TunnelVpnService.effectiveInclusivePackages(
+                splitTunnelEnabled = true,
+                splitTunnelMode = VpnContract.SPLIT_TUNNEL_MODE_INCLUSIVE,
+                inclusivePackages = listOf(" com.example.alpha ", "com.example.beta"),
                 selfPackageName = "io.github.evokelektrique.tunnelforge",
             )
 
@@ -27,11 +28,12 @@ class TunnelVpnServiceTest {
     }
 
     @Test
-    fun effectivePerAppPackagesDoesNotDuplicateTunnelForgePackage() {
+    fun effectiveInclusivePackagesDoesNotDuplicateTunnelForgePackage() {
         val effective =
-            TunnelVpnService.effectivePerAppPackages(
-                routingMode = VpnContract.ROUTING_PER_APP_ALLOW_LIST,
-                allowedPackages =
+            TunnelVpnService.effectiveInclusivePackages(
+                splitTunnelEnabled = true,
+                splitTunnelMode = VpnContract.SPLIT_TUNNEL_MODE_INCLUSIVE,
+                inclusivePackages =
                     listOf(
                         "io.github.evokelektrique.tunnelforge",
                         "com.example.alpha",
@@ -47,15 +49,35 @@ class TunnelVpnServiceTest {
     }
 
     @Test
-    fun effectivePerAppPackagesIsEmptyOutsidePerAppMode() {
+    fun effectiveInclusivePackagesIsEmptyWhenDisabled() {
         val effective =
-            TunnelVpnService.effectivePerAppPackages(
-                routingMode = VpnContract.ROUTING_FULL_TUNNEL,
-                allowedPackages = listOf("com.example.alpha"),
+            TunnelVpnService.effectiveInclusivePackages(
+                splitTunnelEnabled = false,
+                splitTunnelMode = VpnContract.SPLIT_TUNNEL_MODE_INCLUSIVE,
+                inclusivePackages = listOf("com.example.alpha"),
                 selfPackageName = "io.github.evokelektrique.tunnelforge",
             )
 
         assertEquals(emptyList<String>(), effective)
+    }
+
+    @Test
+    fun requestedExclusivePackagesTrimsDedupesAndSkipsSelf() {
+        val requested =
+            TunnelVpnService.requestedExclusivePackages(
+                splitTunnelEnabled = true,
+                splitTunnelMode = VpnContract.SPLIT_TUNNEL_MODE_EXCLUSIVE,
+                exclusivePackages =
+                    listOf(
+                        " com.example.alpha ",
+                        "io.github.evokelektrique.tunnelforge",
+                        "com.example.alpha",
+                        "com.example.beta",
+                    ),
+                selfPackageName = "io.github.evokelektrique.tunnelforge",
+            )
+
+        assertEquals(listOf("com.example.alpha", "com.example.beta"), requested)
     }
 
     @Test

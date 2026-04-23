@@ -6,15 +6,19 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'features/app_selector/presentation/bloc/app_selector_bloc.dart';
 import 'profile_models.dart';
 
-/// Full-screen picker for [RoutingMode.perAppAllowList]: search, multi-select, optional icons.
+/// Full-screen picker for split-tunneling app selection.
 class AppSelectorPage extends StatelessWidget {
   const AppSelectorPage({
     super.key,
+    required this.title,
     required this.initialSelection,
     required this.loadApps,
     required this.loadIcon,
+    this.description,
   });
 
+  final String title;
+  final String? description;
   final Set<String> initialSelection;
   final Future<List<CandidateApp>> Function() loadApps;
   final Future<Uint8List?> Function(String packageName) loadIcon;
@@ -22,19 +26,28 @@ class AppSelectorPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
-      create: (_) =>
-          AppSelectorBloc(
-            loadApps: loadApps,
-            initialSelection: Set<String>.from(initialSelection),
-          )..add(const AppSelectorStarted()),
-      child: _AppSelectorView(loadIcon: loadIcon),
+      create: (_) => AppSelectorBloc(
+        loadApps: loadApps,
+        initialSelection: Set<String>.from(initialSelection),
+      )..add(const AppSelectorStarted()),
+      child: _AppSelectorView(
+        title: title,
+        description: description,
+        loadIcon: loadIcon,
+      ),
     );
   }
 }
 
 class _AppSelectorView extends StatefulWidget {
-  const _AppSelectorView({required this.loadIcon});
+  const _AppSelectorView({
+    required this.title,
+    required this.loadIcon,
+    this.description,
+  });
 
+  final String title;
+  final String? description;
   final Future<Uint8List?> Function(String packageName) loadIcon;
 
   @override
@@ -58,7 +71,7 @@ class _AppSelectorViewState extends State<_AppSelectorView> {
         final filtered = state.filteredApps;
         return Scaffold(
           appBar: AppBar(
-            title: const Text('Apps using VPN'),
+            title: Text(widget.title),
             leading: IconButton(
               icon: const Icon(Icons.close),
               onPressed: () => Navigator.of(context).pop(),
@@ -84,9 +97,8 @@ class _AppSelectorViewState extends State<_AppSelectorView> {
                 ],
               ),
               TextButton(
-                onPressed: () => Navigator.of(context).pop(
-                  Set<String>.from(state.selected),
-                ),
+                onPressed: () =>
+                    Navigator.of(context).pop(Set<String>.from(state.selected)),
                 child: const Text('Done'),
               ),
             ],
@@ -124,9 +136,9 @@ class _AppSelectorViewState extends State<_AppSelectorView> {
                     child: Text(
                       'No launchable apps found. If this is wrong, check that the app can query other packages on your Android version.',
                       textAlign: TextAlign.center,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodyLarge?.copyWith(color: cs.onSurfaceVariant),
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 );
@@ -141,9 +153,22 @@ class _AppSelectorViewState extends State<_AppSelectorView> {
               }
               return ListView.builder(
                 padding: const EdgeInsets.only(bottom: 16),
-                itemCount: filtered.length,
+                itemCount:
+                    filtered.length + (widget.description == null ? 0 : 1),
                 itemBuilder: (_, index) {
-                  final app = filtered[index];
+                  if (widget.description != null && index == 0) {
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      child: Text(
+                        widget.description!,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                    );
+                  }
+                  final app =
+                      filtered[index - (widget.description == null ? 0 : 1)];
                   final selected = state.selected.contains(app.packageName);
                   return SwitchListTile(
                     secondary: _SelectorAppIcon(

@@ -5,11 +5,7 @@ import '../../../profile_transfer.dart';
 import '../../../utils/log_entry.dart';
 
 class HomeMessage extends Equatable {
-  const HomeMessage({
-    required this.id,
-    required this.text,
-    this.error = false,
-  });
+  const HomeMessage({required this.id, required this.text, this.error = false});
 
   final int id;
   final String text;
@@ -91,8 +87,7 @@ class TunnelConnectRequest extends Equatable {
     required this.dnsServers,
     required this.mtu,
     required this.connectionMode,
-    required this.routingMode,
-    required this.allowedAppPackages,
+    required this.splitTunnelSettings,
     required this.proxySettings,
   });
 
@@ -107,8 +102,7 @@ class TunnelConnectRequest extends Equatable {
   final List<DnsServerConfig> dnsServers;
   final int mtu;
   final ConnectionMode connectionMode;
-  final RoutingMode routingMode;
-  final List<String> allowedAppPackages;
+  final SplitTunnelSettings splitTunnelSettings;
   final ProxySettings proxySettings;
 
   @override
@@ -124,8 +118,7 @@ class TunnelConnectRequest extends Equatable {
     dnsServers,
     mtu,
     connectionMode,
-    routingMode,
-    allowedAppPackages,
+    splitTunnelSettings,
     proxySettings,
   ];
 }
@@ -141,4 +134,109 @@ class ImportTransferRequest extends Equatable {
 
   @override
   List<Object?> get props => [transfer, selectAsLastProfile];
+}
+
+enum AppUpdateStatus {
+  idle,
+  loading,
+  upToDate,
+  updateAvailable,
+  aheadOfRelease,
+  comparisonUnavailable,
+  error,
+}
+
+class SemanticVersion extends Equatable implements Comparable<SemanticVersion> {
+  const SemanticVersion({
+    required this.major,
+    required this.minor,
+    required this.patch,
+  });
+
+  final int major;
+  final int minor;
+  final int patch;
+
+  static final RegExp _pattern = RegExp(r'^v?(\d+)\.(\d+)\.(\d+)');
+
+  static SemanticVersion? tryParse(String value) {
+    final match = _pattern.firstMatch(value.trim());
+    if (match == null) return null;
+    return SemanticVersion(
+      major: int.parse(match.group(1)!),
+      minor: int.parse(match.group(2)!),
+      patch: int.parse(match.group(3)!),
+    );
+  }
+
+  @override
+  int compareTo(SemanticVersion other) {
+    final majorCompare = major.compareTo(other.major);
+    if (majorCompare != 0) return majorCompare;
+    final minorCompare = minor.compareTo(other.minor);
+    if (minorCompare != 0) return minorCompare;
+    return patch.compareTo(other.patch);
+  }
+
+  @override
+  List<Object?> get props => [major, minor, patch];
+
+  @override
+  String toString() => '$major.$minor.$patch';
+}
+
+class AppVersionInfo extends Equatable {
+  const AppVersionInfo({
+    this.displayVersion,
+    required this.semanticVersion,
+    this.errorReason,
+  });
+
+  final String? displayVersion;
+  final SemanticVersion? semanticVersion;
+  final String? errorReason;
+
+  bool get hasDisplayVersion =>
+      displayVersion != null && displayVersion!.trim().isNotEmpty;
+
+  @override
+  List<Object?> get props => [displayVersion, semanticVersion, errorReason];
+}
+
+enum AppUpdateErrorKind { http, timeout, network, tls, response, unknown }
+
+class AppUpdateException with EquatableMixin implements Exception {
+  const AppUpdateException({
+    required this.kind,
+    required this.userMessage,
+    this.statusCode,
+    this.details,
+  });
+
+  final AppUpdateErrorKind kind;
+  final String userMessage;
+  final int? statusCode;
+  final String? details;
+
+  @override
+  List<Object?> get props => [kind, userMessage, statusCode, details];
+}
+
+class AppReleaseInfo extends Equatable {
+  const AppReleaseInfo({
+    required this.version,
+    required this.htmlUrl,
+    required this.publishedAt,
+    required this.prerelease,
+  });
+
+  final SemanticVersion version;
+  final String htmlUrl;
+  final DateTime publishedAt;
+  final bool prerelease;
+
+  String get versionLabel => version.toString();
+
+  @override
+  List<Object?> get props => [version, htmlUrl, publishedAt, prerelease];
 }

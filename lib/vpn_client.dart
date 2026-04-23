@@ -108,8 +108,7 @@ class VpnClient {
     bool dnsAutomatic = true,
     List<DnsServerConfig> dnsServers = const [],
     int mtu = Profile.defaultVpnMtu,
-    RoutingMode routingMode = RoutingMode.fullTunnel,
-    List<String> allowedAppPackages = const [],
+    SplitTunnelSettings splitTunnelSettings = const SplitTunnelSettings(),
     ProxySettings proxySettings = const ProxySettings(),
   }) {
     final mtuClamped = Profile.normalizeMtu(mtu);
@@ -137,8 +136,14 @@ class VpnClient {
       VpnContract.argDnsServers: normalizedDnsServers,
       VpnContract.argMtu: mtuClamped,
       VpnContract.argConnectionMode: connectionMode.jsonValue,
-      VpnContract.argRoutingMode: routingMode.jsonValue,
-      VpnContract.argAllowedPackages: List<String>.from(allowedAppPackages),
+      VpnContract.argSplitTunnelEnabled: splitTunnelSettings.enabled,
+      VpnContract.argSplitTunnelMode: splitTunnelSettings.mode.jsonValue,
+      VpnContract.argSplitTunnelInclusivePackages: List<String>.from(
+        splitTunnelSettings.inclusivePackages,
+      ),
+      VpnContract.argSplitTunnelExclusivePackages: List<String>.from(
+        splitTunnelSettings.exclusivePackages,
+      ),
       VpnContract.argProxyHttpPort: ProxySettings.normalizePort(
         proxySettings.httpPort,
         fallback: ProxySettings.defaultHttpPort,

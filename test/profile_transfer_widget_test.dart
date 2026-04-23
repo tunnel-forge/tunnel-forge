@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tunnel_forge/features/onboarding/domain/onboarding_repository.dart';
 import 'package:tunnel_forge/main.dart';
 import 'package:tunnel_forge/profile_models.dart';
 import 'package:tunnel_forge/profile_store.dart';
@@ -12,8 +13,18 @@ import 'package:tunnel_forge/profile_transfer_bridge.dart';
 import 'package:tunnel_forge/profile_transfer_contract.dart';
 import 'package:tunnel_forge/vpn_contract.dart';
 
-import '../integration_test/support/host_to_dart_channel.dart';
-import '../integration_test/support/vpn_channel_mock.dart';
+import 'support/host_to_dart_channel.dart';
+import 'support/vpn_channel_mock.dart';
+
+class _AcceptedOnboardingRepository implements OnboardingRepository {
+  const _AcceptedOnboardingRepository();
+
+  @override
+  Future<int?> loadAcknowledgedVersion() async => kCurrentL2tpDisclosureVersion;
+
+  @override
+  Future<void> saveAcknowledgedVersion(int version) async {}
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -25,6 +36,7 @@ void main() {
   }) async {
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: store,
         profileTransferBridge: profileTransferBridge,
       ),

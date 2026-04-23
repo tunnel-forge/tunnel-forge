@@ -13,10 +13,8 @@ void main() {
   blocTest<TunnelBloc, TunnelState>(
     'ignores stale failure from an older attempt while a newer tunnel is up',
     build: () => TunnelBloc(_FakeTunnelRepository(), _FakeLogsRepository()),
-    seed: () => const TunnelState(
-      tunnelUp: true,
-      activeAttemptId: 'attempt-new',
-    ),
+    seed: () =>
+        const TunnelState(tunnelUp: true, activeAttemptId: 'attempt-new'),
     act: (bloc) {
       bloc.add(
         const TunnelHostStateReceived(
@@ -34,10 +32,8 @@ void main() {
   blocTest<TunnelBloc, TunnelState>(
     'current failure clears active attempt and disconnects the tunnel',
     build: () => TunnelBloc(_FakeTunnelRepository(), _FakeLogsRepository()),
-    seed: () => const TunnelState(
-      tunnelUp: true,
-      activeAttemptId: 'attempt-current',
-    ),
+    seed: () =>
+        const TunnelState(tunnelUp: true, activeAttemptId: 'attempt-current'),
     act: (bloc) {
       bloc.add(
         const TunnelHostStateReceived(
@@ -50,10 +46,7 @@ void main() {
       );
     },
     expect: () => [
-      const TunnelState(
-        tunnelUp: false,
-        activeAttemptId: null,
-      ),
+      const TunnelState(tunnelUp: false, activeAttemptId: null),
       const TunnelState(
         tunnelUp: false,
         activeAttemptId: null,

@@ -62,6 +62,12 @@ class ProfileStore {
   static const prefsKeyProxySocksPort = 'proxy_socks_port_v1';
   static const prefsKeyProxyAllowLanConnections =
       'proxy_allow_lan_connections_v1';
+  static const prefsKeySplitTunnelEnabled = 'split_tunnel_enabled_v1';
+  static const prefsKeySplitTunnelMode = 'split_tunnel_mode_v1';
+  static const prefsKeySplitTunnelInclusivePackages =
+      'split_tunnel_inclusive_packages_v1';
+  static const prefsKeySplitTunnelExclusivePackages =
+      'split_tunnel_exclusive_packages_v1';
   static const prefsKeyConnectivityCheckUrl = 'connectivity_check_url_v1';
   static const prefsKeyConnectivityCheckTimeoutMs =
       'connectivity_check_timeout_ms_v1';
@@ -160,6 +166,35 @@ class ProfileStore {
     await p.setBool(
       prefsKeyProxyAllowLanConnections,
       settings.allowLanConnections,
+    );
+  }
+
+  Future<SplitTunnelSettings> loadSplitTunnelSettings() async {
+    final p = await _prefs();
+    return SplitTunnelSettings(
+      enabled: p.getBool(prefsKeySplitTunnelEnabled) ?? false,
+      mode: SplitTunnelMode.fromJson(p.getString(prefsKeySplitTunnelMode)),
+      inclusivePackages: SplitTunnelSettings.normalizePackages(
+        p.getStringList(prefsKeySplitTunnelInclusivePackages) ?? const [],
+      ),
+      exclusivePackages: SplitTunnelSettings.normalizePackages(
+        p.getStringList(prefsKeySplitTunnelExclusivePackages) ?? const [],
+      ),
+    );
+  }
+
+  Future<void> saveSplitTunnelSettings(SplitTunnelSettings settings) async {
+    final p = await _prefs();
+    final normalized = settings.copyWith();
+    await p.setBool(prefsKeySplitTunnelEnabled, normalized.enabled);
+    await p.setString(prefsKeySplitTunnelMode, normalized.mode.jsonValue);
+    await p.setStringList(
+      prefsKeySplitTunnelInclusivePackages,
+      normalized.inclusivePackages,
+    );
+    await p.setStringList(
+      prefsKeySplitTunnelExclusivePackages,
+      normalized.exclusivePackages,
     );
   }
 

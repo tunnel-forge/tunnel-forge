@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../app_scaffold_messenger.dart';
 import '../../../../app_selector_page.dart';
@@ -16,6 +17,8 @@ import '../../../../widgets/settings_panel.dart';
 import '../../../app_theme/presentation/bloc/app_theme_bloc.dart';
 import '../../../home/domain/home_models.dart';
 import '../../../home/domain/home_repositories.dart';
+import '../../../onboarding/presentation/bloc/onboarding_bloc.dart';
+import '../../../onboarding/presentation/pages/onboarding_page.dart';
 import '../bloc/connectivity_bloc.dart';
 import '../bloc/home_nav_bloc.dart';
 import '../bloc/logs_bloc.dart';
@@ -64,6 +67,12 @@ class _VpnHomePageView extends StatefulWidget {
 }
 
 class _VpnHomePageViewState extends State<_VpnHomePageView> {
+  static const String _kGithubReleasesUrl =
+      'https://github.com/evokelektrique/tunnel-forge/releases';
+  static const String _kProjectGithubUrl =
+      'https://github.com/evokelektrique/tunnel-forge';
+  static const String _kTelegramUrl = 'https://t.me/TunnelForge';
+
   final ScrollController _logsScroll = ScrollController();
   bool _logsStickToBottom = true;
   int _lastProfilesMessageId = 0;
@@ -115,6 +124,13 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
 
   void _toast(String text, {bool error = false}) {
     showAppSnackBar(context, text, error: error);
+  }
+
+  void _maybeRequestVersionCheck(SettingsState settingsState, int navIndex) {
+    if (navIndex != 2) return;
+    if (!settingsState.installedVersionLoaded) return;
+    if (settingsState.appUpdateStatus != AppUpdateStatus.idle) return;
+    context.read<SettingsBloc>().add(const SettingsVersionCheckRequested());
   }
 
   Future<void> _handleProfilesStateChange(ProfilesState state) async {
@@ -195,13 +211,22 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
   }
 
   Future<void> _pickAppsForVpn() async {
-    final current = context.read<SettingsBloc>().state.allowedAppPackages;
+    final splitTunnelSettings = context
+        .read<SettingsBloc>()
+        .state
+        .splitTunnelSettings;
+    final isInclusive = splitTunnelSettings.mode == SplitTunnelMode.inclusive;
+    final current = splitTunnelSettings.activePackages;
     final repository = widget.locator<TunnelRepository>();
     final picked = await Navigator.of(context, rootNavigator: true)
         .push<Set<String>>(
           MaterialPageRoute(
             fullscreenDialog: true,
             builder: (ctx) => AppSelectorPage(
+              title: isInclusive ? 'Apps using VPN' : 'Apps outside VPN',
+              description: isInclusive
+                  ? 'Only the selected apps will use the VPN.'
+                  : 'Selected apps will bypass the VPN and use the normal network.',
               initialSelection: Set<String>.from(current),
               loadApps: repository.listVpnCandidateApps,
               loadIcon: repository.getAppIcon,
@@ -209,8 +234,49 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
           ),
         );
     if (!mounted || picked == null) return;
+    final nextSettings = isInclusive
+        ? splitTunnelSettings.copyWith(inclusivePackages: picked.toList())
+        : splitTunnelSettings.copyWith(exclusivePackages: picked.toList());
     context.read<SettingsBloc>().add(
-      SettingsAllowedAppsChanged(picked.toList()..sort()),
+      SettingsSplitTunnelSettingsChanged(nextSettings),
+    );
+  }
+
+  Future<void> _openL2tpSecurityNotice() async {
+    await Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => BlocProvider<OnboardingBloc>(
+          create: (_) =>
+              widget.locator<OnboardingBloc>()
+                ..add(const OnboardingReadOnlyOpened()),
+          child: const OnboardingPage(),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openExternalUrl(
+    String url, {
+    required String invalidMessage,
+    required String failureMessage,
+  }) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) {
+      _toast(invalidMessage, error: true);
+      return;
+    }
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!launched) {
+      _toast(failureMessage, error: true);
+    }
+  }
+
+  Future<void> _openReleasePage(String url) {
+    return _openExternalUrl(
+      url,
+      invalidMessage: 'Release page URL is invalid.',
+      failureMessage: 'Could not open the release page.',
     );
   }
 
@@ -271,8 +337,7 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
           dnsServers: dnsServers,
           mtu: profile.mtu,
           connectionMode: settingsState.connectionMode,
-          routingMode: settingsState.routingMode,
-          allowedAppPackages: settingsState.allowedAppPackages,
+          splitTunnelSettings: settingsState.splitTunnelSettings,
           proxySettings: settingsState.proxySettings,
         ),
       ),
@@ -385,6 +450,12 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
           listenWhen: (previous, current) =>
               previous.entries.length != current.entries.length,
           listener: (context, state) => _handleLogsStateChange(state),
+        ),
+        BlocListener<SettingsBloc, SettingsState>(
+          listenWhen: (previous, current) =>
+              previous.installedVersionLoaded != current.installedVersionLoaded,
+          listener: (context, state) =>
+              _maybeRequestVersionCheck(state, navState.index),
         ),
       ],
       child: Scaffold(
@@ -583,17 +654,16 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
                   onThemeModeChanged: (mode) =>
                       context.read<AppThemeBloc>().add(AppThemeChanged(mode)),
                   connectionMode: settingsState.connectionMode,
-                  routingMode: settingsState.routingMode,
-                  allowedAppPackages: settingsState.allowedAppPackages,
+                  splitTunnelSettings: settingsState.splitTunnelSettings,
                   proxySettings: settingsState.proxySettings,
                   connectivityCheckSettings:
                       settingsState.connectivityCheckSettings,
                   onConnectionModeChanged: (mode) => context
                       .read<SettingsBloc>()
                       .add(SettingsConnectionModeChanged(mode)),
-                  onRoutingModeChanged: (mode) => context
+                  onSplitTunnelSettingsChanged: (settings) => context
                       .read<SettingsBloc>()
-                      .add(SettingsRoutingModeChanged(mode)),
+                      .add(SettingsSplitTunnelSettingsChanged(settings)),
                   onProxySettingsChanged: (settings) => context
                       .read<SettingsBloc>()
                       .add(SettingsProxySettingsChanged(settings)),
@@ -602,6 +672,28 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
                       .read<SettingsBloc>()
                       .add(SettingsConnectivityCheckSettingsChanged(settings)),
                   onChooseApps: _pickAppsForVpn,
+                  onOpenL2tpSecurityNotice: _openL2tpSecurityNotice,
+                  installedVersion: settingsState.installedVersion,
+                  installedVersionError: settingsState.installedVersionError,
+                  appUpdateStatus: settingsState.appUpdateStatus,
+                  latestReleaseVersion: settingsState.latestReleaseVersion,
+                  updateErrorMessage: settingsState.updateErrorMessage,
+                  onRefreshVersionCheck: () => context.read<SettingsBloc>().add(
+                    const SettingsVersionCheckRequested(),
+                  ),
+                  onOpenReleasePage: () => _openReleasePage(
+                    settingsState.latestReleaseUrl ?? _kGithubReleasesUrl,
+                  ),
+                  onOpenTelegram: () => _openExternalUrl(
+                    _kTelegramUrl,
+                    invalidMessage: 'Telegram link is invalid.',
+                    failureMessage: 'Could not open Telegram.',
+                  ),
+                  onOpenGithub: () => _openExternalUrl(
+                    _kProjectGithubUrl,
+                    invalidMessage: 'GitHub link is invalid.',
+                    failureMessage: 'Could not open GitHub.',
+                  ),
                   routingLocked:
                       profilesState.loading ||
                       tunnelState.busy ||
@@ -620,6 +712,10 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
           onDestinationSelected: (index) {
             context.read<HomeNavBloc>().add(HomeNavChanged(index));
             if (index == 1) _scheduleScrollLogsToEnd();
+            _maybeRequestVersionCheck(
+              context.read<SettingsBloc>().state,
+              index,
+            );
           },
           backgroundColor: Theme.of(context).colorScheme.surface,
           surfaceTintColor: Colors.transparent,

@@ -30,6 +30,11 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val vpnChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VpnContract.METHOD_CHANNEL)
+        val appInfoChannel =
+            MethodChannel(
+                flutterEngine.dartExecutor.binaryMessenger,
+                AppInfoContract.METHOD_CHANNEL,
+            )
         profileTransferChannel =
             MethodChannel(
                 flutterEngine.dartExecutor.binaryMessenger,
@@ -46,6 +51,19 @@ class MainActivity : FlutterActivity() {
                     }
                 }
             }
+        appInfoChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                AppInfoContract.GET_INSTALLED_VERSION -> {
+                    try {
+                        result.success(installedVersionInfo())
+                    } catch (e: Exception) {
+                        AppLog.e(TAG, "getInstalledVersion failed", e)
+                        result.error("app_info_failed", e.message, null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
         handleProfileTransferIntent(intent, deliverImmediately = false)
         VpnTunnelEvents.attach(vpnChannel)
         vpnChannel.setMethodCallHandler { call, result ->
@@ -122,19 +140,29 @@ class MainActivity : FlutterActivity() {
                         } else {
                             VpnContract.MODE_VPN_TUNNEL
                         }
-                    val routingModeRaw = args[VpnContract.ARG_ROUTING_MODE] as? String
-                    val routingMode =
-                        if (routingModeRaw == VpnContract.ROUTING_PER_APP_ALLOW_LIST) {
-                            VpnContract.ROUTING_PER_APP_ALLOW_LIST
+                    val splitTunnelEnabled =
+                        args[VpnContract.ARG_SPLIT_TUNNEL_ENABLED] as? Boolean ?: false
+                    val splitTunnelModeRaw = args[VpnContract.ARG_SPLIT_TUNNEL_MODE] as? String
+                    val splitTunnelMode =
+                        if (splitTunnelModeRaw == VpnContract.SPLIT_TUNNEL_MODE_EXCLUSIVE) {
+                            VpnContract.SPLIT_TUNNEL_MODE_EXCLUSIVE
                         } else {
-                            VpnContract.ROUTING_FULL_TUNNEL
+                            VpnContract.SPLIT_TUNNEL_MODE_INCLUSIVE
                         }
-                    val allowedPackages = mutableListOf<String>()
-                    val apRaw = args[VpnContract.ARG_ALLOWED_PACKAGES]
-                    if (apRaw is List<*>) {
-                        for (e in apRaw) {
+                    val inclusivePackages = mutableListOf<String>()
+                    val inclusiveRaw = args[VpnContract.ARG_SPLIT_TUNNEL_INCLUSIVE_PACKAGES]
+                    if (inclusiveRaw is List<*>) {
+                        for (e in inclusiveRaw) {
                             val s = e as? String
-                            if (!s.isNullOrBlank()) allowedPackages.add(s.trim())
+                            if (!s.isNullOrBlank()) inclusivePackages.add(s.trim())
+                        }
+                    }
+                    val exclusivePackages = mutableListOf<String>()
+                    val exclusiveRaw = args[VpnContract.ARG_SPLIT_TUNNEL_EXCLUSIVE_PACKAGES]
+                    if (exclusiveRaw is List<*>) {
+                        for (e in exclusiveRaw) {
+                            val s = e as? String
+                            if (!s.isNullOrBlank()) exclusivePackages.add(s.trim())
                         }
                     }
                     val proxyHttpPort = sanitizePort(args[VpnContract.ARG_PROXY_HTTP_PORT], ProxyTunnelService.DEFAULT_HTTP_PORT)
@@ -167,7 +195,7 @@ class MainActivity : FlutterActivity() {
                     }
                     AppLog.d(
                         TAG,
-                        "vpn_call connect start attempt=$attemptId server=$serverTrim userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dnsMode=${if (dnsAutomatic) "automatic" else "manual"} dns=${dnsServers.joinToString(",") { "${it.host}[${it.protocol.shortLabel}]" }} mtu=$mtu mode=$connectionMode routing=$routingMode allowedApps=${allowedPackages.size} http=$proxyHttpPort socks=$proxySocksPort lan=$proxyAllowLan",
+                        "vpn_call connect start attempt=$attemptId server=$serverTrim userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dnsMode=${if (dnsAutomatic) "automatic" else "manual"} dns=${dnsServers.joinToString(",") { "${it.host}[${it.protocol.shortLabel}]" }} mtu=$mtu mode=$connectionMode splitTunnelEnabled=$splitTunnelEnabled splitTunnelMode=$splitTunnelMode inclusiveApps=${inclusivePackages.size} exclusiveApps=${exclusivePackages.size} http=$proxyHttpPort socks=$proxySocksPort lan=$proxyAllowLan",
                     )
                     val intent =
                         if (connectionMode == VpnContract.MODE_PROXY_ONLY) {
@@ -198,13 +226,18 @@ class MainActivity : FlutterActivity() {
                                 putDnsServerExtras(this, dnsServers)
                                 putExtra(TunnelVpnService.EXTRA_MTU, mtu)
                                 putExtra(TunnelVpnService.EXTRA_PROFILE_NAME, profileName)
-                                putExtra(TunnelVpnService.EXTRA_ROUTING_MODE, routingMode)
+                                putExtra(TunnelVpnService.EXTRA_SPLIT_TUNNEL_ENABLED, splitTunnelEnabled)
+                                putExtra(TunnelVpnService.EXTRA_SPLIT_TUNNEL_MODE, splitTunnelMode)
                                 putExtra(TunnelVpnService.EXTRA_PROXY_HTTP_PORT, proxyHttpPort)
                                 putExtra(TunnelVpnService.EXTRA_PROXY_SOCKS_PORT, proxySocksPort)
                                 putExtra(TunnelVpnService.EXTRA_PROXY_ALLOW_LAN, proxyAllowLan)
                                 putStringArrayListExtra(
-                                    TunnelVpnService.EXTRA_ALLOWED_PACKAGES,
-                                    ArrayList(allowedPackages),
+                                    TunnelVpnService.EXTRA_SPLIT_TUNNEL_INCLUSIVE_PACKAGES,
+                                    ArrayList(inclusivePackages),
+                                )
+                                putStringArrayListExtra(
+                                    TunnelVpnService.EXTRA_SPLIT_TUNNEL_EXCLUSIVE_PACKAGES,
+                                    ArrayList(exclusivePackages),
                                 )
                             }
                         }
@@ -246,6 +279,31 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun installedVersionInfo(): Map<String, String> {
+        val packageInfo =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageInfo(
+                    packageName,
+                    PackageManager.PackageInfoFlags.of(0),
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(packageName, 0)
+            }
+        val versionName = packageInfo.versionName?.trim().orEmpty()
+        val buildNumber =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                packageInfo.longVersionCode.toString()
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.versionCode.toString()
+            }
+        return mapOf(
+            AppInfoContract.ARG_VERSION_NAME to versionName,
+            AppInfoContract.ARG_BUILD_NUMBER to buildNumber,
+        )
     }
 
     override fun onDestroy() {

@@ -7,6 +7,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:tunnel_forge/connectivity_checker.dart';
+import 'package:tunnel_forge/features/home/domain/home_models.dart';
+import 'package:tunnel_forge/features/home/domain/home_repositories.dart';
+import 'package:tunnel_forge/features/onboarding/domain/onboarding_repository.dart';
 import 'package:tunnel_forge/main.dart';
 import 'package:tunnel_forge/profile_models.dart';
 import 'package:tunnel_forge/profile_store.dart';
@@ -14,8 +17,8 @@ import 'package:tunnel_forge/theme.dart';
 import 'package:tunnel_forge/vpn_contract.dart';
 import 'package:tunnel_forge/widgets/connection_panel.dart';
 
-import '../integration_test/support/host_to_dart_channel.dart';
-import '../integration_test/support/vpn_channel_mock.dart';
+import 'support/host_to_dart_channel.dart';
+import 'support/vpn_channel_mock.dart';
 
 class FakeConnectivityChecker implements ConnectivityChecker {
   final List<ConnectivityPingRequest> requests = <ConnectivityPingRequest>[];
@@ -33,6 +36,42 @@ class FakeConnectivityChecker implements ConnectivityChecker {
     final pending = completer;
     if (pending != null) return pending.future;
     return Future<ConnectivityPingResult>.value(nextResult);
+  }
+}
+
+class _AcceptedOnboardingRepository implements OnboardingRepository {
+  const _AcceptedOnboardingRepository();
+
+  @override
+  Future<int?> loadAcknowledgedVersion() async => kCurrentL2tpDisclosureVersion;
+
+  @override
+  Future<void> saveAcknowledgedVersion(int version) async {}
+}
+
+class _FakeAppVersionRepository implements AppVersionRepository {
+  const _FakeAppVersionRepository();
+
+  @override
+  Future<AppVersionInfo> loadInstalledVersion() async {
+    return const AppVersionInfo(
+      displayVersion: '0.3.0+11',
+      semanticVersion: SemanticVersion(major: 0, minor: 3, patch: 0),
+    );
+  }
+}
+
+class _FakeAppUpdateRepository implements AppUpdateRepository {
+  const _FakeAppUpdateRepository();
+
+  @override
+  Future<AppReleaseInfo> fetchLatestRelease() async {
+    return AppReleaseInfo(
+      version: const SemanticVersion(major: 0, minor: 3, patch: 0),
+      htmlUrl: 'https://github.com/evokelektrique/tunnel-forge/releases',
+      publishedAt: DateTime.utc(2026, 4, 19),
+      prerelease: true,
+    );
   }
 }
 
@@ -334,6 +373,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
       ),
     );
@@ -393,6 +433,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
       ),
     );
@@ -441,8 +482,11 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
         connectivityChecker: checker,
+        appVersionRepository: const _FakeAppVersionRepository(),
+        appUpdateRepository: const _FakeAppUpdateRepository(),
       ),
     );
 
@@ -517,6 +561,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
         connectivityChecker: checker,
       ),
@@ -566,6 +611,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
         connectivityChecker: checker,
       ),
@@ -617,6 +663,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
         connectivityChecker: checker,
       ),
@@ -663,6 +710,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
         connectivityChecker: checker,
       ),
@@ -715,6 +763,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
         connectivityChecker: checker,
       ),
@@ -774,6 +823,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
       ),
     );
@@ -810,7 +860,12 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(480, 1200));
 
     final store = ProfileStore(secretsOverride: MemorySecretStore());
-    await tester.pumpWidget(TunnelForgeApp(profileStore: store));
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
+        profileStore: store,
+      ),
+    );
     await tester.pump();
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 100));
@@ -855,7 +910,12 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(480, 1200));
 
     final store = ProfileStore(secretsOverride: MemorySecretStore());
-    await tester.pumpWidget(TunnelForgeApp(profileStore: store));
+    await tester.pumpWidget(
+      TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
+        profileStore: store,
+      ),
+    );
     await tester.pump();
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 100));
@@ -895,6 +955,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
       ),
     );
@@ -969,6 +1030,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
       ),
     );
@@ -1023,6 +1085,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
       ),
     );
@@ -1079,6 +1142,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
       ),
     );
@@ -1154,6 +1218,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
       ),
     );
@@ -1206,6 +1271,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
       ),
     );
@@ -1270,6 +1336,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
       ),
     );
@@ -1306,6 +1373,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
       ),
     );
@@ -1368,6 +1436,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
       ),
     );
@@ -1421,6 +1490,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
       ),
     );
@@ -1483,6 +1553,7 @@ void main() {
 
     await tester.pumpWidget(
       TunnelForgeApp(
+        onboardingRepository: const _AcceptedOnboardingRepository(),
         profileStore: ProfileStore(secretsOverride: MemorySecretStore()),
       ),
     );

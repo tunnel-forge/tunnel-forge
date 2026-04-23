@@ -214,16 +214,18 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
       );
       return;
     }
+    final splitTunnelSettings = request.splitTunnelSettings;
     if (!proxyMode &&
-        request.routingMode == RoutingMode.perAppAllowList &&
-        request.allowedAppPackages.isEmpty) {
+        splitTunnelSettings.enabled &&
+        splitTunnelSettings.mode == SplitTunnelMode.inclusive &&
+        splitTunnelSettings.inclusivePackages.isEmpty) {
       _toast(
         emit,
-        'Turn on "VPN for all apps", or open "Choose apps" and select at least one app.',
+        'Open "Select apps" and choose at least one app for inclusive split tunneling.',
         error: true,
       );
       _logWarning(
-        'Connect blocked: per-app mode with empty allow-list',
+        'Connect blocked: inclusive split tunneling is enabled with an empty app list',
         tag: 'tunnel',
       );
       return;
@@ -275,7 +277,8 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
       _logDebug(
         'Profile: server=$host user=${request.user.isEmpty ? '(empty)' : request.user} dns=$dnsLog mtu=${request.mtu} '
         'psk=${request.psk.isEmpty ? 'off (cleartext L2TP if server allows)' : 'on'} '
-        'mode=${request.connectionMode.jsonValue} routing=${request.routingMode.jsonValue} allowedApps=${request.allowedAppPackages.length} '
+        'mode=${request.connectionMode.jsonValue} splitTunnelEnabled=${splitTunnelSettings.enabled} splitTunnelMode=${splitTunnelSettings.mode.jsonValue} '
+        'inclusiveApps=${splitTunnelSettings.inclusivePackages.length} exclusiveApps=${splitTunnelSettings.exclusivePackages.length} '
         'http=${request.proxySettings.httpPort} socks=${request.proxySettings.socksPort} lan=${request.proxySettings.allowLanConnections ? 'on' : 'off'} '
         'attempt=$attemptId',
         tag: 'tunnel',
@@ -292,8 +295,7 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
           dnsServers: request.dnsServers,
           mtu: request.mtu,
           connectionMode: request.connectionMode,
-          routingMode: request.routingMode,
-          allowedAppPackages: request.allowedAppPackages,
+          splitTunnelSettings: request.splitTunnelSettings,
           proxySettings: request.proxySettings,
           attemptId: attemptId,
         ),

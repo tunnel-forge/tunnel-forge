@@ -28,12 +28,12 @@ abstract final class VpnContract {
   static const String argProxyHttpPort = 'proxyHttpPort';
   static const String argProxySocksPort = 'proxySocksPort';
   static const String argProxyAllowLan = 'proxyAllowLan';
-
-  /// `fullTunnel` or `perAppAllowList` — same values as [RoutingMode.jsonValue].
-  static const String argRoutingMode = 'routingMode';
-
-  /// Package allow-list when [argRoutingMode] is `perAppAllowList`; ignored for full tunnel.
-  static const String argAllowedPackages = 'allowedPackages';
+  static const String argSplitTunnelEnabled = 'splitTunnelEnabled';
+  static const String argSplitTunnelMode = 'splitTunnelMode';
+  static const String argSplitTunnelInclusivePackages =
+      'splitTunnelInclusivePackages';
+  static const String argSplitTunnelExclusivePackages =
+      'splitTunnelExclusivePackages';
 
   /// Android: launcher-visible apps as `{packageName, label}` maps.
   static const String listVpnCandidateApps = 'listVpnCandidateApps';
@@ -43,6 +43,8 @@ abstract final class VpnContract {
 
   static const String modeVpnTunnel = 'vpnTunnel';
   static const String modeProxyOnly = 'proxyOnly';
+  static const String splitTunnelModeInclusive = 'inclusive';
+  static const String splitTunnelModeExclusive = 'exclusive';
 
   static const String onTunnelState = 'onTunnelState';
 

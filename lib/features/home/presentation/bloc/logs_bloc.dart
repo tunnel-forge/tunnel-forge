@@ -81,8 +81,7 @@ class LogsBloc extends Bloc<LogsEvent, LogsState> {
     this._logsRepository,
     this._settingsRepository,
     this._tunnelRepository,
-  )
-    : super(const LogsState()) {
+  ) : super(const LogsState()) {
     on<LogsStarted>(_onStarted);
     on<LogsEntriesChanged>(_onEntriesChanged);
     on<LogsLevelChangeRequested>(_onLevelChangeRequested);

@@ -223,6 +223,23 @@ void main() {
       expect(proxy.allowLanConnections, isTrue);
     });
 
+    test('persists split-tunnel settings', () async {
+      await store.saveSplitTunnelSettings(
+        const SplitTunnelSettings(
+          enabled: true,
+          mode: SplitTunnelMode.exclusive,
+          inclusivePackages: ['com.example.alpha'],
+          exclusivePackages: [' com.example.beta ', 'com.example.beta'],
+        ),
+      );
+
+      final settings = await store.loadSplitTunnelSettings();
+      expect(settings.enabled, isTrue);
+      expect(settings.mode, SplitTunnelMode.exclusive);
+      expect(settings.inclusivePackages, ['com.example.alpha']);
+      expect(settings.exclusivePackages, ['com.example.beta']);
+    });
+
     test('persists global connectivity check settings', () async {
       final initial = await store.loadConnectivityCheckSettings();
       expect(initial.url, ConnectivityCheckSettings.defaultUrl);

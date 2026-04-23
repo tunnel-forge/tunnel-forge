@@ -25,10 +25,7 @@ final class AppThemeChanged extends AppThemeEvent {
 }
 
 class AppThemeState extends Equatable {
-  const AppThemeState({
-    this.themeMode = ThemeMode.system,
-    this.loaded = false,
-  });
+  const AppThemeState({this.themeMode = ThemeMode.system, this.loaded = false});
 
   final ThemeMode themeMode;
   final bool loaded;

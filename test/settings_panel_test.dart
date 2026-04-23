@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tunnel_forge/features/home/domain/home_models.dart';
 import 'package:tunnel_forge/profile_models.dart';
 import 'package:tunnel_forge/widgets/settings_panel.dart';
 
@@ -14,11 +15,14 @@ void main() {
   Widget buildPanel({
     required ProxySettings proxySettings,
     ConnectionMode connectionMode = ConnectionMode.proxyOnly,
+    SplitTunnelSettings splitTunnelSettings = const SplitTunnelSettings(),
     ProxyExposure? proxyExposure,
     ConnectivityCheckSettings connectivityCheckSettings =
         const ConnectivityCheckSettings(),
+    ValueChanged<SplitTunnelSettings>? onSplitTunnelSettingsChanged,
     ValueChanged<ProxySettings>? onProxySettingsChanged,
     ValueChanged<ConnectivityCheckSettings>? onConnectivityCheckSettingsChanged,
+    VoidCallback? onOpenL2tpSecurityNotice,
   }) {
     final theme = ThemeData.light();
     return MaterialApp(
@@ -27,17 +31,22 @@ void main() {
           themeMode: ThemeMode.light,
           onThemeModeChanged: (_) {},
           connectionMode: connectionMode,
-          routingMode: RoutingMode.fullTunnel,
-          allowedAppPackages: const [],
+          splitTunnelSettings: splitTunnelSettings,
           proxySettings: proxySettings,
           proxyExposure: proxyExposure,
           connectivityCheckSettings: connectivityCheckSettings,
           onConnectionModeChanged: (_) {},
-          onRoutingModeChanged: (_) {},
+          onSplitTunnelSettingsChanged: onSplitTunnelSettingsChanged ?? (_) {},
           onProxySettingsChanged: onProxySettingsChanged ?? (_) {},
           onConnectivityCheckSettingsChanged:
               onConnectivityCheckSettingsChanged ?? (_) {},
           onChooseApps: () {},
+          onOpenL2tpSecurityNotice: onOpenL2tpSecurityNotice,
+          installedVersion: '0.3.0+11',
+          appUpdateStatus: AppUpdateStatus.idle,
+          onRefreshVersionCheck: () {},
+          onOpenTelegram: () {},
+          onOpenGithub: () {},
           routingLocked: false,
           colorScheme: theme.colorScheme,
           textTheme: theme.textTheme,
@@ -89,7 +98,9 @@ void main() {
     expect(changed?.socksPort, ProxySettings.defaultSocksPort);
   });
 
-  testWidgets('proxy controls stay visible in VPN mode', (tester) async {
+  testWidgets('VPN mode shows split tunneling and proxy controls', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       buildPanel(
         proxySettings: const ProxySettings(),
@@ -97,7 +108,92 @@ void main() {
       ),
     );
 
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('proxy_allow_lan_switch')),
+      200,
+      scrollable: settingsScrollView(),
+    );
+
+    expect(
+      find.byKey(const Key('split_tunnel_enabled_switch')),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('proxy_allow_lan_switch')), findsOneWidget);
+  });
+
+  testWidgets('local proxy mode hides split tunneling section', (tester) async {
+    await tester.pumpWidget(
+      buildPanel(
+        proxySettings: const ProxySettings(),
+        connectionMode: ConnectionMode.proxyOnly,
+      ),
+    );
+
+    expect(find.byKey(const Key('split_tunnel_enabled_switch')), findsNothing);
+    expect(find.text('Split tunneling'), findsNothing);
+  });
+
+  testWidgets('split-tunnel toggle emits updated settings', (tester) async {
+    SplitTunnelSettings? changed;
+
+    await tester.pumpWidget(
+      buildPanel(
+        proxySettings: const ProxySettings(),
+        connectionMode: ConnectionMode.vpnTunnel,
+        onSplitTunnelSettingsChanged: (value) {
+          changed = value;
+        },
+      ),
+    );
+
+    await tester.tap(find.byKey(const Key('split_tunnel_enabled_switch')));
+    await tester.pump();
+
+    expect(changed?.enabled, isTrue);
+    expect(changed?.mode, SplitTunnelMode.inclusive);
+  });
+
+  testWidgets('disabled split tunneling hides mode controls', (tester) async {
+    await tester.pumpWidget(
+      buildPanel(
+        proxySettings: const ProxySettings(),
+        connectionMode: ConnectionMode.vpnTunnel,
+      ),
+    );
+
+    expect(find.text('Mode'), findsNothing);
+    expect(find.text('Inclusive'), findsNothing);
+    expect(find.text('Exclusive'), findsNothing);
+    expect(find.text('Select apps using VPN'), findsNothing);
+    expect(find.text('Select apps outside VPN'), findsNothing);
+  });
+
+  testWidgets('enabled split tunneling shows mode controls', (tester) async {
+    await tester.pumpWidget(
+      buildPanel(
+        proxySettings: const ProxySettings(),
+        connectionMode: ConnectionMode.vpnTunnel,
+        splitTunnelSettings: const SplitTunnelSettings(enabled: true),
+      ),
+    );
+
+    expect(find.text('Mode'), findsOneWidget);
+    expect(find.text('Inclusive'), findsOneWidget);
+    expect(find.text('Exclusive'), findsOneWidget);
+  });
+
+  testWidgets('inclusive split tunneling shows validation subtitle', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildPanel(
+        proxySettings: const ProxySettings(),
+        connectionMode: ConnectionMode.vpnTunnel,
+        splitTunnelSettings: const SplitTunnelSettings(enabled: true),
+      ),
+    );
+
+    expect(find.textContaining('Choose at least one app'), findsOneWidget);
   });
 
   testWidgets('LAN switch emits updated proxy settings', (tester) async {
@@ -312,6 +408,31 @@ void main() {
     await tester.pump();
 
     expect(find.text('Enter a timeout greater than 0 ms'), findsOneWidget);
+  });
+
+  testWidgets('L2TP security notice tile is shown and opens callback', (
+    tester,
+  ) async {
+    var opened = false;
+
+    await tester.pumpWidget(
+      buildPanel(
+        proxySettings: const ProxySettings(),
+        onOpenL2tpSecurityNotice: () {
+          opened = true;
+        },
+      ),
+    );
+
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('l2tp_security_notice_tile')),
+      200,
+      scrollable: settingsScrollView(),
+    );
+    await tester.tap(find.byKey(const Key('l2tp_security_notice_tile')));
+    await tester.pump();
+
+    expect(opened, isTrue);
   });
 
   testWidgets('connectivity help text stays short and actionable', (

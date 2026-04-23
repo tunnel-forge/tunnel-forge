@@ -137,8 +137,14 @@ class TunnelVpnService : VpnService() {
                 val dnsServers = manualDnsServersFromIntent(intent)
                 val tunMtu = sanitizeMtu(intent.getIntExtra(EXTRA_MTU, DEFAULT_TUN_MTU))
                 val profileName = intent.getStringExtra(EXTRA_PROFILE_NAME)?.trim().orEmpty()
-                val routingMode = intent.getStringExtra(EXTRA_ROUTING_MODE) ?: VpnContract.ROUTING_FULL_TUNNEL
-                val allowedPackages = intent.getStringArrayListExtra(EXTRA_ALLOWED_PACKAGES)
+                val splitTunnelEnabled = intent.getBooleanExtra(EXTRA_SPLIT_TUNNEL_ENABLED, false)
+                val splitTunnelMode =
+                    intent.getStringExtra(EXTRA_SPLIT_TUNNEL_MODE)
+                        ?: VpnContract.SPLIT_TUNNEL_MODE_INCLUSIVE
+                val inclusivePackages =
+                    intent.getStringArrayListExtra(EXTRA_SPLIT_TUNNEL_INCLUSIVE_PACKAGES)
+                val exclusivePackages =
+                    intent.getStringArrayListExtra(EXTRA_SPLIT_TUNNEL_EXCLUSIVE_PACKAGES)
                 val proxyHttpPort =
                     ProxyTunnelService.sanitizePort(
                         intent.getIntExtra(EXTRA_PROXY_HTTP_PORT, ProxyTunnelService.DEFAULT_HTTP_PORT),
@@ -189,7 +195,7 @@ class TunnelVpnService : VpnService() {
                 VpnTunnelEvents.emitEngineLog(
                     Log.DEBUG,
                     TAG,
-                    "${prefixAttempt(attemptId)}ACTION_START accepted server=$server userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dnsMode=${if (dnsAutomatic) "automatic" else "manual"} dns=${dnsServers.joinToString(",") { "${it.host}[${it.protocol.shortLabel}]" }} mtu=$tunMtu routing=$routingMode http=${proxyConfig.httpPort} socks=${proxyConfig.socksPort} lan=${if (proxyAllowLan) "on" else "off"}",
+                    "${prefixAttempt(attemptId)}ACTION_START accepted server=$server userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dnsMode=${if (dnsAutomatic) "automatic" else "manual"} dns=${dnsServers.joinToString(",") { "${it.host}[${it.protocol.shortLabel}]" }} mtu=$tunMtu splitTunnelEnabled=$splitTunnelEnabled splitTunnelMode=$splitTunnelMode inclusiveApps=${inclusivePackages?.size ?: 0} exclusiveApps=${exclusivePackages?.size ?: 0} http=${proxyConfig.httpPort} socks=${proxyConfig.socksPort} lan=${if (proxyAllowLan) "on" else "off"}",
                 )
                 // TUN establish() can block; do not hold up onStartCommand after startForeground.
                 val startupThread =
@@ -204,8 +210,10 @@ class TunnelVpnService : VpnService() {
                                 dnsAutomatic,
                                 dnsServers,
                                 tunMtu,
-                                routingMode,
-                                allowedPackages,
+                                splitTunnelEnabled,
+                                splitTunnelMode,
+                                inclusivePackages,
+                                exclusivePackages,
                                 proxyConfig,
                             )
                         },
@@ -282,8 +290,10 @@ class TunnelVpnService : VpnService() {
         dnsAutomatic: Boolean,
         dnsServers: List<DnsServerConfig>,
         tunMtu: Int,
-        routingMode: String,
-        allowedPackages: ArrayList<String>?,
+        splitTunnelEnabled: Boolean,
+        splitTunnelMode: String,
+        inclusivePackages: ArrayList<String>?,
+        exclusivePackages: ArrayList<String>?,
         proxyConfig: ProxyRuntimeConfig,
     ) {
         val currentSetupThread = Thread.currentThread()
@@ -296,30 +306,42 @@ class TunnelVpnService : VpnService() {
             connectedEmitted.set(false)
             activeProxyConfig = proxyConfig
 
-            val requestedPerAppPkgs =
-                requestedPerAppPackages(
-                    routingMode = routingMode,
-                    allowedPackages = allowedPackages,
+            val requestedInclusivePkgs =
+                requestedInclusivePackages(
+                    splitTunnelEnabled = splitTunnelEnabled,
+                    splitTunnelMode = splitTunnelMode,
+                    inclusivePackages = inclusivePackages,
                 )
-            if (routingMode == VpnContract.ROUTING_PER_APP_ALLOW_LIST && requestedPerAppPkgs.isEmpty()) {
+            if (splitTunnelEnabled &&
+                splitTunnelMode == VpnContract.SPLIT_TUNNEL_MODE_INCLUSIVE &&
+                requestedInclusivePkgs.isEmpty()
+            ) {
                 emitAttemptState(
                     attemptId,
                     VpnContract.TUNNEL_FAILED,
-                    "Per-app VPN needs at least one app selected in the profile.",
+                    "Inclusive split tunneling needs at least one selected app.",
                 )
                 VpnTunnelEvents.emitEngineLog(
                     Log.ERROR,
                     TAG,
-                    "${prefixAttempt(attemptId)}Rejected start: per-app allow-list is empty",
+                    "${prefixAttempt(attemptId)}Rejected start: inclusive split-tunnel list is empty",
                 )
                 running.set(false)
                 stopServiceForAttempt(attemptId)
                 return
             }
-            val perAppPkgs =
-                effectivePerAppPackages(
-                    routingMode = routingMode,
-                    allowedPackages = allowedPackages,
+            val effectiveInclusivePkgs =
+                effectiveInclusivePackages(
+                    splitTunnelEnabled = splitTunnelEnabled,
+                    splitTunnelMode = splitTunnelMode,
+                    inclusivePackages = inclusivePackages,
+                    selfPackageName = packageName,
+                )
+            val effectiveExclusivePkgs =
+                effectiveExclusivePackages(
+                    splitTunnelEnabled = splitTunnelEnabled,
+                    splitTunnelMode = splitTunnelMode,
+                    exclusivePackages = exclusivePackages,
                     selfPackageName = packageName,
                 )
 
@@ -441,15 +463,32 @@ class TunnelVpnService : VpnService() {
                 VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}TUN allowFamily(AF_INET) IPv4-only")
             }
             applyExcludeRouteForVpnServer(builder, server)
-            if (routingMode == VpnContract.ROUTING_PER_APP_ALLOW_LIST) {
+            if (splitTunnelEnabled &&
+                splitTunnelMode == VpnContract.SPLIT_TUNNEL_MODE_INCLUSIVE
+            ) {
                 VpnTunnelEvents.emitEngineLog(
                     Log.DEBUG,
                     TAG,
-                    "${prefixAttempt(attemptId)}TUN per-app allow-list packages=${perAppPkgs.size} includesSelf=${perAppPkgs.contains(packageName)}",
+                    "${prefixAttempt(attemptId)}TUN split-tunnel inclusive packages=${effectiveInclusivePkgs.size} includesSelf=${effectiveInclusivePkgs.contains(packageName)}",
                 )
-                for (pkg in perAppPkgs) {
+                for (pkg in effectiveInclusivePkgs) {
                     try {
                         builder.addAllowedApplication(pkg)
+                    } catch (e: PackageManager.NameNotFoundException) {
+                        throw IllegalArgumentException("Package not installed: $pkg")
+                    }
+                }
+            } else if (splitTunnelEnabled &&
+                splitTunnelMode == VpnContract.SPLIT_TUNNEL_MODE_EXCLUSIVE
+            ) {
+                VpnTunnelEvents.emitEngineLog(
+                    Log.DEBUG,
+                    TAG,
+                    "${prefixAttempt(attemptId)}TUN split-tunnel exclusive packages=${effectiveExclusivePkgs.size}",
+                )
+                for (pkg in effectiveExclusivePkgs) {
+                    try {
+                        builder.addDisallowedApplication(pkg)
                     } catch (e: PackageManager.NameNotFoundException) {
                         throw IllegalArgumentException("Package not installed: $pkg")
                     }
@@ -842,8 +881,10 @@ class TunnelVpnService : VpnService() {
         const val EXTRA_DNS_SERVER_2_PROTOCOL = "dnsServer2Protocol"
         const val EXTRA_MTU = "mtu"
         const val EXTRA_PROFILE_NAME = "profileName"
-        const val EXTRA_ROUTING_MODE = "routingMode"
-        const val EXTRA_ALLOWED_PACKAGES = "allowedPackages"
+        const val EXTRA_SPLIT_TUNNEL_ENABLED = "splitTunnelEnabled"
+        const val EXTRA_SPLIT_TUNNEL_MODE = "splitTunnelMode"
+        const val EXTRA_SPLIT_TUNNEL_INCLUSIVE_PACKAGES = "splitTunnelInclusivePackages"
+        const val EXTRA_SPLIT_TUNNEL_EXCLUSIVE_PACKAGES = "splitTunnelExclusivePackages"
         const val EXTRA_PROXY_HTTP_PORT = "proxyHttpPort"
         const val EXTRA_PROXY_SOCKS_PORT = "proxySocksPort"
         const val EXTRA_PROXY_ALLOW_LAN = "proxyAllowLan"
@@ -862,27 +903,71 @@ class TunnelVpnService : VpnService() {
 
         fun sanitizeMtu(value: Int): Int = value.coerceIn(MIN_TUN_MTU, MAX_TUN_MTU)
 
-        internal fun requestedPerAppPackages(
-            routingMode: String,
-            allowedPackages: List<String>?,
+        private fun normalizedPackages(packages: List<String>?): List<String> =
+            packages
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.distinct()
+                .orEmpty()
+
+        internal fun requestedInclusivePackages(
+            splitTunnelEnabled: Boolean,
+            splitTunnelMode: String,
+            inclusivePackages: List<String>?,
         ): List<String> =
-            if (routingMode == VpnContract.ROUTING_PER_APP_ALLOW_LIST) {
-                allowedPackages
-                    ?.map { it.trim() }
-                    ?.filter { it.isNotEmpty() }
-                    ?.distinct()
-                    .orEmpty()
+            if (splitTunnelEnabled &&
+                splitTunnelMode == VpnContract.SPLIT_TUNNEL_MODE_INCLUSIVE
+            ) {
+                normalizedPackages(inclusivePackages)
             } else {
                 emptyList()
             }
 
-        internal fun effectivePerAppPackages(
-            routingMode: String,
-            allowedPackages: List<String>?,
+        internal fun effectiveInclusivePackages(
+            splitTunnelEnabled: Boolean,
+            splitTunnelMode: String,
+            inclusivePackages: List<String>?,
             selfPackageName: String,
         ): List<String> =
-            if (routingMode == VpnContract.ROUTING_PER_APP_ALLOW_LIST) {
-                (requestedPerAppPackages(routingMode, allowedPackages) + selfPackageName).distinct()
+            if (splitTunnelEnabled &&
+                splitTunnelMode == VpnContract.SPLIT_TUNNEL_MODE_INCLUSIVE
+            ) {
+                (requestedInclusivePackages(splitTunnelEnabled, splitTunnelMode, inclusivePackages) + selfPackageName)
+                    .distinct()
+            } else {
+                emptyList()
+            }
+
+        internal fun requestedExclusivePackages(
+            splitTunnelEnabled: Boolean,
+            splitTunnelMode: String,
+            exclusivePackages: List<String>?,
+            selfPackageName: String,
+        ): List<String> =
+            if (splitTunnelEnabled &&
+                splitTunnelMode == VpnContract.SPLIT_TUNNEL_MODE_EXCLUSIVE
+            ) {
+                normalizedPackages(exclusivePackages)
+                    .filterNot { it == selfPackageName }
+            } else {
+                emptyList()
+            }
+
+        internal fun effectiveExclusivePackages(
+            splitTunnelEnabled: Boolean,
+            splitTunnelMode: String,
+            exclusivePackages: List<String>?,
+            selfPackageName: String,
+        ): List<String> =
+            if (splitTunnelEnabled &&
+                splitTunnelMode == VpnContract.SPLIT_TUNNEL_MODE_EXCLUSIVE
+            ) {
+                requestedExclusivePackages(
+                    splitTunnelEnabled = splitTunnelEnabled,
+                    splitTunnelMode = splitTunnelMode,
+                    exclusivePackages = exclusivePackages,
+                    selfPackageName = selfPackageName,
+                )
             } else {
                 emptyList()
             }

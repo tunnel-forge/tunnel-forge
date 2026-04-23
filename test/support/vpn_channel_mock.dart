@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:tunnel_forge/vpn_contract.dart';
 
-/// Registers a mock [VpnContract.channel] handler for widget and integration tests.
+/// Registers a mock [VpnContract.channel] handler for widget tests.
 ///
 /// [prepareResult] is returned for [VpnContract.prepareVpn] (defaults to `true`).
 /// [onConnect] can throw [PlatformException] or return `null` like the real host.

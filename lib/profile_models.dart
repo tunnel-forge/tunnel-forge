@@ -15,20 +15,93 @@ enum ConnectionMode {
   }
 }
 
-/// Android routing: entire device vs. selected apps only ([RoutingMode.perAppAllowList]).
-enum RoutingMode {
-  fullTunnel('fullTunnel'),
-  perAppAllowList('perAppAllowList');
+/// Split-tunneling behavior when it is enabled.
+enum SplitTunnelMode {
+  inclusive('inclusive'),
+  exclusive('exclusive');
 
-  const RoutingMode(this.jsonValue);
+  const SplitTunnelMode(this.jsonValue);
   final String jsonValue;
 
-  static RoutingMode fromJson(Object? raw) {
-    if (raw is! String) return RoutingMode.fullTunnel;
+  static SplitTunnelMode fromJson(Object? raw) {
+    if (raw is! String) return SplitTunnelMode.inclusive;
     return switch (raw) {
-      'perAppAllowList' => RoutingMode.perAppAllowList,
-      _ => RoutingMode.fullTunnel,
+      'exclusive' => SplitTunnelMode.exclusive,
+      _ => SplitTunnelMode.inclusive,
     };
+  }
+}
+
+/// Global split-tunneling settings shared across profiles.
+class SplitTunnelSettings {
+  const SplitTunnelSettings({
+    this.enabled = false,
+    this.mode = SplitTunnelMode.inclusive,
+    this.inclusivePackages = const <String>[],
+    this.exclusivePackages = const <String>[],
+  });
+
+  final bool enabled;
+  final SplitTunnelMode mode;
+  final List<String> inclusivePackages;
+  final List<String> exclusivePackages;
+
+  List<String> get activePackages =>
+      mode == SplitTunnelMode.inclusive ? inclusivePackages : exclusivePackages;
+
+  SplitTunnelSettings copyWith({
+    bool? enabled,
+    SplitTunnelMode? mode,
+    List<String>? inclusivePackages,
+    List<String>? exclusivePackages,
+  }) {
+    return SplitTunnelSettings(
+      enabled: enabled ?? this.enabled,
+      mode: mode ?? this.mode,
+      inclusivePackages: normalizePackages(
+        inclusivePackages ?? this.inclusivePackages,
+      ),
+      exclusivePackages: normalizePackages(
+        exclusivePackages ?? this.exclusivePackages,
+      ),
+    );
+  }
+
+  static List<String> normalizePackages(Iterable<String> packages) {
+    final next =
+        packages
+            .map((value) => value.trim())
+            .where((value) => value.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+    return List<String>.unmodifiable(next);
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is SplitTunnelSettings &&
+        enabled == other.enabled &&
+        mode == other.mode &&
+        _sameStringList(inclusivePackages, other.inclusivePackages) &&
+        _sameStringList(exclusivePackages, other.exclusivePackages);
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    enabled,
+    mode,
+    Object.hashAll(inclusivePackages),
+    Object.hashAll(exclusivePackages),
+  );
+
+  static bool _sameStringList(List<String> a, List<String> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 }
 

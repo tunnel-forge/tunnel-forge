@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../../app_info_bridge.dart';
 import '../../../connectivity_checker.dart';
 import '../../../profile_models.dart';
 import '../../../profile_store.dart';
@@ -130,6 +134,11 @@ class SettingsRepositoryImpl implements SettingsRepository {
   }
 
   @override
+  Future<SplitTunnelSettings> loadSplitTunnelSettings() {
+    return _profileStore.loadSplitTunnelSettings();
+  }
+
+  @override
   Future<void> saveConnectionMode(ConnectionMode mode) {
     return _profileStore.saveConnectionMode(mode);
   }
@@ -149,6 +158,227 @@ class SettingsRepositoryImpl implements SettingsRepository {
   @override
   Future<void> saveProxySettings(ProxySettings settings) {
     return _profileStore.saveProxySettings(settings);
+  }
+
+  @override
+  Future<void> saveSplitTunnelSettings(SplitTunnelSettings settings) {
+    return _profileStore.saveSplitTunnelSettings(settings);
+  }
+}
+
+class AppVersionRepositoryImpl implements AppVersionRepository {
+  AppVersionRepositoryImpl({
+    Future<PackageInfo> Function()? packageInfoLoader,
+    Future<({String? versionName, String? buildNumber})> Function()?
+    nativeVersionLoader,
+  }) : _packageInfoLoader = packageInfoLoader ?? PackageInfo.fromPlatform,
+       _nativeVersionLoader =
+           nativeVersionLoader ?? AppInfoBridge().loadInstalledVersion;
+
+  final Future<PackageInfo> Function() _packageInfoLoader;
+  final Future<({String? versionName, String? buildNumber})> Function()
+  _nativeVersionLoader;
+
+  @override
+  Future<AppVersionInfo> loadInstalledVersion() async {
+    Object? packageInfoError;
+    try {
+      final info = await _packageInfoLoader();
+      final displayVersion = _displayVersion(
+        versionName: info.version,
+        buildNumber: info.buildNumber,
+      );
+      if (displayVersion != null) {
+        return AppVersionInfo(
+          displayVersion: displayVersion,
+          semanticVersion: SemanticVersion.tryParse(displayVersion),
+        );
+      }
+      packageInfoError = const FormatException(
+        'package_info_plus returned an empty version.',
+      );
+    } catch (error) {
+      packageInfoError = error;
+    }
+
+    try {
+      final native = await _nativeVersionLoader();
+      final displayVersion = _displayVersion(
+        versionName: native.versionName,
+        buildNumber: native.buildNumber,
+      );
+      if (displayVersion != null) {
+        return AppVersionInfo(
+          displayVersion: displayVersion,
+          semanticVersion: SemanticVersion.tryParse(displayVersion),
+        );
+      }
+      return AppVersionInfo(
+        semanticVersion: null,
+        errorReason:
+            'Installed version unavailable. Native version lookup returned empty values.',
+      );
+    } catch (nativeError) {
+      return AppVersionInfo(
+        semanticVersion: null,
+        errorReason: _versionErrorReason(packageInfoError, nativeError),
+      );
+    }
+  }
+
+  static String? _displayVersion({
+    required String? versionName,
+    required String? buildNumber,
+  }) {
+    final version = versionName?.trim() ?? '';
+    final build = buildNumber?.trim() ?? '';
+    return switch ((version.isEmpty, build.isEmpty)) {
+      (false, false) => '$version+$build',
+      (false, true) => version,
+      (true, false) => build,
+      _ => null,
+    };
+  }
+
+  static String _versionErrorReason(
+    Object? packageInfoError,
+    Object nativeError,
+  ) {
+    final packageInfoMessage = packageInfoError == null
+        ? 'package_info_plus reason unavailable'
+        : packageInfoError.toString();
+    return 'Installed version unavailable. package_info_plus failed: $packageInfoMessage. Native fallback failed: ${nativeError.toString()}.';
+  }
+}
+
+class AppUpdateRepositoryImpl implements AppUpdateRepository {
+  AppUpdateRepositoryImpl({
+    Future<String> Function(Uri uri)? fetcher,
+    this.owner = 'evokelektrique',
+    this.repo = 'tunnel-forge',
+  }) : _fetcher = fetcher ?? _fetchJson;
+
+  final Future<String> Function(Uri uri) _fetcher;
+  final String owner;
+  final String repo;
+
+  @override
+  Future<AppReleaseInfo> fetchLatestRelease() async {
+    final uri = Uri.https('api.github.com', '/repos/$owner/$repo/releases');
+    final body = await _fetcher(uri);
+    final Object decoded;
+    try {
+      decoded = jsonDecode(body);
+    } on FormatException catch (error) {
+      throw AppUpdateException(
+        kind: AppUpdateErrorKind.response,
+        userMessage: 'GitHub Releases returned malformed data.',
+        details: error.message,
+      );
+    }
+    if (decoded is! List) {
+      throw const AppUpdateException(
+        kind: AppUpdateErrorKind.response,
+        userMessage: 'GitHub Releases returned malformed data.',
+        details: 'Expected a GitHub releases list.',
+      );
+    }
+
+    final releases =
+        decoded
+            .whereType<Map>()
+            .map((entry) => _parseRelease(Map<String, dynamic>.from(entry)))
+            .whereType<AppReleaseInfo>()
+            .toList()
+          ..sort(
+            (left, right) => right.publishedAt.compareTo(left.publishedAt),
+          );
+
+    if (releases.isEmpty) {
+      throw const AppUpdateException(
+        kind: AppUpdateErrorKind.response,
+        userMessage: 'GitHub Releases returned no usable releases.',
+        details: 'No valid published releases were found.',
+      );
+    }
+
+    return releases.first;
+  }
+
+  AppReleaseInfo? _parseRelease(Map<String, dynamic> json) {
+    if (json['draft'] == true) return null;
+
+    final publishedAtValue = json['published_at'] as String?;
+    final htmlUrl = json['html_url'] as String?;
+    final tagName = json['tag_name'] as String?;
+    if (publishedAtValue == null || htmlUrl == null || tagName == null) {
+      return null;
+    }
+
+    final publishedAt = DateTime.tryParse(publishedAtValue);
+    final version = SemanticVersion.tryParse(tagName);
+    if (publishedAt == null || version == null) return null;
+
+    return AppReleaseInfo(
+      version: version,
+      htmlUrl: htmlUrl,
+      publishedAt: publishedAt,
+      prerelease: json['prerelease'] == true,
+    );
+  }
+
+  static Future<String> _fetchJson(Uri uri) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    try {
+      final request = await client.getUrl(uri);
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers.set(HttpHeaders.userAgentHeader, 'TunnelForgeApp/1.0');
+      request.headers.set('X-GitHub-Api-Version', '2022-11-28');
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw AppUpdateException(
+          kind: AppUpdateErrorKind.http,
+          userMessage: 'GitHub Releases returned HTTP ${response.statusCode}.',
+          statusCode: response.statusCode,
+          details: body.isEmpty ? null : body,
+        );
+      }
+      return body;
+    } on TimeoutException {
+      throw const AppUpdateException(
+        kind: AppUpdateErrorKind.timeout,
+        userMessage: 'GitHub Releases request timed out.',
+      );
+    } on HandshakeException catch (error) {
+      throw AppUpdateException(
+        kind: AppUpdateErrorKind.tls,
+        userMessage: 'Secure connection to GitHub Releases failed.',
+        details: error.message,
+      );
+    } on SocketException catch (error) {
+      throw AppUpdateException(
+        kind: AppUpdateErrorKind.network,
+        userMessage: 'Network error while contacting GitHub Releases.',
+        details: error.message,
+      );
+    } on AppUpdateException {
+      rethrow;
+    } on FormatException catch (error) {
+      throw AppUpdateException(
+        kind: AppUpdateErrorKind.response,
+        userMessage: 'GitHub Releases returned malformed data.',
+        details: error.message,
+      );
+    } catch (error) {
+      throw AppUpdateException(
+        kind: AppUpdateErrorKind.unknown,
+        userMessage: 'Unexpected error while checking GitHub Releases.',
+        details: error.toString(),
+      );
+    } finally {
+      client.close(force: true);
+    }
   }
 }
 
@@ -213,8 +443,7 @@ class TunnelRepositoryImpl implements TunnelRepository {
       dnsAutomatic: request.dnsAutomatic,
       dnsServers: request.dnsServers,
       mtu: request.mtu,
-      routingMode: request.routingMode,
-      allowedAppPackages: request.allowedAppPackages,
+      splitTunnelSettings: request.splitTunnelSettings,
       proxySettings: request.proxySettings,
     );
   }

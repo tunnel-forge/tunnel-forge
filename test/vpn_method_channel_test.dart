@@ -110,12 +110,27 @@ void main() {
         args[VpnContract.argConnectionMode],
         ConnectionMode.vpnTunnel.jsonValue,
       );
+      expect(args[VpnContract.argSplitTunnelEnabled], isFalse);
       expect(
-        args[VpnContract.argRoutingMode],
-        RoutingMode.fullTunnel.jsonValue,
+        args[VpnContract.argSplitTunnelMode],
+        SplitTunnelMode.inclusive.jsonValue,
       );
-      expect(args[VpnContract.argAllowedPackages], isA<List<Object?>>());
-      expect((args[VpnContract.argAllowedPackages] as List).isEmpty, isTrue);
+      expect(
+        args[VpnContract.argSplitTunnelInclusivePackages],
+        isA<List<Object?>>(),
+      );
+      expect(
+        (args[VpnContract.argSplitTunnelInclusivePackages] as List).isEmpty,
+        isTrue,
+      );
+      expect(
+        args[VpnContract.argSplitTunnelExclusivePackages],
+        isA<List<Object?>>(),
+      );
+      expect(
+        (args[VpnContract.argSplitTunnelExclusivePackages] as List).isEmpty,
+        isTrue,
+      );
       expect(args[VpnContract.argProxyHttpPort], ProxySettings.defaultHttpPort);
       expect(
         args[VpnContract.argProxySocksPort],
@@ -124,20 +139,27 @@ void main() {
       expect(args[VpnContract.argProxyAllowLan], isFalse);
     });
 
-    test('connect map includes per-app routing', () async {
+    test('connect map includes split-tunnel settings', () async {
       final client = VpnClient();
       await client.connect(
         server: '10.0.0.1',
-        routingMode: RoutingMode.perAppAllowList,
-        allowedAppPackages: const ['com.example.a', 'com.example.b'],
+        splitTunnelSettings: const SplitTunnelSettings(
+          enabled: true,
+          mode: SplitTunnelMode.exclusive,
+          inclusivePackages: ['com.example.a'],
+          exclusivePackages: ['com.example.b'],
+        ),
       );
       final args = calls.single.arguments as Map;
+      expect(args[VpnContract.argSplitTunnelEnabled], isTrue);
       expect(
-        args[VpnContract.argRoutingMode],
-        RoutingMode.perAppAllowList.jsonValue,
+        args[VpnContract.argSplitTunnelMode],
+        SplitTunnelMode.exclusive.jsonValue,
       );
-      expect(args[VpnContract.argAllowedPackages], [
+      expect(args[VpnContract.argSplitTunnelInclusivePackages], [
         'com.example.a',
+      ]);
+      expect(args[VpnContract.argSplitTunnelExclusivePackages], [
         'com.example.b',
       ]);
     });

@@ -31,12 +31,22 @@ abstract class SettingsRepository {
   Future<void> saveConnectionMode(ConnectionMode mode);
   Future<ProxySettings> loadProxySettings();
   Future<void> saveProxySettings(ProxySettings settings);
+  Future<SplitTunnelSettings> loadSplitTunnelSettings();
+  Future<void> saveSplitTunnelSettings(SplitTunnelSettings settings);
   Future<ConnectivityCheckSettings> loadConnectivityCheckSettings();
   Future<void> saveConnectivityCheckSettings(
     ConnectivityCheckSettings settings,
   );
   Future<LogDisplayLevel> loadLogDisplayLevel();
   Future<void> saveLogDisplayLevel(LogDisplayLevel level);
+}
+
+abstract class AppVersionRepository {
+  Future<AppVersionInfo> loadInstalledVersion();
+}
+
+abstract class AppUpdateRepository {
+  Future<AppReleaseInfo> fetchLatestRelease();
 }
 
 abstract class TunnelRepository {

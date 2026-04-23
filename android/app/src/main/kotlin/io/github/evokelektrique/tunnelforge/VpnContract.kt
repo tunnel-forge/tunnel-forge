@@ -27,21 +27,20 @@ object VpnContract {
     const val ARG_PROXY_HTTP_PORT = "proxyHttpPort"
     const val ARG_PROXY_SOCKS_PORT = "proxySocksPort"
     const val ARG_PROXY_ALLOW_LAN = "proxyAllowLan"
-
-    /** `fullTunnel` or `perAppAllowList` - must match Dart `RoutingMode`. */
-    const val ARG_ROUTING_MODE = "routingMode"
-
-    const val ARG_ALLOWED_PACKAGES = "allowedPackages"
+    const val ARG_SPLIT_TUNNEL_ENABLED = "splitTunnelEnabled"
+    const val ARG_SPLIT_TUNNEL_MODE = "splitTunnelMode"
+    const val ARG_SPLIT_TUNNEL_INCLUSIVE_PACKAGES = "splitTunnelInclusivePackages"
+    const val ARG_SPLIT_TUNNEL_EXCLUSIVE_PACKAGES = "splitTunnelExclusivePackages"
 
     const val LIST_VPN_CANDIDATE_APPS = "listVpnCandidateApps"
 
     /** Flutter passes package name as the method argument (String). Returns PNG bytes or null. */
     const val GET_APP_ICON = "getAppIcon"
 
-    const val ROUTING_FULL_TUNNEL = "fullTunnel"
-    const val ROUTING_PER_APP_ALLOW_LIST = "perAppAllowList"
     const val MODE_VPN_TUNNEL = "vpnTunnel"
     const val MODE_PROXY_ONLY = "proxyOnly"
+    const val SPLIT_TUNNEL_MODE_INCLUSIVE = "inclusive"
+    const val SPLIT_TUNNEL_MODE_EXCLUSIVE = "exclusive"
 
     /** Flutter [MethodChannel.invokeMethod] from Android -> Dart. */
     const val ON_TUNNEL_STATE = "onTunnelState"

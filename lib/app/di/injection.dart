@@ -6,6 +6,11 @@ import '../../connectivity_checker.dart';
 import '../../profile_store.dart';
 import '../../profile_transfer_bridge.dart';
 import '../../vpn_client.dart';
+import '../../features/onboarding/data/shared_prefs_onboarding_repository.dart';
+import '../../features/onboarding/data/system_app_exit_controller.dart';
+import '../../features/onboarding/domain/app_exit_controller.dart';
+import '../../features/onboarding/domain/onboarding_repository.dart';
+import '../../features/onboarding/presentation/bloc/onboarding_bloc.dart';
 import '../../features/app_theme/data/shared_prefs_theme_repository.dart';
 import '../../features/app_theme/domain/theme_repository.dart';
 import '../../features/app_theme/presentation/bloc/app_theme_bloc.dart';
@@ -23,6 +28,10 @@ GetIt createAppLocator({
   ConnectivityChecker? connectivityChecker,
   VpnClient? vpnClient,
   ProfileTransferBridge? profileTransferBridge,
+  AppVersionRepository? appVersionRepository,
+  AppUpdateRepository? appUpdateRepository,
+  OnboardingRepository? onboardingRepository,
+  AppExitController? appExitController,
 }) {
   final locator = GetIt.asNewInstance();
 
@@ -35,11 +44,23 @@ GetIt createAppLocator({
   locator.registerLazySingleton<ThemeRepository>(
     SharedPrefsThemeRepository.new,
   );
+  locator.registerLazySingleton<OnboardingRepository>(
+    () => onboardingRepository ?? SharedPrefsOnboardingRepository(),
+  );
+  locator.registerLazySingleton<AppExitController>(
+    () => appExitController ?? SystemAppExitController(),
+  );
   locator.registerLazySingleton<ProfilesRepository>(
     () => ProfilesRepositoryImpl(locator<ProfileStore>()),
   );
   locator.registerLazySingleton<SettingsRepository>(
     () => SettingsRepositoryImpl(locator<ProfileStore>()),
+  );
+  locator.registerLazySingleton<AppVersionRepository>(
+    () => appVersionRepository ?? AppVersionRepositoryImpl(),
+  );
+  locator.registerLazySingleton<AppUpdateRepository>(
+    () => appUpdateRepository ?? AppUpdateRepositoryImpl(),
   );
   locator.registerLazySingleton<TunnelRepository>(
     () => TunnelRepositoryImpl(client: vpnClient),
@@ -57,6 +78,12 @@ GetIt createAppLocator({
   locator.registerFactory<AppThemeBloc>(
     () => AppThemeBloc(locator<ThemeRepository>()),
   );
+  locator.registerFactory<OnboardingBloc>(
+    () => OnboardingBloc(
+      locator<OnboardingRepository>(),
+      locator<AppExitController>(),
+    ),
+  );
   locator.registerFactory<HomeNavBloc>(HomeNavBloc.new);
   locator.registerFactory<ProfilesBloc>(
     () => ProfilesBloc(
@@ -65,7 +92,12 @@ GetIt createAppLocator({
     ),
   );
   locator.registerFactory<SettingsBloc>(
-    () => SettingsBloc(locator<SettingsRepository>()),
+    () => SettingsBloc(
+      locator<SettingsRepository>(),
+      locator<AppVersionRepository>(),
+      locator<AppUpdateRepository>(),
+      locator<LogsRepository>(),
+    ),
   );
   locator.registerFactory<LogsBloc>(
     () => LogsBloc(

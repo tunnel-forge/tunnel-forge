@@ -24,10 +24,7 @@ final class AppSelectorQueryChanged extends AppSelectorEvent {
 }
 
 final class AppSelectorToggled extends AppSelectorEvent {
-  const AppSelectorToggled({
-    required this.packageName,
-    required this.selected,
-  });
+  const AppSelectorToggled({required this.packageName, required this.selected});
 
   final String packageName;
   final bool selected;

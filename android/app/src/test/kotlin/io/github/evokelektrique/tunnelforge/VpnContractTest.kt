@@ -28,12 +28,20 @@ class VpnContractTest {
         assertEquals("proxyHttpPort", VpnContract.ARG_PROXY_HTTP_PORT)
         assertEquals("proxySocksPort", VpnContract.ARG_PROXY_SOCKS_PORT)
         assertEquals("proxyAllowLan", VpnContract.ARG_PROXY_ALLOW_LAN)
-        assertEquals("routingMode", VpnContract.ARG_ROUTING_MODE)
-        assertEquals("allowedPackages", VpnContract.ARG_ALLOWED_PACKAGES)
+        assertEquals("splitTunnelEnabled", VpnContract.ARG_SPLIT_TUNNEL_ENABLED)
+        assertEquals("splitTunnelMode", VpnContract.ARG_SPLIT_TUNNEL_MODE)
+        assertEquals(
+            "splitTunnelInclusivePackages",
+            VpnContract.ARG_SPLIT_TUNNEL_INCLUSIVE_PACKAGES,
+        )
+        assertEquals(
+            "splitTunnelExclusivePackages",
+            VpnContract.ARG_SPLIT_TUNNEL_EXCLUSIVE_PACKAGES,
+        )
         assertEquals("vpnTunnel", VpnContract.MODE_VPN_TUNNEL)
         assertEquals("proxyOnly", VpnContract.MODE_PROXY_ONLY)
-        assertEquals("fullTunnel", VpnContract.ROUTING_FULL_TUNNEL)
-        assertEquals("perAppAllowList", VpnContract.ROUTING_PER_APP_ALLOW_LIST)
+        assertEquals("inclusive", VpnContract.SPLIT_TUNNEL_MODE_INCLUSIVE)
+        assertEquals("exclusive", VpnContract.SPLIT_TUNNEL_MODE_EXCLUSIVE)
     }
 
     @Test
