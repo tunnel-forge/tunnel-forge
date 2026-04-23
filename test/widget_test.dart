@@ -703,6 +703,11 @@ void main() {
         },
       ]),
       ProfileStore.prefsKeyLastProfileId: 'widget_test_per_app_connectivity',
+      ProfileStore.prefsKeySplitTunnelEnabled: true,
+      ProfileStore.prefsKeySplitTunnelMode: SplitTunnelMode.inclusive.jsonValue,
+      ProfileStore.prefsKeySplitTunnelInclusivePackages: const <String>[
+        'com.example.allowed',
+      ],
     });
     final checker = FakeConnectivityChecker();
     installVpnChannelMock(<String>[]);
@@ -721,10 +726,6 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     }
 
-    await tester.tap(find.text('Settings'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Inclusive'));
-    await tester.pumpAndSettle();
     await simulateHostTunnelState(tester, VpnTunnelState.connected, 'tun0');
     await tester.pump();
 
