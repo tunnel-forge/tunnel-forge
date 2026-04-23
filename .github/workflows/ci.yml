@@ -126,7 +126,7 @@ jobs:
 
       - name: Run Android JVM tests
         working-directory: android
-        run: ./gradlew --stacktrace testDebugUnitTest
+        run: ./gradlew --stacktrace :app:testDebugUnitTest
 
       - name: Upload Android test results to Codecov
         if: ${{ !cancelled() }}
