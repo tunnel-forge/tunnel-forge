@@ -128,12 +128,8 @@ void main() {
       await tester.pump();
       expect(repository.savedVersion, isNull);
 
-      await tester.ensureVisible(
-        find.text('I understand the L2TP risk.'),
-      );
-      await tester.tap(
-        find.text('I understand the L2TP risk.'),
-      );
+      await tester.ensureVisible(find.text('I understand the L2TP risk.'));
+      await tester.tap(find.text('I understand the L2TP risk.'));
       await tester.pump();
       expect(
         find.text('Confirm in ${kOnboardingAgreeCountdownSeconds}s'),

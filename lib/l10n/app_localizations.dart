@@ -192,10 +192,8 @@ extension AppStrings on AppLocalizations {
     'Use this option only when compatibility is required and no stronger protocol is available.',
     'فقط زمانی از آن استفاده کنید که سرویس شما گزینه بهتری ارائه نمی‌دهد.',
   );
-  String get introCheckbox => AppText.pick(
-    'Keep VPN profiles organized.',
-    'پروفایل‌ها مرتب می‌مانند.',
-  );
+  String get introCheckbox =>
+      AppText.pick('Keep VPN profiles organized.', 'پروفایل‌ها مرتب می‌مانند.');
   String get riskCheckbox => AppText.pick(
     'I understand the L2TP risk.',
     'محدودیت امنیتی L2TP را می‌دانم.',

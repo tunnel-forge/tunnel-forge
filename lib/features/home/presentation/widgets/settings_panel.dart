@@ -728,8 +728,8 @@ class _SettingsPanelState extends State<SettingsPanel> {
         ),
       AppUpdateStatus.error =>
         widget.updateErrorMessage == null
-        ? t.couldNotCheckUpdates
-        : t.updateCheckError(widget.updateErrorMessage!),
+            ? t.couldNotCheckUpdates
+            : t.updateCheckError(widget.updateErrorMessage!),
       _ => t.checkGithubReleases,
     };
   }

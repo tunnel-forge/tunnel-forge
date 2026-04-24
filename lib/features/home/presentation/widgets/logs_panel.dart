@@ -184,10 +184,7 @@ class _LogsPanelState extends State<LogsPanel> {
     return Stack(
       children: [
         SelectionArea(
-          child: Directionality(
-            textDirection: TextDirection.ltr,
-            child: body,
-          ),
+          child: Directionality(textDirection: TextDirection.ltr, child: body),
         ),
         if (!widget.stickToBottom)
           Positioned(
