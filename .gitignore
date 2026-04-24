@@ -57,3 +57,4 @@ app.*.map.json
 # Android signing keys
 upload-keystore.jks
 upload-keystore.jks.base64
+android/.kotlin/
