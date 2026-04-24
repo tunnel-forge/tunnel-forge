@@ -5,9 +5,9 @@ import 'package:bloc_test/bloc_test.dart';
 import 'package:tunnel_forge/features/home/domain/home_models.dart';
 import 'package:tunnel_forge/features/home/domain/home_repositories.dart';
 import 'package:tunnel_forge/features/home/presentation/bloc/tunnel_bloc.dart';
-import 'package:tunnel_forge/profile_models.dart';
-import 'package:tunnel_forge/utils/log_entry.dart';
-import 'package:tunnel_forge/vpn_contract.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
+import 'package:tunnel_forge/core/logging/log_entry.dart';
+import 'package:tunnel_forge/features/tunnel/data/vpn_contract.dart';
 
 void main() {
   blocTest<TunnelBloc, TunnelState>(

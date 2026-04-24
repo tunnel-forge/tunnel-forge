@@ -6,16 +6,16 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:tunnel_forge/connectivity_checker.dart';
+import 'package:tunnel_forge/core/network/connectivity_checker.dart';
 import 'package:tunnel_forge/features/home/domain/home_models.dart';
 import 'package:tunnel_forge/features/home/domain/home_repositories.dart';
 import 'package:tunnel_forge/features/onboarding/domain/onboarding_repository.dart';
 import 'package:tunnel_forge/main.dart';
-import 'package:tunnel_forge/profile_models.dart';
-import 'package:tunnel_forge/profile_store.dart';
-import 'package:tunnel_forge/theme.dart';
-import 'package:tunnel_forge/vpn_contract.dart';
-import 'package:tunnel_forge/widgets/connection_panel.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
+import 'package:tunnel_forge/features/profiles/data/profile_store.dart';
+import 'package:tunnel_forge/app/theme/app_theme.dart';
+import 'package:tunnel_forge/features/tunnel/data/vpn_contract.dart';
+import 'package:tunnel_forge/features/home/presentation/widgets/connection_panel.dart';
 
 import 'support/host_to_dart_channel.dart';
 import 'support/vpn_channel_mock.dart';

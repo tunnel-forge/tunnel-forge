@@ -3,10 +3,10 @@ import 'dart:async';
 import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
 
-import '../../../../l10n/app_localizations.dart';
-import '../../../../profile_models.dart';
-import '../../../../profile_transfer.dart';
-import '../../../../profile_transfer_contract.dart';
+import 'package:tunnel_forge/l10n/app_localizations.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_transfer.dart';
+import 'package:tunnel_forge/features/profiles/data/profile_transfer_contract.dart';
 import '../../../home/data/home_repositories_impl.dart';
 import '../../../home/domain/home_models.dart';
 import '../../../home/domain/home_repositories.dart';

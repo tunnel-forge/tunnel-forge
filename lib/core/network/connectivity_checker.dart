@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:equatable/equatable.dart';
 
-import 'profile_models.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
 
 class ConnectivityPingResult {
   const ConnectivityPingResult({

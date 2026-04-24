@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../l10n/app_localizations.dart';
-import '../utils/log_entry.dart';
+import 'package:tunnel_forge/l10n/app_localizations.dart';
+import 'package:tunnel_forge/core/logging/log_entry.dart';
 
 /// Monospace log viewer with optional horizontal scroll when word wrap is off.
 class LogsPanel extends StatefulWidget {

@@ -1,6 +1,6 @@
 import 'package:flutter/services.dart';
 
-import 'app_info_contract.dart';
+import 'package:tunnel_forge/core/platform/app_info_contract.dart';
 
 class AppInfoBridge {
   AppInfoBridge({MethodChannel? channel})

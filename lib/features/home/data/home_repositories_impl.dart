@@ -6,14 +6,14 @@ import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../../app_info_bridge.dart';
-import '../../../connectivity_checker.dart';
-import '../../../profile_models.dart';
-import '../../../profile_store.dart';
-import '../../../profile_transfer.dart';
-import '../../../profile_transfer_bridge.dart';
-import '../../../utils/log_entry.dart';
-import '../../../vpn_client.dart';
+import 'package:tunnel_forge/core/platform/app_info_bridge.dart';
+import 'package:tunnel_forge/core/network/connectivity_checker.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
+import 'package:tunnel_forge/features/profiles/data/profile_store.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_transfer.dart';
+import 'package:tunnel_forge/features/profiles/data/profile_transfer_bridge.dart';
+import 'package:tunnel_forge/core/logging/log_entry.dart';
+import 'package:tunnel_forge/features/tunnel/data/vpn_client.dart';
 import '../domain/home_models.dart';
 import '../domain/home_repositories.dart';
 

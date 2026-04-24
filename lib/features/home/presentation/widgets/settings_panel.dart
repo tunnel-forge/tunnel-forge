@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../features/home/domain/home_models.dart';
-import '../l10n/app_localizations.dart';
-import '../profile_models.dart';
+import 'package:tunnel_forge/features/home/domain/home_models.dart';
+import 'package:tunnel_forge/l10n/app_localizations.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
 
 /// Theme mode, connection mode, split tunneling, and global local-proxy settings.
 class SettingsPanel extends StatefulWidget {

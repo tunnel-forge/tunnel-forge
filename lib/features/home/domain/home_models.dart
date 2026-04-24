@@ -1,8 +1,8 @@
 import 'package:equatable/equatable.dart';
 
-import '../../../profile_models.dart';
-import '../../../profile_transfer.dart';
-import '../../../utils/log_entry.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_transfer.dart';
+import 'package:tunnel_forge/core/logging/log_entry.dart';
 
 class HomeMessage extends Equatable {
   const HomeMessage({required this.id, required this.text, this.error = false});

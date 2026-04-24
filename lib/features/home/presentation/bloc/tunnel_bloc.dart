@@ -4,10 +4,10 @@ import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter/services.dart';
 
-import '../../../../profile_models.dart';
-import '../../../../l10n/app_localizations.dart';
-import '../../../../utils/log_entry.dart';
-import '../../../../vpn_contract.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
+import 'package:tunnel_forge/l10n/app_localizations.dart';
+import 'package:tunnel_forge/core/logging/log_entry.dart';
+import 'package:tunnel_forge/features/tunnel/data/vpn_contract.dart';
 import '../../../home/domain/home_models.dart';
 import '../../../home/domain/home_repositories.dart';
 import '../../../home/domain/log_redaction.dart';

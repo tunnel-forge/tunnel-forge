@@ -1,7 +1,7 @@
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tunnel_forge/features/app_selector/presentation/bloc/app_selector_bloc.dart';
-import 'package:tunnel_forge/profile_models.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
 
 void main() {
   blocTest<AppSelectorBloc, AppSelectorState>(

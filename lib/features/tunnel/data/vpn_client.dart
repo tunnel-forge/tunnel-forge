@@ -1,9 +1,9 @@
 // VPN [MethodChannel] client: Flutter invokes prepare/connect/disconnect; Android pushes state and engine logs.
 import 'package:flutter/services.dart';
 
-import 'profile_models.dart';
-import 'utils/log_entry.dart';
-import 'vpn_contract.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
+import 'package:tunnel_forge/core/logging/log_entry.dart';
+import 'package:tunnel_forge/features/tunnel/data/vpn_contract.dart';
 
 /// Host -> Dart: [VpnTunnelState] value, a human-readable [detail], and the originating [attemptId].
 typedef VpnTunnelHostCallback =

@@ -4,19 +4,19 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:get_it/get_it.dart';
 
-import '../connectivity_checker.dart';
-import '../l10n/app_localizations.dart';
-import '../profile_store.dart';
-import '../profile_transfer_bridge.dart';
-import '../theme.dart';
-import '../vpn_client.dart';
-import '../features/home/domain/home_repositories.dart';
-import '../features/app_theme/presentation/bloc/app_theme_bloc.dart';
-import '../features/home/presentation/pages/home_page.dart';
-import '../features/onboarding/domain/app_exit_controller.dart';
-import '../features/onboarding/domain/onboarding_repository.dart';
-import '../features/onboarding/presentation/bloc/onboarding_bloc.dart';
-import '../features/onboarding/presentation/pages/onboarding_page.dart';
+import 'package:tunnel_forge/core/network/connectivity_checker.dart';
+import 'package:tunnel_forge/l10n/app_localizations.dart';
+import 'package:tunnel_forge/features/profiles/data/profile_store.dart';
+import 'package:tunnel_forge/features/profiles/data/profile_transfer_bridge.dart';
+import 'package:tunnel_forge/app/theme/app_theme.dart';
+import 'package:tunnel_forge/features/tunnel/data/vpn_client.dart';
+import 'package:tunnel_forge/features/home/domain/home_repositories.dart';
+import 'package:tunnel_forge/features/app_theme/presentation/bloc/app_theme_bloc.dart';
+import 'package:tunnel_forge/features/home/presentation/pages/home_page.dart';
+import 'package:tunnel_forge/features/onboarding/domain/app_exit_controller.dart';
+import 'package:tunnel_forge/features/onboarding/domain/onboarding_repository.dart';
+import 'package:tunnel_forge/features/onboarding/presentation/bloc/onboarding_bloc.dart';
+import 'package:tunnel_forge/features/onboarding/presentation/pages/onboarding_page.dart';
 import 'di/injection.dart';
 
 class TunnelForgeApp extends StatefulWidget {

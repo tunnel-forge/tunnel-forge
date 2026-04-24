@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import 'app_scaffold_messenger.dart';
-import 'features/home/data/home_repositories_impl.dart';
-import 'features/profile_form/presentation/bloc/profile_form_bloc.dart';
-import 'l10n/app_localizations.dart';
-import 'profile_models.dart';
-import 'profile_store.dart';
+import 'package:tunnel_forge/app/ui/app_scaffold_messenger.dart';
+import 'package:tunnel_forge/features/home/data/home_repositories_impl.dart';
+import 'package:tunnel_forge/features/profile_form/presentation/bloc/profile_form_bloc.dart';
+import 'package:tunnel_forge/l10n/app_localizations.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
+import 'package:tunnel_forge/features/profiles/data/profile_store.dart';
 
 /// Modal sheet to view or edit one [Profile] and its stored secrets.
 class ProfileEditorSheet extends StatelessWidget {

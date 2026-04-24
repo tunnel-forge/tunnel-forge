@@ -1,9 +1,9 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:tunnel_forge/profile_models.dart';
-import 'package:tunnel_forge/vpn_client.dart';
-import 'package:tunnel_forge/vpn_contract.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
+import 'package:tunnel_forge/features/tunnel/data/vpn_client.dart';
+import 'package:tunnel_forge/features/tunnel/data/vpn_contract.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

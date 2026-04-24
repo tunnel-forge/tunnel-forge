@@ -1,7 +1,7 @@
 import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
 
-import '../../../../profile_models.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
 
 sealed class AppSelectorEvent extends Equatable {
   const AppSelectorEvent();

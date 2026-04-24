@@ -1,7 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:tunnel_forge/vpn_contract.dart';
+import 'package:tunnel_forge/features/tunnel/data/vpn_contract.dart';
 
 /// Registers a mock [VpnContract.channel] handler for widget tests.
 ///

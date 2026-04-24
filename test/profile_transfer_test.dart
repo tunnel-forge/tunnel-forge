@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:tunnel_forge/profile_models.dart';
-import 'package:tunnel_forge/profile_store.dart';
-import 'package:tunnel_forge/profile_transfer.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
+import 'package:tunnel_forge/features/profiles/data/profile_store.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_transfer.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

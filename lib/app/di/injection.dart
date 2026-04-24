@@ -2,26 +2,26 @@ import 'dart:async';
 
 import 'package:get_it/get_it.dart';
 
-import '../../connectivity_checker.dart';
-import '../../profile_store.dart';
-import '../../profile_transfer_bridge.dart';
-import '../../vpn_client.dart';
-import '../../features/onboarding/data/shared_prefs_onboarding_repository.dart';
-import '../../features/onboarding/data/system_app_exit_controller.dart';
-import '../../features/onboarding/domain/app_exit_controller.dart';
-import '../../features/onboarding/domain/onboarding_repository.dart';
-import '../../features/onboarding/presentation/bloc/onboarding_bloc.dart';
-import '../../features/app_theme/data/shared_prefs_theme_repository.dart';
-import '../../features/app_theme/domain/theme_repository.dart';
-import '../../features/app_theme/presentation/bloc/app_theme_bloc.dart';
-import '../../features/home/data/home_repositories_impl.dart';
-import '../../features/home/domain/home_repositories.dart';
-import '../../features/home/presentation/bloc/connectivity_bloc.dart';
-import '../../features/home/presentation/bloc/home_nav_bloc.dart';
-import '../../features/home/presentation/bloc/logs_bloc.dart';
-import '../../features/home/presentation/bloc/profiles_bloc.dart';
-import '../../features/home/presentation/bloc/settings_bloc.dart';
-import '../../features/home/presentation/bloc/tunnel_bloc.dart';
+import 'package:tunnel_forge/core/network/connectivity_checker.dart';
+import 'package:tunnel_forge/features/profiles/data/profile_store.dart';
+import 'package:tunnel_forge/features/profiles/data/profile_transfer_bridge.dart';
+import 'package:tunnel_forge/features/tunnel/data/vpn_client.dart';
+import 'package:tunnel_forge/features/onboarding/data/shared_prefs_onboarding_repository.dart';
+import 'package:tunnel_forge/features/onboarding/data/system_app_exit_controller.dart';
+import 'package:tunnel_forge/features/onboarding/domain/app_exit_controller.dart';
+import 'package:tunnel_forge/features/onboarding/domain/onboarding_repository.dart';
+import 'package:tunnel_forge/features/onboarding/presentation/bloc/onboarding_bloc.dart';
+import 'package:tunnel_forge/features/app_theme/data/shared_prefs_theme_repository.dart';
+import 'package:tunnel_forge/features/app_theme/domain/theme_repository.dart';
+import 'package:tunnel_forge/features/app_theme/presentation/bloc/app_theme_bloc.dart';
+import 'package:tunnel_forge/features/home/data/home_repositories_impl.dart';
+import 'package:tunnel_forge/features/home/domain/home_repositories.dart';
+import 'package:tunnel_forge/features/home/presentation/bloc/connectivity_bloc.dart';
+import 'package:tunnel_forge/features/home/presentation/bloc/home_nav_bloc.dart';
+import 'package:tunnel_forge/features/home/presentation/bloc/logs_bloc.dart';
+import 'package:tunnel_forge/features/home/presentation/bloc/profiles_bloc.dart';
+import 'package:tunnel_forge/features/home/presentation/bloc/settings_bloc.dart';
+import 'package:tunnel_forge/features/home/presentation/bloc/tunnel_bloc.dart';
 
 GetIt createAppLocator({
   ProfileStore? profileStore,

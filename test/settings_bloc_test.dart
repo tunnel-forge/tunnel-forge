@@ -3,8 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tunnel_forge/features/home/domain/home_models.dart';
 import 'package:tunnel_forge/features/home/domain/home_repositories.dart';
 import 'package:tunnel_forge/features/home/presentation/bloc/settings_bloc.dart';
-import 'package:tunnel_forge/profile_models.dart';
-import 'package:tunnel_forge/utils/log_entry.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
+import 'package:tunnel_forge/core/logging/log_entry.dart';
 
 class _FakeSettingsRepository implements SettingsRepository {
   ConnectionMode connectionMode = ConnectionMode.proxyOnly;

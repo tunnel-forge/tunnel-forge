@@ -1,11 +1,11 @@
 import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
 
-import '../../../../connectivity_checker.dart';
-import '../../../../widgets/connection_panel.dart';
+import 'package:tunnel_forge/core/network/connectivity_checker.dart';
+import 'package:tunnel_forge/features/home/presentation/widgets/connection_panel.dart';
 import '../../../home/domain/log_redaction.dart';
 import '../../../home/domain/home_repositories.dart';
-import '../../../../utils/log_entry.dart';
+import 'package:tunnel_forge/core/logging/log_entry.dart';
 
 sealed class ConnectivityEvent extends Equatable {
   const ConnectivityEvent();

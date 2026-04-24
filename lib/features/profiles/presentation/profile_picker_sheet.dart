@@ -6,16 +6,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import 'app_scaffold_messenger.dart';
-import 'features/home/data/home_repositories_impl.dart';
-import 'features/home/domain/home_models.dart';
-import 'features/home/presentation/bloc/profiles_bloc.dart';
-import 'features/profile_form/presentation/bloc/profile_form_bloc.dart';
-import 'l10n/app_localizations.dart';
-import 'profile_editor_sheet.dart';
-import 'profile_store.dart';
-import 'profile_transfer.dart';
-import 'profile_transfer_contract.dart';
+import 'package:tunnel_forge/app/ui/app_scaffold_messenger.dart';
+import 'package:tunnel_forge/features/home/data/home_repositories_impl.dart';
+import 'package:tunnel_forge/features/home/domain/home_models.dart';
+import 'package:tunnel_forge/features/home/presentation/bloc/profiles_bloc.dart';
+import 'package:tunnel_forge/features/profile_form/presentation/bloc/profile_form_bloc.dart';
+import 'package:tunnel_forge/l10n/app_localizations.dart';
+import 'package:tunnel_forge/features/profiles/presentation/profile_editor_sheet.dart';
+import 'package:tunnel_forge/features/profiles/data/profile_store.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_transfer.dart';
+import 'package:tunnel_forge/features/profiles/data/profile_transfer_contract.dart';
 
 /// Bottom sheet listing saved profiles with select, edit, delete, and import actions.
 class ProfilePickerSheet extends StatefulWidget {

@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:tunnel_forge/utils/log_buffer.dart';
-import 'package:tunnel_forge/utils/log_entry.dart';
+import 'package:tunnel_forge/core/logging/log_buffer.dart';
+import 'package:tunnel_forge/core/logging/log_entry.dart';
 
 void main() {
   test('joinLines serializes structured entries in stable format', () {

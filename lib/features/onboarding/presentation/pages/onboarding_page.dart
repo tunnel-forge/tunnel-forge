@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../../../l10n/app_localizations.dart';
-import '../../../../theme.dart';
+import 'package:tunnel_forge/l10n/app_localizations.dart';
+import 'package:tunnel_forge/app/theme/app_theme.dart';
 import '../bloc/onboarding_bloc.dart';
 
 class OnboardingPage extends StatefulWidget {

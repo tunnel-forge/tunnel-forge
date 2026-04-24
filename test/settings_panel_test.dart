@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tunnel_forge/features/home/domain/home_models.dart';
 import 'package:tunnel_forge/l10n/app_localizations.dart';
-import 'package:tunnel_forge/profile_models.dart';
-import 'package:tunnel_forge/widgets/settings_panel.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
+import 'package:tunnel_forge/features/home/presentation/widgets/settings_panel.dart';
 
 void main() {
   Finder connectivityUrlField() =>
@@ -75,6 +75,13 @@ void main() {
 
     expect(find.text('18080'), findsWidgets);
     expect(find.text('11080'), findsWidgets);
+
+    await tester.scrollUntilVisible(
+      proxyEndpointsTitle(),
+      200,
+      scrollable: settingsScrollView(),
+    );
+
     expect(find.textContaining('HTTP: 127.0.0.1:18080'), findsOneWidget);
     expect(find.textContaining('SOCKS5: 127.0.0.1:11080'), findsOneWidget);
   });

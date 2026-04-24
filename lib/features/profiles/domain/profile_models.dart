@@ -1,4 +1,4 @@
-import 'l10n/app_localizations.dart';
+import 'package:tunnel_forge/l10n/app_localizations.dart';
 
 /// Connection surface: Android VPN/TUN vs. local proxy listeners only.
 enum ConnectionMode {

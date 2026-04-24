@@ -3,9 +3,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import 'features/app_selector/presentation/bloc/app_selector_bloc.dart';
-import 'l10n/app_localizations.dart';
-import 'profile_models.dart';
+import 'package:tunnel_forge/features/app_selector/presentation/bloc/app_selector_bloc.dart';
+import 'package:tunnel_forge/l10n/app_localizations.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
 
 /// Full-screen picker for split-tunneling app selection.
 class AppSelectorPage extends StatelessWidget {

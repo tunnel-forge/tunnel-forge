@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
-import 'profile_transfer.dart';
-import 'profile_transfer_contract.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_transfer.dart';
+import 'package:tunnel_forge/features/profiles/data/profile_transfer_contract.dart';
 
 class ProfileTransferBridge {
   ProfileTransferBridge({MethodChannel? channel})

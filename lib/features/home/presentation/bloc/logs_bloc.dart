@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
 
-import '../../../../utils/log_entry.dart';
+import 'package:tunnel_forge/core/logging/log_entry.dart';
 import '../../../home/domain/home_repositories.dart';
 
 sealed class LogsEvent extends Equatable {

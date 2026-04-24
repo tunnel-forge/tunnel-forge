@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../l10n/app_localizations.dart';
-import '../theme.dart';
+import 'package:tunnel_forge/l10n/app_localizations.dart';
+import 'package:tunnel_forge/app/theme/app_theme.dart';
 
 enum _ConnectionVisualState {
   idle,

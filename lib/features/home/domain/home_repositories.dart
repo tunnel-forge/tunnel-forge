@@ -1,9 +1,9 @@
 import 'dart:typed_data';
 
-import '../../../connectivity_checker.dart';
-import '../../../profile_models.dart';
-import '../../../profile_transfer.dart';
-import '../../../utils/log_entry.dart';
+import 'package:tunnel_forge/core/network/connectivity_checker.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_transfer.dart';
+import 'package:tunnel_forge/core/logging/log_entry.dart';
 import 'home_models.dart';
 
 abstract class ProfilesRepository {

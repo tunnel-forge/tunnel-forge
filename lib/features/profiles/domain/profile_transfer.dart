@@ -3,8 +3,8 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 
-import 'profile_models.dart';
-import 'profile_transfer_contract.dart';
+import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
+import 'package:tunnel_forge/features/profiles/data/profile_transfer_contract.dart';
 
 class ProfileTransferEnvelope {
   const ProfileTransferEnvelope({
