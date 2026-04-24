@@ -1,3 +1,5 @@
+import 'l10n/app_localizations.dart';
+
 /// Connection surface: Android VPN/TUN vs. local proxy listeners only.
 enum ConnectionMode {
   vpnTunnel('vpnTunnel'),
@@ -332,11 +334,17 @@ class ConnectivityCheckSettings {
     final normalized = normalizeUrl(text);
     final uri = Uri.tryParse(normalized);
     if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
-      return 'Enter a valid absolute HTTP or HTTPS URL';
+      return AppText.pick(
+        'Enter a valid absolute HTTP or HTTPS URL',
+        'یک نشانی کامل و معتبر HTTP یا HTTPS وارد کنید',
+      );
     }
     final scheme = uri.scheme.toLowerCase();
     if (scheme != 'http' && scheme != 'https') {
-      return 'Only HTTP and HTTPS URLs are supported';
+      return AppText.pick(
+        'Only HTTP and HTTPS URLs are supported',
+        'فقط نشانی‌های HTTP و HTTPS پشتیبانی می‌شوند',
+      );
     }
     return null;
   }
@@ -345,10 +353,16 @@ class ConnectivityCheckSettings {
     if (text.trim().isEmpty) return null;
     final value = int.tryParse(text.trim());
     if (value == null) {
-      return 'Enter a whole number of milliseconds';
+      return AppText.pick(
+        'Enter a whole number of milliseconds',
+        'یک عدد صحیح بر حسب میلی‌ثانیه وارد کنید',
+      );
     }
     if (value <= 0) {
-      return 'Enter a timeout greater than 0 ms';
+      return AppText.pick(
+        'Enter a timeout greater than 0 ms',
+        'مهلت باید بیشتر از ۰ میلی‌ثانیه باشد',
+      );
     }
     return null;
   }
@@ -544,11 +558,20 @@ class Profile {
   ) {
     if (invalidDnsServer(text, protocol) == null) return '';
     final requirement = switch (protocol) {
-      DnsProtocol.dnsOverTcp || DnsProtocol.dnsOverUdp => 'hostname or IPv4',
-      DnsProtocol.dnsOverTls => 'hostname',
-      DnsProtocol.dnsOverHttps => 'hostname or HTTPS URL',
+      DnsProtocol.dnsOverTcp || DnsProtocol.dnsOverUdp => AppText.pick(
+        'hostname or IPv4',
+        'نام میزبان یا IPv4',
+      ),
+      DnsProtocol.dnsOverTls => AppText.pick('hostname', 'نام میزبان'),
+      DnsProtocol.dnsOverHttps => AppText.pick(
+        'hostname or HTTPS URL',
+        'نام میزبان یا نشانی HTTPS',
+      ),
     };
-    return '$label: use $requirement';
+    return AppText.pick(
+      '$label: use $requirement',
+      '$label: از $requirement استفاده کنید',
+    );
   }
 
   static List<DnsServerConfig> orderedDnsServers({

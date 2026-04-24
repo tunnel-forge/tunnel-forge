@@ -101,6 +101,14 @@ void main() {
       );
 
       expect(find.text('Continue'), findsOneWidget);
+      expect(find.text('Choose your language'), findsOneWidget);
+
+      await tester.ensureVisible(
+        find.byKey(const Key('onboarding_continue_button')),
+      );
+      await tester.tap(find.byKey(const Key('onboarding_continue_button')));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.text('TunnelForge'), findsOneWidget);
 
       await tester.ensureVisible(
         find.byKey(const Key('onboarding_continue_button')),
@@ -121,10 +129,10 @@ void main() {
       expect(repository.savedVersion, isNull);
 
       await tester.ensureVisible(
-        find.text('I understand the risk and want to continue.'),
+        find.text('I understand the L2TP risk.'),
       );
       await tester.tap(
-        find.text('I understand the risk and want to continue.'),
+        find.text('I understand the L2TP risk.'),
       );
       await tester.pump();
       expect(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tunnel_forge/features/home/domain/home_models.dart';
+import 'package:tunnel_forge/l10n/app_localizations.dart';
 import 'package:tunnel_forge/profile_models.dart';
 import 'package:tunnel_forge/widgets/settings_panel.dart';
 
@@ -28,6 +29,8 @@ void main() {
     return MaterialApp(
       home: Scaffold(
         body: SettingsPanel(
+          language: AppLanguage.english,
+          onLanguageChanged: (_) {},
           themeMode: ThemeMode.light,
           onThemeModeChanged: (_) {},
           connectionMode: connectionMode,

@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../features/home/domain/home_models.dart';
+import '../l10n/app_localizations.dart';
 import '../profile_models.dart';
 
 /// Theme mode, connection mode, split tunneling, and global local-proxy settings.
 class SettingsPanel extends StatefulWidget {
   const SettingsPanel({
     super.key,
+    required this.language,
+    required this.onLanguageChanged,
     this.themeMode,
     this.onThemeModeChanged,
     required this.connectionMode,
@@ -35,6 +38,8 @@ class SettingsPanel extends StatefulWidget {
     required this.textTheme,
   });
 
+  final AppLanguage language;
+  final ValueChanged<AppLanguage> onLanguageChanged;
   final ThemeMode? themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
   final ConnectionMode connectionMode;
@@ -156,18 +161,15 @@ class _SettingsPanelState extends State<SettingsPanel> {
   @override
   Widget build(BuildContext context) {
     final splitTunnelSettings = widget.splitTunnelSettings;
+    final t = AppLocalizations.of(context);
     final isInclusive = splitTunnelSettings.mode == SplitTunnelMode.inclusive;
     final activePackages = splitTunnelSettings.activePackages;
     final activePackagesEmpty = activePackages.isEmpty;
     final splitTunnelSubtitle = switch (splitTunnelSettings.mode) {
-      SplitTunnelMode.inclusive when activePackagesEmpty =>
-        'No apps selected. Choose at least one app to use the VPN.',
-      SplitTunnelMode.inclusive =>
-        '${activePackages.length} app${activePackages.length == 1 ? '' : 's'} will use the VPN.',
-      SplitTunnelMode.exclusive when activePackagesEmpty =>
-        'No apps selected. All apps will continue using the VPN.',
-      SplitTunnelMode.exclusive =>
-        '${activePackages.length} app${activePackages.length == 1 ? '' : 's'} will bypass the VPN.',
+      SplitTunnelMode.inclusive when activePackagesEmpty => t.noAppsUseVpn,
+      SplitTunnelMode.inclusive => t.appsWillUseVpn(activePackages.length),
+      SplitTunnelMode.exclusive when activePackagesEmpty => t.noAppsBypassVpn,
+      SplitTunnelMode.exclusive => t.appsWillBypassVpn(activePackages.length),
     };
     final proxyMode = widget.connectionMode == ConnectionMode.proxyOnly;
     final activeProxyExposure = widget.proxyExposure?.active == true
@@ -180,36 +182,53 @@ class _SettingsPanelState extends State<SettingsPanel> {
         activeProxyExposure?.socksPort ?? widget.proxySettings.socksPort;
     final proxyEndpointStatus = switch (activeProxyExposure) {
       ProxyExposure exposure when exposure.hasWarning => exposure.warning!,
-      ProxyExposure exposure when exposure.lanActive =>
-        'LAN clients on the same Wi-Fi or hotspot can use this address.',
-      ProxyExposure exposure when exposure.lanRequested =>
-        'LAN sharing is enabled for this session.',
-      _ when widget.proxySettings.allowLanConnections =>
-        'Connect to detect the current LAN IP for other devices.',
-      _ => 'LAN access is disabled.',
+      ProxyExposure exposure when exposure.lanActive => t.lanClientsCanUse,
+      ProxyExposure exposure when exposure.lanRequested => t.lanSharingEnabled,
+      _ when widget.proxySettings.allowLanConnections => t.connectToDetectLan,
+      _ => t.lanDisabled,
     };
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: [
+        _sectionTitle(t.languageLabel),
+        const SizedBox(height: _kSectionHeaderGap),
+        SegmentedButton<AppLanguage>(
+          segments: [
+            ButtonSegment<AppLanguage>(
+              value: AppLanguage.english,
+              label: Text(t.english),
+            ),
+            ButtonSegment<AppLanguage>(
+              value: AppLanguage.persian,
+              label: Text(t.persian),
+            ),
+          ],
+          selected: {widget.language},
+          onSelectionChanged: (next) {
+            if (next.isEmpty) return;
+            widget.onLanguageChanged(next.first);
+          },
+        ),
+        const SizedBox(height: _kSectionGap),
         if (widget.themeMode != null && widget.onThemeModeChanged != null) ...[
-          _sectionTitle('Appearance'),
+          _sectionTitle(t.appearance),
           const SizedBox(height: _kSectionHeaderGap),
           SegmentedButton<ThemeMode>(
-            segments: const [
+            segments: [
               ButtonSegment<ThemeMode>(
                 value: ThemeMode.system,
-                label: Text('System'),
-                icon: Icon(Icons.brightness_auto_outlined, size: 18),
+                label: Text(t.system),
+                icon: const Icon(Icons.brightness_auto_outlined, size: 18),
               ),
               ButtonSegment<ThemeMode>(
                 value: ThemeMode.light,
-                label: Text('Light'),
-                icon: Icon(Icons.light_mode_outlined, size: 18),
+                label: Text(t.light),
+                icon: const Icon(Icons.light_mode_outlined, size: 18),
               ),
               ButtonSegment<ThemeMode>(
                 value: ThemeMode.dark,
-                label: Text('Dark'),
-                icon: Icon(Icons.dark_mode_outlined, size: 18),
+                label: Text(t.dark),
+                icon: const Icon(Icons.dark_mode_outlined, size: 18),
               ),
             ],
             selected: {widget.themeMode!},
@@ -220,19 +239,19 @@ class _SettingsPanelState extends State<SettingsPanel> {
           ),
           const SizedBox(height: _kSectionGap),
         ],
-        _sectionTitle('Connection mode'),
+        _sectionTitle(t.connectionMode),
         const SizedBox(height: _kSectionHeaderGap),
         SegmentedButton<ConnectionMode>(
-          segments: const [
+          segments: [
             ButtonSegment<ConnectionMode>(
               value: ConnectionMode.vpnTunnel,
-              label: Text('VPN'),
-              icon: Icon(Icons.vpn_key_outlined, size: 18),
+              label: Text(t.vpn),
+              icon: const Icon(Icons.vpn_key_outlined, size: 18),
             ),
             ButtonSegment<ConnectionMode>(
               value: ConnectionMode.proxyOnly,
-              label: Text('Local proxy'),
-              icon: Icon(Icons.lan_outlined, size: 18),
+              label: Text(t.localProxy),
+              icon: const Icon(Icons.lan_outlined, size: 18),
             ),
           ],
           selected: {widget.connectionMode},
@@ -245,7 +264,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
         ),
         const SizedBox(height: _kSectionGap),
         if (!proxyMode) ...[
-          _sectionTitle('Split tunneling'),
+          _sectionTitle(t.splitTunneling),
           const SizedBox(height: _kSectionHeaderGap),
           Card(
             margin: EdgeInsets.zero,
@@ -258,11 +277,13 @@ class _SettingsPanelState extends State<SettingsPanel> {
                   SwitchListTile(
                     key: const Key('split_tunnel_enabled_switch'),
                     contentPadding: EdgeInsets.zero,
-                    title: _cardTitle('Enable split tunneling'),
+                    title: _cardTitle(t.enableSplitTunneling),
                     subtitle: _cardText(
                       splitTunnelSettings.enabled
-                          ? 'Apply the selected app list using ${isInclusive ? 'inclusive' : 'exclusive'} mode.'
-                          : 'Route all apps through the VPN and keep both app lists saved for later.',
+                          ? t.splitTunnelApply(
+                              isInclusive ? t.inclusive : t.exclusive,
+                            )
+                          : t.splitTunnelRouteAll,
                       color: widget.colorScheme.onSurfaceVariant,
                     ),
                     value: splitTunnelSettings.enabled,
@@ -274,11 +295,11 @@ class _SettingsPanelState extends State<SettingsPanel> {
                   ),
                   if (splitTunnelSettings.enabled) ...[
                     const SizedBox(height: 8),
-                    _cardTitle('Mode'),
+                    _cardTitle(t.mode),
                     _cardText(
                       isInclusive
-                          ? 'Inclusive routes only the apps you choose through the VPN.'
-                          : 'Exclusive routes all apps through the VPN except the apps you choose.',
+                          ? t.inclusiveDescription
+                          : t.exclusiveDescription,
                       color: widget.colorScheme.onSurfaceVariant,
                     ),
                     const SizedBox(height: 14),
@@ -286,14 +307,14 @@ class _SettingsPanelState extends State<SettingsPanel> {
                       width: double.infinity,
                       child: SegmentedButton<SplitTunnelMode>(
                         showSelectedIcon: false,
-                        segments: const [
+                        segments: [
                           ButtonSegment<SplitTunnelMode>(
                             value: SplitTunnelMode.inclusive,
-                            label: Text('Inclusive'),
+                            label: Text(t.inclusive),
                           ),
                           ButtonSegment<SplitTunnelMode>(
                             value: SplitTunnelMode.exclusive,
-                            label: Text('Exclusive'),
+                            label: Text(t.exclusive),
                           ),
                         ],
                         selected: {splitTunnelSettings.mode},
@@ -321,8 +342,8 @@ class _SettingsPanelState extends State<SettingsPanel> {
                       ),
                       title: _cardTitle(
                         isInclusive
-                            ? 'Select apps using VPN'
-                            : 'Select apps outside VPN',
+                            ? t.selectAppsUsingVpn
+                            : t.selectAppsOutsideVpn,
                       ),
                       subtitle: _cardText(
                         splitTunnelSubtitle,
@@ -343,7 +364,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
           ),
           const SizedBox(height: _kSectionGap),
         ],
-        _sectionTitle('Local proxy'),
+        _sectionTitle(t.localProxy),
         const SizedBox(height: _kSectionHeaderGap),
         Card(
           margin: EdgeInsets.zero,
@@ -358,7 +379,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                   controller: _httpPortController,
                   enabled: !widget.routingLocked,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'HTTP port'),
+                  decoration: InputDecoration(labelText: t.httpPort),
                   onChanged: (value) => widget.onProxySettingsChanged(
                     widget.proxySettings.copyWith(
                       httpPort: ProxySettings.portFromText(
@@ -374,7 +395,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                   controller: _socksPortController,
                   enabled: !widget.routingLocked,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'SOCKS5 port'),
+                  decoration: InputDecoration(labelText: t.socksPort),
                   onChanged: (value) => widget.onProxySettingsChanged(
                     widget.proxySettings.copyWith(
                       socksPort: ProxySettings.portFromText(
@@ -388,11 +409,11 @@ class _SettingsPanelState extends State<SettingsPanel> {
                 SwitchListTile(
                   key: const Key('proxy_allow_lan_switch'),
                   contentPadding: EdgeInsets.zero,
-                  title: _cardTitle('Allow connections from LAN'),
+                  title: _cardTitle(t.allowLan),
                   subtitle: _cardText(
                     widget.proxySettings.allowLanConnections
-                        ? 'Detect a shareable local IPv4 and expose both listeners to devices on the same Wi-Fi or hotspot when available.'
-                        : 'Keep both listeners on this device only.',
+                        ? t.allowLanOn
+                        : t.allowLanOff,
                     color: widget.colorScheme.onSurfaceVariant,
                   ),
                   value: widget.proxySettings.allowLanConnections,
@@ -409,7 +430,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Text(
-                      'HTTP and SOCKS5 ports must be different before connecting.',
+                      t.proxyPortsDifferent,
                       style: widget.textTheme.bodySmall?.copyWith(
                         color: widget.colorScheme.error,
                       ),
@@ -427,7 +448,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _cardTitle('Proxy endpoints'),
+                _cardTitle(t.proxyEndpoints),
                 const SizedBox(height: 8),
                 _cardText(
                   [
@@ -441,7 +462,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
           ),
         ),
         const SizedBox(height: _kSectionGap),
-        _sectionTitle('Connectivity check'),
+        _sectionTitle(t.connectivityCheck),
         const SizedBox(height: _kSectionHeaderGap),
         Card(
           margin: EdgeInsets.zero,
@@ -451,9 +472,9 @@ class _SettingsPanelState extends State<SettingsPanel> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _cardTitle('Status check URL'),
+                _cardTitle(t.statusCheckUrl),
                 _cardText(
-                  'Used for the status check after you connect. Tap the badge anytime to refresh.',
+                  t.statusCheckHelp,
                   color: widget.colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(height: 14),
@@ -462,7 +483,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                   controller: _connectivityUrlController,
                   keyboardType: TextInputType.url,
                   decoration: InputDecoration(
-                    labelText: 'Connectivity URL',
+                    labelText: t.connectivityUrl,
                     hintText: ConnectivityCheckSettings.defaultUrl,
                     errorText: _connectivityUrlError,
                   ),
@@ -484,7 +505,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   decoration: InputDecoration(
-                    labelText: 'Connectivity timeout (ms)',
+                    labelText: t.connectivityTimeout,
                     hintText: '${ConnectivityCheckSettings.defaultTimeoutMs}',
                     errorText: _connectivityTimeoutError,
                   ),
@@ -508,7 +529,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                   },
                 ),
                 _cardText(
-                  'Maximum time to wait before marking the check unreachable.',
+                  t.timeoutHelp,
                   color: widget.colorScheme.onSurfaceVariant,
                 ),
               ],
@@ -517,16 +538,16 @@ class _SettingsPanelState extends State<SettingsPanel> {
         ),
         if (widget.onOpenL2tpSecurityNotice != null) ...[
           const SizedBox(height: _kSectionGap),
-          _sectionTitle('Notice'),
+          _sectionTitle(t.notice),
           const SizedBox(height: _kSectionHeaderGap),
           Card(
             margin: EdgeInsets.zero,
             child: ListTile(
               key: const Key('l2tp_security_notice_tile'),
               contentPadding: _kCardTilePadding,
-              title: _cardTitle('L2TP security notice'),
+              title: _cardTitle(t.l2tpSecurityNotice),
               subtitle: _cardText(
-                'Review the L2TP/IPsec compatibility notice.',
+                t.reviewL2tpNotice,
                 color: widget.colorScheme.onSurfaceVariant,
               ),
               trailing: Icon(
@@ -538,7 +559,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
           ),
         ],
         const SizedBox(height: _kSectionGap),
-        _sectionTitle('Updates'),
+        _sectionTitle(t.updates),
         const SizedBox(height: _kSectionHeaderGap),
         Card(
           key: const Key('settings_update_card'),
@@ -562,14 +583,14 @@ class _SettingsPanelState extends State<SettingsPanel> {
                       key: const Key('settings_update_refresh_button'),
                       onPressed: widget.onRefreshVersionCheck,
                       icon: const Icon(Icons.refresh),
-                      label: const Text('Refresh'),
+                      label: Text(t.refresh),
                     ),
                     if (widget.onOpenReleasePage != null)
                       FilledButton.tonalIcon(
                         key: const Key('settings_update_open_button'),
                         onPressed: widget.onOpenReleasePage,
                         icon: const Icon(Icons.open_in_new),
-                        label: const Text('Open release page'),
+                        label: Text(t.openReleasePage),
                       ),
                   ],
                 ),
@@ -582,8 +603,8 @@ class _SettingsPanelState extends State<SettingsPanel> {
           padding: const EdgeInsets.only(bottom: 8),
           child: Text(
             widget.installedVersion == null
-                ? 'Version unavailable'
-                : 'Version ${widget.installedVersion}',
+                ? t.versionUnavailable
+                : t.version(widget.installedVersion!),
             key: const Key('settings_version_footer'),
             textAlign: TextAlign.center,
             style: widget.textTheme.bodySmall?.copyWith(
@@ -591,7 +612,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
             ),
           ),
         ),
-        _sectionTitle('About'),
+        _sectionTitle(t.about),
         const SizedBox(height: _kSectionHeaderGap),
         Card(
           key: const Key('settings_about_card'),
@@ -603,7 +624,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
               Padding(
                 padding: _kCardContentPadding,
                 child: _cardText(
-                  'Tunnel Forge is a simple Android app for L2TP/IPsec VPN, local proxy access, and per-app routing.',
+                  t.aboutText,
                   color: widget.colorScheme.onSurfaceVariant,
                 ),
               ),
@@ -611,7 +632,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
               ListTile(
                 key: const Key('settings_about_telegram_tile'),
                 contentPadding: _kCardTilePadding,
-                title: _cardTitle('Telegram'),
+                title: _cardTitle(t.telegramTitle),
                 subtitle: _cardText(
                   'https://t.me/TunnelForge',
                   color: widget.colorScheme.onSurfaceVariant,
@@ -626,7 +647,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
               ListTile(
                 key: const Key('settings_about_github_tile'),
                 contentPadding: _kCardTilePadding,
-                title: _cardTitle('GitHub'),
+                title: _cardTitle(t.githubTitle),
                 subtitle: _cardText(
                   'https://github.com/evokelektrique/tunnel-forge',
                   color: widget.colorScheme.onSurfaceVariant,
@@ -669,33 +690,47 @@ class _SettingsPanelState extends State<SettingsPanel> {
   }
 
   String _updateTitle() {
+    final t = AppText.current;
     return switch (widget.appUpdateStatus) {
-      AppUpdateStatus.loading => 'Checking for updates',
-      AppUpdateStatus.updateAvailable => 'Update available',
-      AppUpdateStatus.aheadOfRelease => 'Installed build is newer',
-      AppUpdateStatus.comparisonUnavailable => 'Installed version unavailable',
-      AppUpdateStatus.error => 'Update check unavailable',
-      AppUpdateStatus.upToDate => 'App is up to date',
-      AppUpdateStatus.idle => 'Check for updates',
+      AppUpdateStatus.loading => t.checkingUpdates,
+      AppUpdateStatus.updateAvailable => t.updateAvailable,
+      AppUpdateStatus.aheadOfRelease => t.buildNewer,
+      AppUpdateStatus.comparisonUnavailable => t.versionUnavailable,
+      AppUpdateStatus.error => t.updateCheckUnavailable,
+      AppUpdateStatus.upToDate => t.appUpToDate,
+      AppUpdateStatus.idle => t.checkForUpdates,
     };
   }
 
   String _updateSubtitle() {
+    final t = AppText.current;
     final latestRelease = widget.latestReleaseVersion;
     return switch (widget.appUpdateStatus) {
-      AppUpdateStatus.loading =>
-        'Looking up the latest published GitHub release.',
+      AppUpdateStatus.loading => t.lookingUpRelease,
       AppUpdateStatus.updateAvailable when latestRelease != null =>
-        'Latest release: $latestRelease. You are running ${widget.installedVersion ?? 'an unknown build'}.',
-      AppUpdateStatus.upToDate when latestRelease != null =>
-        'You are running the latest published release: $latestRelease.',
+        t.latestReleaseRunning(
+          latestRelease,
+          widget.installedVersion ?? t.unknownBuild,
+        ),
+      AppUpdateStatus.upToDate when latestRelease != null => t.latestPublished(
+        latestRelease,
+      ),
       AppUpdateStatus.aheadOfRelease when latestRelease != null =>
-        'This build is newer than the latest GitHub release ($latestRelease).',
+        t.buildNewerThanLatest(latestRelease),
       AppUpdateStatus.comparisonUnavailable when latestRelease != null =>
-        'Latest release: $latestRelease. ${widget.updateErrorMessage ?? widget.installedVersionError ?? 'Installed version unavailable, so this build cannot be compared.'}',
+        t.latestCannotCompare(
+          latestRelease,
+          t.updateCheckError(
+            widget.updateErrorMessage ??
+                widget.installedVersionError ??
+                t.installedVersionUnavailableCompare,
+          ),
+        ),
       AppUpdateStatus.error =>
-        widget.updateErrorMessage ?? 'Couldn\'t check for updates right now.',
-      _ => 'Check GitHub releases to see whether a newer build is available.',
+        widget.updateErrorMessage == null
+        ? t.couldNotCheckUpdates
+        : t.updateCheckError(widget.updateErrorMessage!),
+      _ => t.checkGithubReleases,
     };
   }
 }

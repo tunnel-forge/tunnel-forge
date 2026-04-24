@@ -58,7 +58,7 @@ class ProfilesRepositoryImpl implements ProfilesRepository {
           XFile.fromData(bytes, mimeType: ProfileTransferEnvelope.mimeType),
         ],
         fileNameOverrides: [fileName],
-        title: 'Export Tunnel Forge profile',
+        title: 'Export TunnelForge profile',
       ),
     );
   }

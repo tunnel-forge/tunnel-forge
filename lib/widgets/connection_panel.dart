@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../theme.dart';
 
 enum _ConnectionVisualState {
@@ -61,6 +62,7 @@ class ConnectionPanel extends StatelessWidget {
     final locked = busy || stopRequested;
     final showProgress = busy || waitingToConnect || stopRequested;
     final theme = Theme.of(context);
+    final t = AppLocalizations.of(context);
     final semanticColors =
         theme.extension<AppSemanticColors>() ??
         AppSemanticColors.fallback(theme.brightness);
@@ -118,7 +120,7 @@ class ConnectionPanel extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Active profile',
+                                  t.activeProfile,
                                   style: textTheme.labelMedium?.copyWith(
                                     color: colorScheme.onSurfaceVariant,
                                   ),

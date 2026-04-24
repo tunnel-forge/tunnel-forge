@@ -236,7 +236,7 @@ void main() {
     );
   });
 
-  testWidgets('clipboard import accepts Tunnel Forge share links', (
+  testWidgets('clipboard import accepts TunnelForge share links', (
     tester,
   ) async {
     final prefs = await SharedPreferences.getInstance();

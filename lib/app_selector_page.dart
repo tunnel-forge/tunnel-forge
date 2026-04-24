@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'features/app_selector/presentation/bloc/app_selector_bloc.dart';
+import 'l10n/app_localizations.dart';
 import 'profile_models.dart';
 
 /// Full-screen picker for split-tunneling app selection.
@@ -66,6 +67,7 @@ class _AppSelectorViewState extends State<_AppSelectorView> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final t = AppLocalizations.of(context);
     return BlocBuilder<AppSelectorBloc, AppSelectorState>(
       builder: (context, state) {
         final filtered = state.filteredApps;
@@ -75,7 +77,7 @@ class _AppSelectorViewState extends State<_AppSelectorView> {
             leading: IconButton(
               icon: const Icon(Icons.close),
               onPressed: () => Navigator.of(context).pop(),
-              tooltip: 'Cancel',
+              tooltip: t.cancel,
             ),
             actions: [
               PopupMenuButton<String>(
@@ -91,15 +93,15 @@ class _AppSelectorViewState extends State<_AppSelectorView> {
                     );
                   }
                 },
-                itemBuilder: (ctx) => const [
-                  PopupMenuItem(value: 'all', child: Text('Select all')),
-                  PopupMenuItem(value: 'clear', child: Text('Clear all')),
+                itemBuilder: (ctx) => [
+                  PopupMenuItem(value: 'all', child: Text(t.selectAll)),
+                  PopupMenuItem(value: 'clear', child: Text(t.clearAll)),
                 ],
               ),
               TextButton(
                 onPressed: () =>
                     Navigator.of(context).pop(Set<String>.from(state.selected)),
-                child: const Text('Done'),
+                child: Text(t.done),
               ),
             ],
             bottom: PreferredSize(
@@ -112,7 +114,7 @@ class _AppSelectorViewState extends State<_AppSelectorView> {
                     AppSelectorQueryChanged(value),
                   ),
                   decoration: InputDecoration(
-                    hintText: 'Search by name or package',
+                    hintText: t.searchApps,
                     prefixIcon: const Icon(Icons.search, size: 22),
                     isDense: true,
                     filled: true,
@@ -134,7 +136,7 @@ class _AppSelectorViewState extends State<_AppSelectorView> {
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Text(
-                      'No launchable apps found. If this is wrong, check that the app can query other packages on your Android version.',
+                      t.noLaunchableApps,
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: cs.onSurfaceVariant,
@@ -146,7 +148,7 @@ class _AppSelectorViewState extends State<_AppSelectorView> {
               if (filtered.isEmpty) {
                 return Center(
                   child: Text(
-                    'No matches.',
+                    t.noMatches,
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
                 );

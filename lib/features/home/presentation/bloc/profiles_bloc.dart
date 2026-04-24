@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
 
+import '../../../../l10n/app_localizations.dart';
 import '../../../../profile_models.dart';
 import '../../../../profile_transfer.dart';
 import '../../../../profile_transfer_contract.dart';
@@ -197,7 +198,13 @@ class ProfilesBloc extends Bloc<ProfilesEvent, ProfilesState> {
     if (row == null) {
       emit(
         state.copyWith(
-          message: _nextMessage('This profile no longer exists.', error: true),
+          message: _nextMessage(
+            AppText.pick(
+              'This profile no longer exists.',
+              'این پروفایل دیگر وجود ندارد.',
+            ),
+            error: true,
+          ),
         ),
       );
       return;
@@ -215,7 +222,11 @@ class ProfilesBloc extends Bloc<ProfilesEvent, ProfilesState> {
       emit(
         state.copyWith(
           message: _nextMessage(
-            transfer.message ?? 'Couldn\'t open the incoming profile',
+            transfer.message ??
+                AppText.pick(
+                  'Couldn\'t open the incoming profile',
+                  'پروفایل دریافتی باز نشد',
+                ),
             error: true,
           ),
         ),
@@ -235,16 +246,24 @@ class ProfilesBloc extends Bloc<ProfilesEvent, ProfilesState> {
             : null,
       );
       final source = switch ((transfer.source, transfer.type)) {
-        ('Clipboard', ProfileTransferContract.typeTfUri) =>
+        ('Clipboard', ProfileTransferContract.typeTfUri) => AppText.pick(
           'a clipboard share link',
-        ('Clipboard', _) => 'the clipboard',
-        (_, ProfileTransferContract.typeTfUri) => 'a share link',
-        _ => 'a .tfp file',
+          'یک پیوند اشتراک کلیپ‌بورد',
+        ),
+        ('Clipboard', _) => AppText.pick('the clipboard', 'کلیپ‌بورد'),
+        (_, ProfileTransferContract.typeTfUri) => AppText.pick(
+          'a share link',
+          'یک پیوند اشتراک',
+        ),
+        _ => AppText.pick('a .tfp file', 'یک فایل .tfp'),
       };
       emit(
         state.copyWith(
           message: _nextMessage(
-            'Imported profile "${imported.displayName}" from $source',
+            AppText.pick(
+              'Imported profile "${imported.displayName}" from $source',
+              'پروفایل «${imported.displayName}» از $source وارد شد',
+            ),
           ),
         ),
       );
@@ -253,7 +272,10 @@ class ProfilesBloc extends Bloc<ProfilesEvent, ProfilesState> {
     } catch (_) {
       emit(
         state.copyWith(
-          message: _nextMessage('Couldn\'t import profile', error: true),
+          message: _nextMessage(
+            AppText.pick('Couldn\'t import profile', 'پروفایل وارد نشد'),
+            error: true,
+          ),
         ),
       );
     }
@@ -273,11 +295,20 @@ class ProfilesBloc extends Bloc<ProfilesEvent, ProfilesState> {
           state.profiles.isNotEmpty) {
         add(ProfilesSelectionChanged(state.profiles.first.id));
       }
-      emit(state.copyWith(message: _nextMessage('Profile removed')));
+      emit(
+        state.copyWith(
+          message: _nextMessage(
+            AppText.pick('Profile removed', 'پروفایل حذف شد'),
+          ),
+        ),
+      );
     } catch (_) {
       emit(
         state.copyWith(
-          message: _nextMessage('Couldn\'t delete profile', error: true),
+          message: _nextMessage(
+            AppText.pick('Couldn\'t delete profile', 'پروفایل حذف نشد'),
+            error: true,
+          ),
         ),
       );
     }
@@ -299,13 +330,22 @@ class ProfilesBloc extends Bloc<ProfilesEvent, ProfilesState> {
   ) async {
     try {
       await _profilesRepository.copyProfileShareLink(event.id);
-      emit(state.copyWith(message: _nextMessage('Share link copied')));
+      emit(
+        state.copyWith(
+          message: _nextMessage(
+            AppText.pick('Share link copied', 'پیوند اشتراک کپی شد'),
+          ),
+        ),
+      );
     } on ProfileRepositoryException catch (error) {
       emit(state.copyWith(message: _nextMessage(error.message, error: true)));
     } catch (_) {
       emit(
         state.copyWith(
-          message: _nextMessage('Couldn\'t copy share link', error: true),
+          message: _nextMessage(
+            AppText.pick('Couldn\'t copy share link', 'پیوند اشتراک کپی نشد'),
+            error: true,
+          ),
         ),
       );
     }
@@ -319,7 +359,12 @@ class ProfilesBloc extends Bloc<ProfilesEvent, ProfilesState> {
       await _profilesRepository.exportProfileFile(event.id);
       emit(
         state.copyWith(
-          message: _nextMessage('Profile file ready to save or share'),
+          message: _nextMessage(
+            AppText.pick(
+              'Profile file ready to save or share',
+              'فایل پروفایل برای ذخیره یا اشتراک آماده است',
+            ),
+          ),
         ),
       );
     } on ProfileRepositoryException catch (error) {
@@ -327,7 +372,10 @@ class ProfilesBloc extends Bloc<ProfilesEvent, ProfilesState> {
     } catch (_) {
       emit(
         state.copyWith(
-          message: _nextMessage('Couldn\'t export .tfp file', error: true),
+          message: _nextMessage(
+            AppText.pick('Couldn\'t export .tfp file', 'خروجی .tfp ساخته نشد'),
+            error: true,
+          ),
         ),
       );
     }

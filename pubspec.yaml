@@ -10,6 +10,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   archive: ^4.0.7
   bloc: ^9.0.0
   cross_file: ^0.3.4+2
@@ -37,3 +39,24 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  fonts:
+    - family: Estedad
+      fonts:
+        - asset: resources/fonts/estedad/Estedad-Thin.ttf
+          weight: 100
+        - asset: resources/fonts/estedad/Estedad-ExtraLight.ttf
+          weight: 200
+        - asset: resources/fonts/estedad/Estedad-Light.ttf
+          weight: 300
+        - asset: resources/fonts/estedad/Estedad-Regular.ttf
+          weight: 400
+        - asset: resources/fonts/estedad/Estedad-Medium.ttf
+          weight: 500
+        - asset: resources/fonts/estedad/Estedad-SemiBold.ttf
+          weight: 600
+        - asset: resources/fonts/estedad/Estedad-Bold.ttf
+          weight: 700
+        - asset: resources/fonts/estedad/Estedad-ExtraBold.ttf
+          weight: 800
+        - asset: resources/fonts/estedad/Estedad-Black.ttf
+          weight: 900

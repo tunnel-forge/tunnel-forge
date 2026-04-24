@@ -158,8 +158,12 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
 const Color _kSeedColor = AppPalette.lightConnectIdle;
 
 /// Shared light/dark [ThemeData] for [MaterialApp] (Material 3, neutral base).
-ThemeData appTheme(Brightness brightness) {
-  final baseTheme = ThemeData(brightness: brightness, useMaterial3: true);
+ThemeData appTheme(Brightness brightness, {String fontFamily = 'Estedad'}) {
+  final baseTheme = ThemeData(
+    brightness: brightness,
+    fontFamily: fontFamily,
+    useMaterial3: true,
+  );
   final baseText = baseTheme.textTheme;
   final seedScheme = ColorScheme.fromSeed(
     seedColor: _kSeedColor,
@@ -231,6 +235,7 @@ ThemeData appTheme(Brightness brightness) {
   );
   return ThemeData(
     colorScheme: scheme,
+    fontFamily: fontFamily,
     useMaterial3: true,
     visualDensity: VisualDensity.standard,
     extensions: <ThemeExtension<dynamic>>[
@@ -243,11 +248,11 @@ ThemeData appTheme(Brightness brightness) {
     textTheme: baseText.copyWith(
       titleLarge: baseText.titleLarge?.copyWith(
         fontWeight: FontWeight.w700,
-        letterSpacing: -0.2,
+        letterSpacing: 0,
       ),
       titleMedium: baseText.titleMedium?.copyWith(
         fontWeight: FontWeight.w600,
-        letterSpacing: -0.1,
+        letterSpacing: 0,
       ),
       titleSmall: baseText.titleSmall?.copyWith(fontWeight: FontWeight.w600),
       bodyLarge: baseText.bodyLarge?.copyWith(height: 1.35),

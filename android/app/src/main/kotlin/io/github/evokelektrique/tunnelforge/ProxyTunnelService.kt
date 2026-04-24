@@ -479,7 +479,7 @@ class ProxyTunnelService : Service() {
 
     private fun tunnelExitDetail(code: Int): String =
         when (code) {
-            1 -> "IPsec did not finish (Quick Mode / ESP not ready)."
+            1 -> "IPsec negotiation failed. Check the PSK and server settings."
             2 -> "L2TP handshake failed."
             3 -> "PPP negotiation failed."
             4 -> "Tunnel poll I/O error."

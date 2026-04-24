@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../l10n/app_localizations.dart';
 import '../../../../theme.dart';
 import '../bloc/onboarding_bloc.dart';
 
@@ -18,6 +19,8 @@ class _OnboardingPageState extends State<OnboardingPage>
     return BlocBuilder<OnboardingBloc, OnboardingState>(
       builder: (context, state) {
         final isIntro = state.step == OnboardingStep.intro && state.isBlocking;
+        final isLanguage =
+            state.step == OnboardingStep.language && state.isBlocking;
 
         return PopScope<void>(
           canPop: state.isReadOnly,
@@ -33,9 +36,12 @@ class _OnboardingPageState extends State<OnboardingPage>
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       final compact = constraints.maxHeight < 760;
+                      final maxContentWidth = isLanguage ? 720.0 : 480.0;
                       return Center(
                         child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 480),
+                          constraints: BoxConstraints(
+                            maxWidth: maxContentWidth,
+                          ),
                           child: Padding(
                             padding: EdgeInsets.fromLTRB(
                               24,
@@ -45,6 +51,7 @@ class _OnboardingPageState extends State<OnboardingPage>
                             ),
                             child: _OnboardingContent(
                               state: state,
+                              isLanguage: isLanguage,
                               isIntro: isIntro,
                               compact: compact,
                               onContinue: () => context
@@ -77,6 +84,7 @@ class _OnboardingPageState extends State<OnboardingPage>
 class _OnboardingContent extends StatelessWidget {
   const _OnboardingContent({
     required this.state,
+    required this.isLanguage,
     required this.isIntro,
     required this.compact,
     required this.onContinue,
@@ -86,6 +94,7 @@ class _OnboardingContent extends StatelessWidget {
   });
 
   final OnboardingState state;
+  final bool isLanguage;
   final bool isIntro;
   final bool compact;
   final VoidCallback onContinue;
@@ -93,25 +102,30 @@ class _OnboardingContent extends StatelessWidget {
   final VoidCallback onAgree;
   final VoidCallback onCancel;
 
-  String get _headline {
-    if (state.isReadOnly) return 'Notice';
-    if (isIntro) return 'Tunnel Forge';
-    return 'Review security notice';
+  String _headline(AppLocalizations t) {
+    if (state.isReadOnly) return t.notice;
+    if (isLanguage) return t.chooseLanguage;
+    if (isIntro) return t.appTitle;
+    return t.securityNoticeTitle;
   }
 
-  String get _subtitle {
+  String _subtitle(AppLocalizations t) {
     if (state.isReadOnly) {
-      return 'L2TP should only be used when no stronger option is available.';
+      return t.securityReadOnlySubtitle;
+    }
+    if (isLanguage) {
+      return t.languageSubtitle;
     }
     if (isIntro) {
-      return 'Legacy L2TP support for modern Android, with setup and connection management in one place.';
+      return t.onboardingIntroSubtitle;
     }
-    return 'L2TP/IPsec is provided for legacy compatibility, is not considered secure by modern standards, and should only be used when stronger protocols are not available.';
+    return t.securityNoticeSubtitle;
   }
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final t = AppLocalizations.of(context);
     final titleStyle = compact
         ? textTheme.headlineLarge
         : textTheme.displayMedium;
@@ -124,11 +138,12 @@ class _OnboardingContent extends StatelessWidget {
         ],
         _HeroSection(
           state: state,
+          isLanguage: isLanguage,
           isIntro: isIntro,
           compact: compact,
           titleStyle: titleStyle,
-          headline: _headline,
-          subtitle: _subtitle,
+          headline: _headline(t),
+          subtitle: _subtitle(t),
         ),
         SizedBox(height: compact ? 16 : 20),
         const Spacer(),
@@ -136,6 +151,7 @@ class _OnboardingContent extends StatelessWidget {
           alignment: Alignment.bottomLeft,
           child: _NoticePanel(
             state: state,
+            isLanguage: isLanguage,
             isIntro: isIntro,
             compact: compact,
             onCheckboxChanged: onCheckboxChanged,
@@ -176,9 +192,11 @@ class _StepIndicatorRow extends StatelessWidget {
     return Row(
       children: [
         const Spacer(),
-        dot(true),
+        dot(state.step == OnboardingStep.language),
         const SizedBox(width: 6),
-        dot(state.isReadOnly || !isIntro),
+        dot(state.step == OnboardingStep.intro),
+        const SizedBox(width: 6),
+        dot(state.isReadOnly || state.step == OnboardingStep.acknowledgement),
       ],
     );
   }
@@ -187,6 +205,7 @@ class _StepIndicatorRow extends StatelessWidget {
 class _HeroSection extends StatelessWidget {
   const _HeroSection({
     required this.state,
+    required this.isLanguage,
     required this.isIntro,
     required this.compact,
     required this.titleStyle,
@@ -195,35 +214,30 @@ class _HeroSection extends StatelessWidget {
   });
 
   final OnboardingState state;
+  final bool isLanguage;
   final bool isIntro;
   final bool compact;
   final TextStyle? titleStyle;
   final String headline;
   final String subtitle;
 
-  List<String> _paragraphs() {
+  List<String> _paragraphs(AppLocalizations t) {
     if (state.isReadOnly) {
-      return const [
-        'L2TP/IPsec no longer meets modern security expectations for sensitive traffic.',
-        'Use this option only when compatibility is required and no stronger protocol is available.',
-      ];
+      return [t.securityReadOnlyP1, t.securityReadOnlyP2];
+    }
+    if (isLanguage) {
+      return [t.languageBody];
     }
     if (isIntro) {
-      return const [
-        'Create and organize profiles, switch between connections, and keep the essentials close at hand.',
-        'Designed for environments that still depend on L2TP, without forcing an outdated setup experience.',
-        'A focused way to manage legacy VPN access on current Android devices.',
-      ];
+      return [t.onboardingIntroP1, t.onboardingIntroP2, t.onboardingIntroP3];
     }
-    return const [
-      'This protocol remains available to support older infrastructure, not as a recommended default for new deployments.',
-      'It should be treated as easier to decrypt than modern VPN protocols. If your network supports WireGuard, OpenVPN, or another modern alternative, that should be the preferred choice.',
-    ];
+    return [t.securityP1, t.securityP2];
   }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final t = AppLocalizations.of(context);
     final textTheme = Theme.of(context).textTheme;
     final brightness = Theme.of(context).brightness;
     final isDarkHero = state.isBlocking;
@@ -245,19 +259,20 @@ class _HeroSection extends StatelessWidget {
               ? const Color(0xFF4A4F55)
               : Colors.white.withValues(alpha: 0.84))
         : colorScheme.onSurfaceVariant;
-    final paragraphs = _paragraphs();
+    final paragraphs = _paragraphs(t);
     final brandLineStyle =
         (compact ? textTheme.headlineSmall : textTheme.headlineMedium)
             ?.copyWith(
               color: heroPrimaryTextColor,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.7,
-              height: 1.08,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0,
+              height: 1.15,
             );
     final supportingTextStyle = textTheme.bodyMedium?.copyWith(
       color: heroSecondaryTextColor,
       height: 1.45,
     );
+    final isBrandHeadline = headline == t.appTitle;
 
     return Container(
       width: double.infinity,
@@ -274,12 +289,16 @@ class _HeroSection extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text(
-                  headline,
-                  key: const Key('onboarding_title'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: brandLineStyle,
+                child: Directionality(
+                  textDirection: isBrandHeadline
+                      ? TextDirection.ltr
+                      : Directionality.of(context),
+                  child: Text(
+                    headline,
+                    key: const Key('onboarding_title'),
+                    textAlign: isBrandHeadline ? TextAlign.left : null,
+                    style: brandLineStyle,
+                  ),
                 ),
               ),
             ],
@@ -292,19 +311,7 @@ class _HeroSection extends StatelessWidget {
           ),
           for (final paragraph in paragraphs) ...[
             SizedBox(height: compact ? 12 : 14),
-            Padding(
-              padding: EdgeInsets.only(right: compact ? 8 : 12),
-              child: Text(
-                paragraph,
-                style: supportingTextStyle?.copyWith(
-                  color: isDarkHero
-                      ? (isInvertedHero
-                            ? const Color(0xFF5F6368)
-                            : Colors.white.withValues(alpha: 0.74))
-                      : colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
+            Text(paragraph, style: supportingTextStyle),
           ],
         ],
       ),
@@ -315,6 +322,7 @@ class _HeroSection extends StatelessWidget {
 class _NoticePanel extends StatelessWidget {
   const _NoticePanel({
     required this.state,
+    required this.isLanguage,
     required this.isIntro,
     required this.compact,
     required this.onCheckboxChanged,
@@ -324,6 +332,7 @@ class _NoticePanel extends StatelessWidget {
   });
 
   final OnboardingState state;
+  final bool isLanguage;
   final bool isIntro;
   final bool compact;
   final ValueChanged<bool?> onCheckboxChanged;
@@ -335,15 +344,17 @@ class _NoticePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final checkboxLabel = isIntro
-        ? 'Manage your VPN profiles in one place.'
-        : 'I understand the risk and want to continue.';
+    final t = AppLocalizations.of(context);
+    final languageController = isLanguage
+        ? AppLanguageController.of(context)
+        : null;
+    final checkboxLabel = isIntro ? t.introCheckbox : t.riskCheckbox;
     final panelTitle = isIntro
         ? null
-        : 'Use only when compatibility requires it';
+        : (isLanguage ? null : t.compatibilityOnly);
     final panelBody = isIntro
         ? null
-        : 'Proceed only if this connection depends on L2TP/IPsec, you understand that it is not a secure modern protocol, and no stronger option is available for the same service.';
+        : (isLanguage ? null : t.compatibilityBody);
     return Column(
       key: const Key('onboarding_countdown'),
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -352,8 +363,8 @@ class _NoticePanel extends StatelessWidget {
           Text(
             panelTitle,
             style: textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.2,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0,
             ),
           ),
           const SizedBox(height: 10),
@@ -368,7 +379,13 @@ class _NoticePanel extends StatelessWidget {
           ),
           SizedBox(height: compact ? 18 : 22),
         ],
-        if (state.isBlocking && !isIntro) ...[
+        if (isLanguage) ...[
+          _LanguageChoiceList(
+            selectedLanguage: languageController!.language,
+            onLanguageChanged: languageController.setLanguage,
+          ),
+        ],
+        if (state.isBlocking && !isIntro && !isLanguage) ...[
           Material(
             color: Colors.transparent,
             child: InkWell(
@@ -397,8 +414,6 @@ class _NoticePanel extends StatelessWidget {
                     Expanded(
                       child: Text(
                         checkboxLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                         style: textTheme.bodyMedium?.copyWith(
                           height: 1.0,
                           fontWeight: FontWeight.w500,
@@ -415,6 +430,7 @@ class _NoticePanel extends StatelessWidget {
         _ActionSection(
           state: state,
           isIntro: isIntro,
+          isLanguage: isLanguage,
           onContinue: onContinue,
           onAgree: onAgree,
           onCancel: onCancel,
@@ -424,9 +440,136 @@ class _NoticePanel extends StatelessWidget {
   }
 }
 
+class _LanguageChoiceList extends StatelessWidget {
+  const _LanguageChoiceList({
+    required this.selectedLanguage,
+    required this.onLanguageChanged,
+  });
+
+  final AppLanguage selectedLanguage;
+  final ValueChanged<AppLanguage> onLanguageChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context);
+
+    return Column(
+      children: [
+        _LanguageChoiceTile(
+          language: AppLanguage.english,
+          title: t.english,
+          selected: selectedLanguage == AppLanguage.english,
+          onTap: () => onLanguageChanged(AppLanguage.english),
+        ),
+        const SizedBox(height: 12),
+        _LanguageChoiceTile(
+          language: AppLanguage.persian,
+          title: t.persian,
+          selected: selectedLanguage == AppLanguage.persian,
+          onTap: () => onLanguageChanged(AppLanguage.persian),
+        ),
+      ],
+    );
+  }
+}
+
+class _LanguageChoiceTile extends StatelessWidget {
+  const _LanguageChoiceTile({
+    required this.language,
+    required this.title,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final AppLanguage language;
+  final String title;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final semanticColors =
+        Theme.of(context).extension<AppSemanticColors>() ??
+        AppSemanticColors.fallback(Theme.of(context).brightness);
+    final borderColor = selected
+        ? semanticColors.connected
+        : colorScheme.outlineVariant.withValues(alpha: 0.72);
+    final backgroundColor = selected
+        ? semanticColors.connected.withValues(alpha: 0.10)
+        : colorScheme.surfaceContainerHighest.withValues(alpha: 0.42);
+    final direction = language == AppLanguage.persian
+        ? TextDirection.rtl
+        : TextDirection.ltr;
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: borderColor, width: selected ? 2 : 1),
+            ),
+            child: Directionality(
+              textDirection: direction,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: selected
+                          ? semanticColors.connected
+                          : Colors.transparent,
+                      border: Border.all(
+                        color: selected
+                            ? semanticColors.connected
+                            : colorScheme.outline,
+                        width: 2,
+                      ),
+                    ),
+                    child: selected
+                        ? Icon(
+                            Icons.check,
+                            size: 17,
+                            color: semanticColors.onConnected,
+                          )
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ActionSection extends StatelessWidget {
   const _ActionSection({
     required this.state,
+    required this.isLanguage,
     required this.isIntro,
     required this.onContinue,
     required this.onAgree,
@@ -434,20 +577,22 @@ class _ActionSection extends StatelessWidget {
   });
 
   final OnboardingState state;
+  final bool isLanguage;
   final bool isIntro;
   final VoidCallback onContinue;
   final VoidCallback onAgree;
   final VoidCallback onCancel;
 
-  String get _primaryLabel {
-    if (isIntro) return 'Continue';
-    if (!state.timerComplete) return 'Confirm in ${state.secondsRemaining}s';
-    return 'Confirm';
+  String _primaryLabel(AppLocalizations t) {
+    if (isLanguage || isIntro) return t.continueLabel;
+    if (!state.timerComplete) return t.confirmInSeconds(state.secondsRemaining);
+    return t.confirm;
   }
 
   @override
   Widget build(BuildContext context) {
     final isExiting = state.status == OnboardingFlowStatus.exiting;
+    final t = AppLocalizations.of(context);
     final brightness = Theme.of(context).brightness;
     final semanticColors =
         Theme.of(context).extension<AppSemanticColors>() ??
@@ -459,14 +604,15 @@ class _ActionSection extends StatelessWidget {
         ? const Color(0xFF5F6B77)
         : const Color(0xFFB4BEC8);
     final isVisuallyEnabled =
-        !isExiting && (state.isReadOnly || isIntro || state.canAgree);
+        !isExiting &&
+        (state.isReadOnly || isLanguage || isIntro || state.canAgree);
     void primaryAction() {
       if (isExiting) return;
       if (state.isReadOnly) {
         onCancel();
         return;
       }
-      if (isIntro) {
+      if (isLanguage || isIntro) {
         onContinue();
         return;
       }
@@ -486,7 +632,7 @@ class _ActionSection extends StatelessWidget {
               color: Colors.transparent,
               child: InkWell(
                 key: Key(
-                  isIntro
+                  isLanguage || isIntro
                       ? 'onboarding_continue_button'
                       : 'onboarding_agree_button',
                 ),
@@ -511,7 +657,7 @@ class _ActionSection extends StatelessWidget {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : Text(
-                            _primaryLabel,
+                            _primaryLabel(t),
                             style: Theme.of(context).textTheme.labelLarge
                                 ?.copyWith(
                                   color: isVisuallyEnabled
@@ -538,7 +684,7 @@ class _ActionSection extends StatelessWidget {
                   minimumSize: const Size.fromHeight(52),
                   alignment: Alignment.center,
                 ),
-                child: const Text('Dismiss'),
+                child: Text(t.dismiss),
               ),
             ),
           ),

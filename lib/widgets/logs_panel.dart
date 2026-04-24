@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../utils/log_entry.dart';
 
 /// Monospace log viewer with optional horizontal scroll when word wrap is off.
@@ -41,13 +42,12 @@ class _LogsPanelState extends State<LogsPanel> {
   @override
   Widget build(BuildContext context) {
     final logs = widget.logs;
+    final t = AppLocalizations.of(context);
     if (logs.isEmpty) {
-      final title = widget.hasAnyLogs
-          ? 'No logs match this level'
-          : 'No activity yet';
+      final title = widget.hasAnyLogs ? t.noLogsMatch : t.noActivityYet;
       final subtitle = widget.hasAnyLogs
-          ? 'Try a different log level to see more entries.'
-          : 'Connection events and diagnostics will appear here.';
+          ? t.differentLogLevel
+          : t.logsWillAppear;
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -183,7 +183,12 @@ class _LogsPanelState extends State<LogsPanel> {
 
     return Stack(
       children: [
-        SelectionArea(child: body),
+        SelectionArea(
+          child: Directionality(
+            textDirection: TextDirection.ltr,
+            child: body,
+          ),
+        ),
         if (!widget.stickToBottom)
           Positioned(
             right: 8,
@@ -191,7 +196,7 @@ class _LogsPanelState extends State<LogsPanel> {
             child: FilledButton.tonalIcon(
               onPressed: widget.onJumpToLatest,
               icon: const Icon(Icons.vertical_align_bottom_rounded, size: 18),
-              label: const Text('Latest'),
+              label: Text(t.latest),
               style: FilledButton.styleFrom(
                 visualDensity: VisualDensity.compact,
                 textStyle: widget.textTheme.labelMedium,

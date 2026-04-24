@@ -125,7 +125,7 @@ class ProfileTransferEnvelope {
   static ProfileTransferEnvelope fromTfUri(String text) {
     final uri = Uri.tryParse(text.trim());
     if (uri == null || uri.scheme != uriScheme || uri.host != uriHost) {
-      throw const FormatException('Invalid Tunnel Forge share link');
+      throw const FormatException('Invalid TunnelForge share link');
     }
     if (uri.pathSegments.isEmpty) {
       throw const FormatException('Share link payload is missing');

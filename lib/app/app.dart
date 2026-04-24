@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:get_it/get_it.dart';
 
 import '../connectivity_checker.dart';
+import '../l10n/app_localizations.dart';
 import '../profile_store.dart';
 import '../profile_transfer_bridge.dart';
 import '../theme.dart';
@@ -45,10 +47,12 @@ class TunnelForgeApp extends StatefulWidget {
 
 class _TunnelForgeAppState extends State<TunnelForgeApp> {
   late final GetIt _locator;
+  late final AppLanguageController _languageController;
 
   @override
   void initState() {
     super.initState();
+    _languageController = AppLanguageController();
     _locator = createAppLocator(
       profileStore: widget.profileStore,
       connectivityChecker: widget.connectivityChecker,
@@ -64,27 +68,46 @@ class _TunnelForgeAppState extends State<TunnelForgeApp> {
   @override
   void dispose() {
     disposeLocator(_locator);
+    _languageController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider<AppThemeBloc>(
-      create: (_) => _locator<AppThemeBloc>()..add(const AppThemeStarted()),
-      child: BlocBuilder<AppThemeBloc, AppThemeState>(
-        builder: (context, state) {
-          return MaterialApp(
-            title: 'Tunnel Forge',
-            theme: appTheme(Brightness.light),
-            darkTheme: appTheme(Brightness.dark),
-            themeMode: state.themeMode,
-            home: BlocProvider<OnboardingBloc>(
-              create: (_) =>
-                  _locator<OnboardingBloc>()..add(const OnboardingStarted()),
-              child: _AppBootstrap(locator: _locator),
-            ),
-          );
-        },
+    return AppLanguageScope(
+      controller: _languageController,
+      child: BlocProvider<AppThemeBloc>(
+        create: (_) => _locator<AppThemeBloc>()..add(const AppThemeStarted()),
+        child: BlocBuilder<AppThemeBloc, AppThemeState>(
+          builder: (context, state) {
+            return AnimatedBuilder(
+              animation: _languageController,
+              builder: (context, _) {
+                final language = _languageController.language;
+                return MaterialApp(
+                  title: 'TunnelForge',
+                  locale: language.locale,
+                  supportedLocales: AppLocalizations.supportedLocales,
+                  localizationsDelegates: const [
+                    AppLocalizations.delegate,
+                    GlobalMaterialLocalizations.delegate,
+                    GlobalWidgetsLocalizations.delegate,
+                    GlobalCupertinoLocalizations.delegate,
+                  ],
+                  theme: appTheme(Brightness.light),
+                  darkTheme: appTheme(Brightness.dark),
+                  themeMode: state.themeMode,
+                  home: BlocProvider<OnboardingBloc>(
+                    create: (_) =>
+                        _locator<OnboardingBloc>()
+                          ..add(const OnboardingStarted()),
+                    child: _AppBootstrap(locator: _locator),
+                  ),
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }

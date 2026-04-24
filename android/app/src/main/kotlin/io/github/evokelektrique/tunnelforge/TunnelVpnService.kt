@@ -841,10 +841,7 @@ class TunnelVpnService : VpnService() {
 
     private fun tunnelExitDetail(code: Int): String =
         when (code) {
-            1 ->
-                "IPsec did not finish (Quick Mode / ESP not ready). " +
-                    "If the server is L2TP-only (no IPsec), leave the IPsec PSK field empty. " +
-                    "Plaintext L2TP is only for trusted networks."
+            1 -> "IPsec negotiation failed. Check the PSK and server settings."
             2 -> "L2TP handshake failed."
             3 -> "PPP negotiation failed."
             4 -> "Tunnel poll I/O error."

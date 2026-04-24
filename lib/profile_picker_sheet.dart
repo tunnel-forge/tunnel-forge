@@ -11,6 +11,7 @@ import 'features/home/data/home_repositories_impl.dart';
 import 'features/home/domain/home_models.dart';
 import 'features/home/presentation/bloc/profiles_bloc.dart';
 import 'features/profile_form/presentation/bloc/profile_form_bloc.dart';
+import 'l10n/app_localizations.dart';
 import 'profile_editor_sheet.dart';
 import 'profile_store.dart';
 import 'profile_transfer.dart';
@@ -104,7 +105,11 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
       await refreshResult;
     } on TimeoutException {
       if (!mounted) return;
-      showAppSnackBar(context, 'Profile list refresh timed out', error: true);
+      showAppSnackBar(
+        context,
+        AppText.current.profileRefreshTimedOut,
+        error: true,
+      );
     }
   }
 
@@ -131,7 +136,11 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
       if (mounted) setState(() {});
     } on TimeoutException {
       if (!mounted) return;
-      showAppSnackBar(context, 'Profile import timed out', error: true);
+      showAppSnackBar(
+        context,
+        AppText.current.profileImportTimedOut,
+        error: true,
+      );
     }
   }
 
@@ -149,7 +158,7 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
       if (bytes == null) {
         showAppSnackBar(
           context,
-          'Couldn\'t read the selected file',
+          AppText.current.couldNotReadSelectedFile,
           error: true,
         );
         return;
@@ -164,7 +173,7 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
       );
     } catch (_) {
       if (!mounted) return;
-      showAppSnackBar(context, 'Couldn\'t import .tfp file', error: true);
+      showAppSnackBar(context, AppText.current.couldNotImportTfp, error: true);
     }
   }
 
@@ -174,7 +183,7 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
       final text = data?.text?.trim() ?? '';
       if (text.isEmpty) {
         if (!mounted) return;
-        showAppSnackBar(context, 'Clipboard is empty', error: true);
+        showAppSnackBar(context, AppText.current.clipboardEmpty, error: true);
         return;
       }
       final transfer =
@@ -195,16 +204,14 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
       final message = error.message.toString();
       showAppSnackBar(
         context,
-        message.isEmpty
-            ? 'Clipboard does not contain a valid Tunnel Forge profile'
-            : message,
+        message.isEmpty ? AppText.current.clipboardInvalidProfile : message,
         error: true,
       );
     } catch (_) {
       if (!mounted) return;
       showAppSnackBar(
         context,
-        'Couldn\'t import a profile from the clipboard',
+        AppText.current.couldNotImportClipboard,
         error: true,
       );
     }
@@ -214,14 +221,12 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete profile?'),
-        content: const Text(
-          'This will remove the server and saved credentials from this device.',
-        ),
+        title: Text(AppLocalizations.of(ctx).deleteProfileQuestion),
+        content: Text(AppLocalizations.of(ctx).deleteProfileBody),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(AppLocalizations.of(ctx).cancel),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -229,7 +234,7 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
               foregroundColor: Theme.of(ctx).colorScheme.onError,
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
+            child: Text(AppLocalizations.of(ctx).delete),
           ),
         ],
       ),
@@ -263,6 +268,7 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final tt = theme.textTheme;
+    final t = AppLocalizations.of(context);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -271,9 +277,9 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
           padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
           child: Row(
             children: [
-              Expanded(child: Text('Profiles', style: tt.titleLarge)),
+              Expanded(child: Text(t.profiles, style: tt.titleLarge)),
               PopupMenuButton<_AddProfileAction>(
-                tooltip: 'Add profile',
+                tooltip: t.addProfile,
                 icon: const Icon(Icons.add),
                 onSelected: (action) async {
                   switch (action) {
@@ -288,18 +294,18 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
                       break;
                   }
                 },
-                itemBuilder: (context) => const [
+                itemBuilder: (context) => [
                   PopupMenuItem<_AddProfileAction>(
                     value: _AddProfileAction.create,
-                    child: Text('Create new profile'),
+                    child: Text(t.createNewProfile),
                   ),
                   PopupMenuItem<_AddProfileAction>(
                     value: _AddProfileAction.importFile,
-                    child: Text('Import from file'),
+                    child: Text(t.importFromFile),
                   ),
                   PopupMenuItem<_AddProfileAction>(
                     value: _AddProfileAction.importClipboard,
-                    child: Text('Import from clipboard'),
+                    child: Text(t.importFromClipboard),
                   ),
                 ],
               ),
@@ -316,7 +322,7 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
               ? Padding(
                   padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
                   child: Text(
-                    'No profiles yet. Tap + to create or import your first profile.',
+                    t.noProfilesYet,
                     style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
                   ),
                 )
@@ -349,7 +355,7 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           PopupMenuButton<_ProfileTileAction>(
-                            tooltip: 'Profile actions',
+                            tooltip: t.profileActions,
                             onSelected: (action) async {
                               switch (action) {
                                 case _ProfileTileAction.copyShareLink:
@@ -364,26 +370,26 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
                                   break;
                               }
                             },
-                            itemBuilder: (context) => const [
+                            itemBuilder: (context) => [
                               PopupMenuItem<_ProfileTileAction>(
                                 value: _ProfileTileAction.copyShareLink,
-                                child: Text('Copy share link'),
+                                child: Text(t.copyShareLink),
                               ),
                               PopupMenuItem<_ProfileTileAction>(
                                 value: _ProfileTileAction.exportFile,
-                                child: Text('Export .tfp'),
+                                child: Text(t.exportTfp),
                               ),
                             ],
                           ),
                           IconButton(
-                            tooltip: 'Edit profile',
+                            tooltip: t.editProfile,
                             icon: const Icon(Icons.edit_outlined, size: 22),
                             onPressed: state.loading
                                 ? null
                                 : () => _openEditor(profileId: profile.id),
                           ),
                           IconButton(
-                            tooltip: 'Delete profile',
+                            tooltip: t.deleteProfile,
                             icon: Icon(
                               Icons.delete_outline,
                               size: 22,
@@ -422,7 +428,7 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
           if (!mounted) return;
           _closeEditor();
           if (!mounted) return;
-          showAppSnackBar(this.context, 'Profile saved');
+          showAppSnackBar(this.context, AppText.current.profileSaved);
         },
       ),
     );

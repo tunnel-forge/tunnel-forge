@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'app_scaffold_messenger.dart';
 import 'features/home/data/home_repositories_impl.dart';
 import 'features/profile_form/presentation/bloc/profile_form_bloc.dart';
+import 'l10n/app_localizations.dart';
 import 'profile_models.dart';
 import 'profile_store.dart';
 
@@ -144,6 +145,7 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
     required ValueChanged<String> onChanged,
     required ValueChanged<DnsProtocol?> onProtocolChanged,
   }) {
+    final t = AppLocalizations.of(context);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -156,7 +158,7 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
             onChanged: onChanged,
             decoration: _deco(
               context,
-              label: 'DNS servers',
+              label: t.dnsServers,
               hint: hint,
             ).copyWith(errorText: errorText, errorMaxLines: 2),
           ),
@@ -209,6 +211,7 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
     TextTheme tt,
     Color dnsSectionColor,
   ) {
+    final t = AppLocalizations.of(context);
     return Container(
       key: const Key('dns_servers_section'),
       padding: const EdgeInsets.all(12),
@@ -219,10 +222,10 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('DNS servers', style: tt.titleSmall),
+          Text(t.dnsServers, style: tt.titleSmall),
           const SizedBox(height: 4),
           Text(
-            'DNS 1 is primary. DNS 2 is fallback.',
+            t.dnsHelp,
             style: tt.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
@@ -273,8 +276,12 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     final safeBottom = MediaQuery.paddingOf(context).bottom;
     final dnsSectionColor = theme.colorScheme.surfaceContainerHigh;
-    final mtuHelper =
-        'Range ${Profile.minVpnMtu}-${Profile.maxVpnMtu}. Use ${Profile.defaultVpnMtu} unless you need a smaller MTU.';
+    final t = AppLocalizations.of(context);
+    final mtuHelper = t.mtuHelper(
+      Profile.minVpnMtu,
+      Profile.maxVpnMtu,
+      Profile.defaultVpnMtu,
+    );
 
     return BlocConsumer<ProfileFormBloc, ProfileFormState>(
       listenWhen: (previous, current) =>
@@ -307,10 +314,7 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
               children: [
                 Text(state.loadError!, style: tt.bodyLarge),
                 const SizedBox(height: 16),
-                FilledButton(
-                  onPressed: widget.onClose,
-                  child: const Text('Close'),
-                ),
+                FilledButton(onPressed: widget.onClose, child: Text(t.close)),
               ],
             ),
           );
@@ -329,7 +333,7 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
                 automaticallyImplyLeading: false,
                 backgroundColor: sheetColor,
                 surfaceTintColor: Colors.transparent,
-                title: const Text('Profile details'),
+                title: Text(t.profileDetails),
                 leading: IconButton(
                   icon: const Icon(Icons.close),
                   onPressed: widget.onClose,
@@ -341,7 +345,7 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
                         : () => context.read<ProfileFormBloc>().add(
                             const ProfileFormSaveRequested(),
                           ),
-                    child: const Text('Save'),
+                    child: Text(t.save),
                   ),
                 ],
               ),
@@ -362,8 +366,8 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
                                 .add(ProfileFormDisplayNameChanged(value)),
                             decoration: _deco(
                               context,
-                              label: 'Name',
-                              hint: 'e.g. Office VPN',
+                              label: t.name,
+                              hint: t.nameHint,
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -376,8 +380,8 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
                                 .add(ProfileFormServerChanged(value)),
                             decoration: _deco(
                               context,
-                              label: 'Server',
-                              hint: 'Hostname or IP address',
+                              label: t.server,
+                              hint: t.serverHint,
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -387,7 +391,7 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
                             onChanged: (value) => context
                                 .read<ProfileFormBloc>()
                                 .add(ProfileFormUserChanged(value)),
-                            decoration: _deco(context, label: 'Username'),
+                            decoration: _deco(context, label: t.username),
                           ),
                           const SizedBox(height: 12),
                           TextField(
@@ -396,7 +400,7 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
                             onChanged: (value) => context
                                 .read<ProfileFormBloc>()
                                 .add(ProfileFormPasswordChanged(value)),
-                            decoration: _deco(context, label: 'Password'),
+                            decoration: _deco(context, label: t.password),
                           ),
                           const SizedBox(height: 12),
                           TextField(
@@ -407,9 +411,8 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
                                 .add(ProfileFormPskChanged(value)),
                             decoration: _deco(
                               context,
-                              label: 'IPsec PSK',
-                              hint:
-                                  'Leave blank if your server doesn\'t use IPsec',
+                              label: t.ipsecPsk,
+                              hint: t.ipsecPskHint,
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -417,10 +420,8 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
                             value: state.dnsAutomatic,
                             controlAffinity: ListTileControlAffinity.leading,
                             contentPadding: EdgeInsets.zero,
-                            title: const Text('Automatic'),
-                            subtitle: const Text(
-                              'Receive DNS configuration automatically from the VPN server during PPP negotiation.',
-                            ),
+                            title: Text(t.automatic),
+                            subtitle: Text(t.automaticDnsHelp),
                             onChanged: state.loading
                                 ? null
                                 : (value) =>

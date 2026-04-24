@@ -6,13 +6,13 @@ import 'package:equatable/equatable.dart';
 import '../../domain/app_exit_controller.dart';
 import '../../domain/onboarding_repository.dart';
 
-const int kOnboardingAgreeCountdownSeconds = 10;
+const int kOnboardingAgreeCountdownSeconds = 20;
 
 enum OnboardingFlowStatus { loading, presenting, accepted, exiting }
 
 enum OnboardingMode { blockingFirstLaunch, readOnly }
 
-enum OnboardingStep { intro, acknowledgement }
+enum OnboardingStep { language, intro, acknowledgement }
 
 sealed class OnboardingEvent extends Equatable {
   const OnboardingEvent();
@@ -67,7 +67,7 @@ class OnboardingState extends Equatable {
   const OnboardingState({
     this.status = OnboardingFlowStatus.loading,
     this.mode = OnboardingMode.blockingFirstLaunch,
-    this.step = OnboardingStep.intro,
+    this.step = OnboardingStep.language,
     this.checkboxChecked = false,
     this.secondsRemaining = kOnboardingAgreeCountdownSeconds,
   });
@@ -145,7 +145,7 @@ class OnboardingBloc extends Bloc<OnboardingEvent, OnboardingState> {
       state.copyWith(
         status: OnboardingFlowStatus.presenting,
         mode: OnboardingMode.blockingFirstLaunch,
-        step: OnboardingStep.intro,
+        step: OnboardingStep.language,
         checkboxChecked: false,
         secondsRemaining: kOnboardingAgreeCountdownSeconds,
       ),
@@ -172,7 +172,12 @@ class OnboardingBloc extends Bloc<OnboardingEvent, OnboardingState> {
     OnboardingContinuePressed event,
     Emitter<OnboardingState> emit,
   ) async {
-    if (!state.isBlocking || state.step != OnboardingStep.intro) return;
+    if (!state.isBlocking) return;
+    if (state.step == OnboardingStep.language) {
+      emit(state.copyWith(step: OnboardingStep.intro));
+      return;
+    }
+    if (state.step != OnboardingStep.intro) return;
     emit(
       state.copyWith(
         step: OnboardingStep.acknowledgement,
@@ -187,17 +192,21 @@ class OnboardingBloc extends Bloc<OnboardingEvent, OnboardingState> {
     OnboardingBackPressed event,
     Emitter<OnboardingState> emit,
   ) async {
-    if (!state.isBlocking || state.step != OnboardingStep.acknowledgement) {
+    if (!state.isBlocking) {
       return;
     }
-    await _stopCountdown();
-    emit(
-      state.copyWith(
-        step: OnboardingStep.intro,
-        checkboxChecked: false,
-        secondsRemaining: kOnboardingAgreeCountdownSeconds,
-      ),
-    );
+    if (state.step == OnboardingStep.acknowledgement) {
+      await _stopCountdown();
+      emit(
+        state.copyWith(
+          step: OnboardingStep.intro,
+          checkboxChecked: false,
+          secondsRemaining: kOnboardingAgreeCountdownSeconds,
+        ),
+      );
+    } else if (state.step == OnboardingStep.intro) {
+      emit(state.copyWith(step: OnboardingStep.language));
+    }
   }
 
   void _onCheckboxChanged(

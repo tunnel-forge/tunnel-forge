@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../../app_scaffold_messenger.dart';
 import '../../../../app_selector_page.dart';
 import '../../../../connectivity_checker.dart';
+import '../../../../l10n/app_localizations.dart';
 import '../../../../profile_models.dart';
 import '../../../../profile_picker_sheet.dart';
 import '../../../../profile_store.dart';
@@ -211,6 +212,7 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
   }
 
   Future<void> _pickAppsForVpn() async {
+    final t = AppText.current;
     final splitTunnelSettings = context
         .read<SettingsBloc>()
         .state
@@ -223,10 +225,10 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
           MaterialPageRoute(
             fullscreenDialog: true,
             builder: (ctx) => AppSelectorPage(
-              title: isInclusive ? 'Apps using VPN' : 'Apps outside VPN',
+              title: isInclusive ? t.appsUsingVpn : t.appsOutsideVpn,
               description: isInclusive
-                  ? 'Only the selected apps will use the VPN.'
-                  : 'Selected apps will bypass the VPN and use the normal network.',
+                  ? t.onlySelectedAppsVpn
+                  : t.selectedAppsBypass,
               initialSelection: Set<String>.from(current),
               loadApps: repository.listVpnCandidateApps,
               loadIcon: repository.getAppIcon,
@@ -275,15 +277,27 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
   Future<void> _openReleasePage(String url) {
     return _openExternalUrl(
       url,
-      invalidMessage: 'Release page URL is invalid.',
-      failureMessage: 'Could not open the release page.',
+      invalidMessage: AppText.pick(
+        'Release page URL is invalid.',
+        'نشانی صفحه انتشار معتبر نیست.',
+      ),
+      failureMessage: AppText.pick(
+        'Could not open the release page.',
+        'صفحه انتشار باز نشد.',
+      ),
     );
   }
 
   void _handleMissingProfileTap(ProfilesState profilesState) {
     final message = profilesState.profiles.isEmpty
-        ? 'Create a profile first. You will need a server, username, and tunnel settings before connecting.'
-        : 'Choose one of your saved profiles before connecting.';
+        ? AppText.pick(
+            'Create a profile first. You will need a server, username, and tunnel settings before connecting.',
+            'ابتدا یک پروفایل بسازید. پیش از اتصال به سرور، نام کاربری و تنظیمات تونل نیاز دارید.',
+          )
+        : AppText.pick(
+            'Choose one of your saved profiles before connecting.',
+            'پیش از اتصال یکی از پروفایل‌های ذخیره‌شده را انتخاب کنید.',
+          );
     _toast(message, error: true);
     widget.locator<LogsRepository>().append(
       LogEntry(
@@ -349,8 +363,11 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
     if (visibleLogs.isEmpty) {
       _toast(
         logsState.entries.isEmpty
-            ? 'No logs to copy'
-            : 'No visible logs to copy',
+            ? AppText.pick('No logs to copy', 'گزارشی برای کپی نیست')
+            : AppText.pick(
+                'No visible logs to copy',
+                'گزارش نمایانی برای کپی نیست',
+              ),
       );
       return;
     }
@@ -360,13 +377,18 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
       ),
     );
     final count = visibleLogs.length;
-    _toast('Copied $count ${count == 1 ? 'line' : 'lines'} to clipboard');
+    _toast(
+      AppText.pick(
+        'Copied $count ${count == 1 ? 'line' : 'lines'} to clipboard',
+        '$count خط در کلیپ‌بورد کپی شد',
+      ),
+    );
   }
 
   void _clearLogs() {
     context.read<LogsBloc>().add(const LogsCleared());
     setState(() => _logsStickToBottom = true);
-    _toast('Logs cleared');
+    _toast(AppText.pick('Logs cleared', 'گزارش‌ها پاک شد'));
   }
 
   String _connectButtonLabel(
@@ -374,22 +396,33 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
     bool hasActiveProfile,
     ConnectionMode connectionMode,
   ) {
+    final t = AppText.current;
     if (tunnelState.stopRequested && tunnelState.tunnelUp) {
-      return 'Disconnecting...';
+      return t.disconnecting;
     }
-    if (tunnelState.stopRequested) return 'Canceling...';
-    if (tunnelState.busy && tunnelState.tunnelUp) return 'Disconnecting...';
+    if (tunnelState.stopRequested) return t.canceling;
+    if (tunnelState.busy && tunnelState.tunnelUp) return t.disconnecting;
     if (tunnelState.awaitingTunnel && !tunnelState.tunnelUp) {
-      return 'Connecting... tap to cancel';
+      return t.connectingTapCancel;
     }
-    if (tunnelState.busy) return 'Working...';
+    if (tunnelState.busy) return t.working;
     if (tunnelState.tunnelUp) {
       return connectionMode == ConnectionMode.proxyOnly
-          ? 'Proxy ready'
-          : 'Connected';
+          ? t.proxyReady
+          : t.connected;
     }
-    if (!hasActiveProfile) return 'Select profile';
-    return 'Ready';
+    if (!hasActiveProfile) return t.selectProfile;
+    return t.ready;
+  }
+
+  String _connectivityBadgeLabel(ConnectivityState state) {
+    final t = AppText.current;
+    return switch (state.badgeState) {
+      ConnectivityBadgeState.idle => t.tapToCheck,
+      ConnectivityBadgeState.checking => t.checking,
+      ConnectivityBadgeState.success => '${state.latencyMs ?? 0} ms',
+      ConnectivityBadgeState.failure => t.unreachable,
+    };
   }
 
   @override
@@ -401,6 +434,8 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
     final logsState = context.watch<LogsBloc>().state;
     final connectivityState = context.watch<ConnectivityBloc>().state;
     final appThemeState = context.watch<AppThemeBloc>().state;
+    final t = AppLocalizations.of(context);
+    final languageController = AppLanguageController.of(context);
 
     final effectiveProfileId = profilesState.hasActiveProfile
         ? profilesState.activeProfileId
@@ -416,18 +451,16 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
     }
     final profileSummaryTitle = activeProfile != null
         ? activeProfile.displayName
-        : (profilesState.profiles.isEmpty
-              ? 'No saved profile'
-              : 'Quick connect');
+        : (profilesState.profiles.isEmpty ? t.noSavedProfile : t.quickConnect);
     final profileSummarySubtitle = activeProfile != null
         ? activeProfile.server
         : (profilesState.profiles.isEmpty
-              ? 'Create your first profile'
-              : 'Select a saved profile');
+              ? t.createFirstProfile
+              : t.selectSavedProfile);
     final appBarTitle = switch (navState.index) {
-      0 => 'Tunnel Forge',
-      1 => 'Logs',
-      _ => 'Settings',
+      0 => t.appTitle,
+      1 => t.logs,
+      _ => t.settings,
     };
 
     return MultiBlocListener(
@@ -493,7 +526,7 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     PopupMenuButton<LogDisplayLevel>(
-                      tooltip: 'Log level',
+                      tooltip: t.logLevel,
                       initialValue: logsState.level,
                       onSelected: (level) => context.read<LogsBloc>().add(
                         LogsLevelChangeRequested(level),
@@ -541,8 +574,8 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
                     ),
                     IconButton(
                       tooltip: logsState.wordWrap
-                          ? 'Turn off word wrap (wide lines scroll sideways)'
-                          : 'Turn on word wrap',
+                          ? t.wordWrapOff
+                          : t.wordWrapOn,
                       onPressed: () => context.read<LogsBloc>().add(
                         const LogsWordWrapToggled(),
                       ),
@@ -551,14 +584,14 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
                       ),
                     ),
                     IconButton(
-                      tooltip: 'Copy visible',
+                      tooltip: t.copyVisible,
                       onPressed: logsState.visibleLogs.isEmpty
                           ? null
                           : () => _copyLogs(logsState),
                       icon: const Icon(Icons.copy_all_outlined),
                     ),
                     IconButton(
-                      tooltip: 'Clear',
+                      tooltip: t.clear,
                       onPressed: logsState.entries.isEmpty ? null : _clearLogs,
                       icon: const Icon(Icons.delete_outline),
                     ),
@@ -625,7 +658,9 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
                     onUnavailablePrimaryTap: () =>
                         _handleMissingProfileTap(profilesState),
                     connectivityBadgeState: connectivityState.badgeState,
-                    connectivityBadgeLabel: connectivityState.badgeLabel,
+                    connectivityBadgeLabel: _connectivityBadgeLabel(
+                      connectivityState,
+                    ),
                     onConnectivityTap: () =>
                         context.read<ConnectivityBloc>().add(
                           ConnectivityRunRequested(
@@ -650,6 +685,8 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
                   hasAnyLogs: logsState.entries.isNotEmpty,
                 ),
                 _ => SettingsPanel(
+                  language: languageController.language,
+                  onLanguageChanged: languageController.setLanguage,
                   themeMode: appThemeState.themeMode,
                   onThemeModeChanged: (mode) =>
                       context.read<AppThemeBloc>().add(AppThemeChanged(mode)),
@@ -686,13 +723,25 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
                   ),
                   onOpenTelegram: () => _openExternalUrl(
                     _kTelegramUrl,
-                    invalidMessage: 'Telegram link is invalid.',
-                    failureMessage: 'Could not open Telegram.',
+                    invalidMessage: AppText.pick(
+                      'Telegram link is invalid.',
+                      'پیوند تلگرام معتبر نیست.',
+                    ),
+                    failureMessage: AppText.pick(
+                      'Could not open Telegram.',
+                      'تلگرام باز نشد.',
+                    ),
                   ),
                   onOpenGithub: () => _openExternalUrl(
                     _kProjectGithubUrl,
-                    invalidMessage: 'GitHub link is invalid.',
-                    failureMessage: 'Could not open GitHub.',
+                    invalidMessage: AppText.pick(
+                      'GitHub link is invalid.',
+                      'پیوند GitHub معتبر نیست.',
+                    ),
+                    failureMessage: AppText.pick(
+                      'Could not open GitHub.',
+                      'GitHub باز نشد.',
+                    ),
                   ),
                   routingLocked:
                       profilesState.loading ||
@@ -723,21 +772,21 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
           height: 72,
           labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
           animationDuration: const Duration(milliseconds: 360),
-          destinations: const [
+          destinations: [
             NavigationDestination(
-              icon: Icon(Icons.vpn_key_outlined),
-              selectedIcon: Icon(Icons.vpn_key),
-              label: 'VPN',
+              icon: const Icon(Icons.vpn_key_outlined),
+              selectedIcon: const Icon(Icons.vpn_key),
+              label: t.vpn,
             ),
             NavigationDestination(
-              icon: Icon(Icons.article_outlined),
-              selectedIcon: Icon(Icons.article),
-              label: 'Logs',
+              icon: const Icon(Icons.article_outlined),
+              selectedIcon: const Icon(Icons.article),
+              label: t.logs,
             ),
             NavigationDestination(
-              icon: Icon(Icons.settings_outlined),
-              selectedIcon: Icon(Icons.settings),
-              label: 'Settings',
+              icon: const Icon(Icons.settings_outlined),
+              selectedIcon: const Icon(Icons.settings),
+              label: t.settings,
             ),
           ],
         ),

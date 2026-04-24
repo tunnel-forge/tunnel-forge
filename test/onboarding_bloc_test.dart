@@ -50,7 +50,7 @@ void main() {
     );
 
     blocTest<OnboardingBloc, OnboardingState>(
-      'presents intro on first launch',
+      'presents language choice on first launch',
       build: () =>
           OnboardingBloc(_FakeOnboardingRepository(), _FakeAppExitController()),
       act: (bloc) => bloc.add(const OnboardingStarted()),
@@ -59,23 +59,30 @@ void main() {
       ],
     );
 
-    test('continue moves to acknowledgement and arms the countdown', () async {
-      final bloc = OnboardingBloc(
-        _FakeOnboardingRepository(),
-        _FakeAppExitController(),
-      );
-      addTearDown(bloc.close);
+    test(
+      'continue moves through intro to acknowledgement and arms countdown',
+      () async {
+        final bloc = OnboardingBloc(
+          _FakeOnboardingRepository(),
+          _FakeAppExitController(),
+        );
+        addTearDown(bloc.close);
 
-      bloc.add(const OnboardingStarted());
-      await Future<void>.delayed(Duration.zero);
-      bloc.add(const OnboardingContinuePressed());
-      await Future<void>.delayed(const Duration(milliseconds: 1100));
-      await Future<void>.delayed(Duration.zero);
+        bloc.add(const OnboardingStarted());
+        await Future<void>.delayed(Duration.zero);
+        bloc.add(const OnboardingContinuePressed());
+        await Future<void>.delayed(Duration.zero);
+        expect(bloc.state.step, OnboardingStep.intro);
 
-      expect(bloc.state.status, OnboardingFlowStatus.presenting);
-      expect(bloc.state.step, OnboardingStep.acknowledgement);
-      expect(bloc.state.secondsRemaining, 9);
-    });
+        bloc.add(const OnboardingContinuePressed());
+        await Future<void>.delayed(const Duration(milliseconds: 1100));
+        await Future<void>.delayed(Duration.zero);
+
+        expect(bloc.state.status, OnboardingFlowStatus.presenting);
+        expect(bloc.state.step, OnboardingStep.acknowledgement);
+        expect(bloc.state.secondsRemaining, 19);
+      },
+    );
 
     test('agree requires both checkbox and completed timer', () async {
       final repository = _FakeOnboardingRepository();
@@ -89,6 +96,8 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(bloc.state.checkboxChecked, isFalse);
 
+      bloc.add(const OnboardingContinuePressed());
+      await Future<void>.delayed(Duration.zero);
       bloc.add(const OnboardingContinuePressed());
       await Future<void>.delayed(Duration.zero);
 
@@ -121,6 +130,8 @@ void main() {
         addTearDown(bloc.close);
 
         bloc.add(const OnboardingStarted());
+        await Future<void>.delayed(Duration.zero);
+        bloc.add(const OnboardingContinuePressed());
         await Future<void>.delayed(Duration.zero);
         bloc.add(const OnboardingContinuePressed());
         await Future<void>.delayed(
