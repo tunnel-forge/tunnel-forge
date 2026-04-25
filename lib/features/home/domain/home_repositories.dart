@@ -56,7 +56,10 @@ abstract class TunnelRepository {
 
   Future<bool> prepareVpn();
   Future<void> connect(TunnelConnectRequest request);
-  Future<void> disconnect();
+  Future<void> disconnect({
+    required ConnectionMode connectionMode,
+    String attemptId = '',
+  });
   Future<void> setLogLevel(LogDisplayLevel level);
   Future<List<CandidateApp>> listVpnCandidateApps();
   Future<Uint8List?> getAppIcon(String packageName);

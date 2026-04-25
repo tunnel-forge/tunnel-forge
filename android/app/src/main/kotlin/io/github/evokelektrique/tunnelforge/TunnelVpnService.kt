@@ -88,7 +88,9 @@ class TunnelVpnService : VpnService() {
 
     override fun onDestroy() {
         cancelPendingStopSelf()
-        stopTunnelInternal()
+        if (hasActiveSession()) {
+            stopTunnelInternal()
+        }
         instance = null
         super.onDestroy()
     }
@@ -99,18 +101,18 @@ class TunnelVpnService : VpnService() {
                 cancelPendingStopSelf()
                 val attemptId = intent.getStringExtra(EXTRA_ATTEMPT_ID) ?: ""
                 VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}ACTION_STOP: tearing down tunnel")
-                val hadActiveSession =
-                    TunnelVpnServiceStopPolicy.shouldEmitStoppedOnActionStop(
-                        running = running.get(),
-                        hasSetupThread = setupThread != null,
-                        hasEngineThread = engineThread != null,
-                        hasTunInterface = tunInterface != null,
-                        hasDnsServer = localDnsServer != null,
-                        hasLocalProxyRuntime = localProxyRuntime != null,
-                    )
+                val hadActiveSession = hasActiveSession()
                 val stoppedAttemptId = synchronized(sessionLock) { activeAttemptId }
-                stopTunnelInternal()
+                if (VpnStopAttemptPolicy.shouldIgnoreStopRequest(attemptId, stoppedAttemptId)) {
+                    VpnTunnelEvents.emitEngineLog(
+                        Log.DEBUG,
+                        TAG,
+                        "${prefixAttempt(attemptId)}Ignoring stale tunnel stop activeAttempt=$stoppedAttemptId",
+                    )
+                    return START_NOT_STICKY
+                }
                 if (hadActiveSession) {
+                    stopTunnelInternal()
                     VpnTunnelEvents.emit(VpnContract.TUNNEL_STOPPED, "Stopped by app", stoppedAttemptId)
                 }
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -236,6 +238,16 @@ class TunnelVpnService : VpnService() {
             }
         }
     }
+
+    private fun hasActiveSession(): Boolean =
+        TunnelVpnServiceStopPolicy.shouldEmitStoppedOnActionStop(
+            running = running.get(),
+            hasSetupThread = setupThread != null,
+            hasEngineThread = engineThread != null,
+            hasTunInterface = tunInterface != null,
+            hasDnsServer = localDnsServer != null,
+            hasLocalProxyRuntime = localProxyRuntime != null,
+        )
 
     private fun currentAttemptId(): String =
         synchronized(sessionLock) { activeAttemptId }
@@ -1023,4 +1035,9 @@ internal object TunnelVpnServiceStopPolicy {
         hasDnsServer: Boolean,
         hasLocalProxyRuntime: Boolean,
     ): Boolean = running || hasSetupThread || hasEngineThread || hasTunInterface || hasDnsServer || hasLocalProxyRuntime
+}
+
+internal object VpnStopAttemptPolicy {
+    fun shouldIgnoreStopRequest(requestedAttemptId: String, activeAttemptId: String): Boolean =
+        requestedAttemptId.isNotEmpty() && activeAttemptId.isNotEmpty() && requestedAttemptId != activeAttemptId
 }

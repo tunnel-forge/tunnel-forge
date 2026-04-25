@@ -197,8 +197,16 @@ class VpnClient {
     }
   }
 
-  Future<void> disconnect() =>
-      _channel.invokeMethod<void>(VpnContract.disconnect);
+  Future<void> disconnect({
+    required ConnectionMode connectionMode,
+    String attemptId = '',
+  }) {
+    return _channel
+        .invokeMethod<void>(VpnContract.disconnect, <String, Object?>{
+          VpnContract.argConnectionMode: connectionMode.jsonValue,
+          if (attemptId.isNotEmpty) VpnContract.argAttemptId: attemptId,
+        });
+  }
 
   Future<void> setLogLevel(LogDisplayLevel level) {
     return _channel.invokeMethod<void>(

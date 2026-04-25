@@ -20,12 +20,12 @@ class ProxyTunnelLoopRunnerTest {
             detailForCode = { "code=$it" },
             isStopRequested = { false },
             isConnected = { true },
-            emitTerminal = { state, detail -> terminalEvents += "$state:$detail" },
+            emitTerminal = { attemptId, state, detail -> terminalEvents += "$attemptId:$state:$detail" },
             onLoopCrash = { crashes += it },
         )
 
         assertTrue(logs.any { it == "${Log.DEBUG}:attempt=attempt-1 nativeStartProxyLoop thread running" })
-        assertEquals(listOf("${VpnContract.TUNNEL_FAILED}:boom"), terminalEvents)
+        assertEquals(listOf("attempt-1:${VpnContract.TUNNEL_FAILED}:boom"), terminalEvents)
         assertEquals(1, crashes.size)
         assertTrue(crashes.single() is IllegalStateException)
     }
@@ -41,12 +41,12 @@ class ProxyTunnelLoopRunnerTest {
             detailForCode = { "code=$it" },
             isStopRequested = { false },
             isConnected = { true },
-            emitTerminal = { state, detail -> terminalEvents += "$state:$detail" },
+            emitTerminal = { attemptId, state, detail -> terminalEvents += "$attemptId:$state:$detail" },
             onLoopCrash = { throw AssertionError("Unexpected crash callback: ${it.message}") },
         )
 
         assertEquals(
-            listOf("${VpnContract.TUNNEL_FAILED}:Local proxy connection was lost."),
+            listOf(":${VpnContract.TUNNEL_FAILED}:Local proxy connection was lost."),
             terminalEvents,
         )
     }
@@ -62,7 +62,7 @@ class ProxyTunnelLoopRunnerTest {
             detailForCode = { "code=$it" },
             isStopRequested = { true },
             isConnected = { true },
-            emitTerminal = { state, detail -> terminalEvents += "$state:$detail" },
+            emitTerminal = { attemptId, state, detail -> terminalEvents += "$attemptId:$state:$detail" },
             onLoopCrash = { throw AssertionError("Unexpected crash callback: ${it.message}") },
         )
 

@@ -449,7 +449,15 @@ class TunnelRepositoryImpl implements TunnelRepository {
   }
 
   @override
-  Future<void> disconnect() => _client.disconnect();
+  Future<void> disconnect({
+    required ConnectionMode connectionMode,
+    String attemptId = '',
+  }) {
+    return _client.disconnect(
+      connectionMode: connectionMode,
+      attemptId: attemptId,
+    );
+  }
 
   @override
   void dispose() {

@@ -276,15 +276,11 @@ static int esp_prepare_profile_variant(const esp_keys_t *src, esp_keys_t *dst, i
 static int send_ctrl(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len, l2tp_session_t *s,
                      const uint8_t *avps, size_t avp_len) {
   uint8_t pkt[2048];
-  size_t tot = L2TP_CTRL_HDR + avp_len;
-  if (tot > sizeof(pkt)) return -1;
-  util_write_be16(pkt + 0, 0xC802);
-  util_write_be16(pkt + 2, (uint16_t)tot);
-  util_write_be16(pkt + 4, s->tunnel_id);
-  util_write_be16(pkt + 6, s->session_id);
-  util_write_be16(pkt + 8, s->send_ns);
-  util_write_be16(pkt + 10, s->recv_nr_expected);
-  memcpy(pkt + L2TP_CTRL_HDR, avps, avp_len);
+  size_t tot = 0;
+  if (l2tp_ctrl_build(pkt, sizeof(pkt), s->tunnel_id, s->session_id, s->send_ns, s->recv_nr_expected, avps, avp_len,
+                      &tot) != 0) {
+    return -1;
+  }
   tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                       "l2tp send_ctrl: tid=%u sid=%u ns=%u nr=%u avp_len=%zu pkt_len=%zu",
                       s->tunnel_id, s->session_id, s->send_ns, s->recv_nr_expected, avp_len, tot);
@@ -302,14 +298,56 @@ static int send_ctrl(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, s
 /** Zero-Length Body: 12-byte control header only (RFC 2661 sec 5.8). */
 static int send_zlb(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len, l2tp_session_t *s) {
   uint8_t pkt[L2TP_CTRL_HDR];
-  util_write_be16(pkt + 0, 0xC802);
-  util_write_be16(pkt + 2, L2TP_CTRL_HDR);
-  util_write_be16(pkt + 4, s->tunnel_id);
-  util_write_be16(pkt + 6, s->session_id);
-  util_write_be16(pkt + 8, s->send_ns);
-  util_write_be16(pkt + 10, s->recv_nr_expected);
-  if (esp_encrypt_send(esp_fd, esp, peer, peer_len, pkt, sizeof(pkt)) < 0) return -1;
+  size_t pkt_len = 0;
+  if (l2tp_ctrl_build(pkt, sizeof(pkt), s->tunnel_id, s->session_id, s->send_ns, s->recv_nr_expected, NULL, 0,
+                      &pkt_len) != 0) {
+    return -1;
+  }
+  if (esp_encrypt_send(esp_fd, esp, peer, peer_len, pkt, pkt_len) < 0) return -1;
   return 0;
+}
+
+int l2tp_send_teardown(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
+                       l2tp_session_t *s) {
+  if (esp == NULL || peer == NULL || s == NULL || s->tunnel_id == 0) return -1;
+
+  int rc = 0;
+  if (s->session_id != 0 && s->peer_session_id != 0) {
+    uint8_t avps[64];
+    size_t ao = 0;
+    l2tp_session_t call = *s;
+    call.session_id = s->session_id;
+    if (l2tp_avp_append_u16(avps, sizeof(avps), &ao, L2TP_AVP_MSG_TYPE, L2TP_MSG_CDN) != 0 ||
+        l2tp_avp_append_result(avps, sizeof(avps), &ao, 3, 0) != 0 ||
+        l2tp_avp_append_u16(avps, sizeof(avps), &ao, L2TP_AVP_ASSIGNED_SESSION, s->peer_session_id) != 0 ||
+        send_ctrl(esp_fd, esp, peer, peer_len, &call, avps, ao) != 0) {
+      rc = -1;
+      tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "l2tp teardown: CDN send failed");
+    } else {
+      s->send_ns = call.send_ns;
+      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "l2tp teardown: CDN sent tid=%u sid=%u",
+                        (unsigned)s->tunnel_id, (unsigned)s->session_id);
+    }
+  }
+
+  {
+    uint8_t avps[64];
+    size_t ao = 0;
+    l2tp_session_t ctrl = *s;
+    ctrl.session_id = 0;
+    if (l2tp_avp_append_u16(avps, sizeof(avps), &ao, L2TP_AVP_MSG_TYPE, L2TP_MSG_STOPCCN) != 0 ||
+        l2tp_avp_append_result(avps, sizeof(avps), &ao, 6, 0) != 0 ||
+        l2tp_avp_append_u16(avps, sizeof(avps), &ao, L2TP_AVP_ASSIGNED_TUNNEL, s->peer_tunnel_id) != 0 ||
+        send_ctrl(esp_fd, esp, peer, peer_len, &ctrl, avps, ao) != 0) {
+      rc = -1;
+      tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "l2tp teardown: STOPCCN send failed");
+    } else {
+      s->send_ns = ctrl.send_ns;
+      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "l2tp teardown: STOPCCN sent tid=%u", (unsigned)s->tunnel_id);
+    }
+  }
+
+  return rc;
 }
 
 static uint16_t pick_local_id(uint16_t remote, uint16_t salt) {

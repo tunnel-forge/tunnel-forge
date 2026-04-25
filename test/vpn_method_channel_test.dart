@@ -221,8 +221,15 @@ void main() {
 
     test('disconnect', () async {
       final client = VpnClient();
-      await client.disconnect();
+      await client.disconnect(
+        connectionMode: ConnectionMode.proxyOnly,
+        attemptId: 'attempt-1',
+      );
       expect(calls.single.method, VpnContract.disconnect);
+      expect(calls.single.arguments, <String, Object?>{
+        VpnContract.argConnectionMode: VpnContract.modeProxyOnly,
+        VpnContract.argAttemptId: 'attempt-1',
+      });
     });
 
     test('tunnel state callback parses attempt id when present', () async {

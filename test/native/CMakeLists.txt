@@ -22,6 +22,10 @@ add_executable(test_ppp_ipcp test_ppp_ipcp.c ../../android/app/src/main/cpp/util
 target_include_directories(test_ppp_ipcp PRIVATE ../../android/app/src/main/cpp)
 add_test(NAME ppp_ipcp COMMAND test_ppp_ipcp)
 
+add_executable(test_ppp_mschap_failure test_ppp_mschap_failure.c)
+target_include_directories(test_ppp_mschap_failure PRIVATE ../../android/app/src/main/cpp)
+add_test(NAME ppp_mschap_failure COMMAND test_ppp_mschap_failure)
+
 add_executable(test_ppp_frame test_ppp_frame.c)
 add_test(NAME ppp_frame COMMAND test_ppp_frame)
 

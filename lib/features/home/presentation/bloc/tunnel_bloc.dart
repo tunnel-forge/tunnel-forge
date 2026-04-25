@@ -190,7 +190,11 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
     TunnelConnectRequested event,
     Emitter<TunnelState> emit,
   ) async {
-    if (state.busy || (state.awaitingTunnel && !state.tunnelUp)) return;
+    if (state.busy ||
+        state.stopRequested ||
+        (state.awaitingTunnel && !state.tunnelUp)) {
+      return;
+    }
     final request = event.request;
     final proxyMode = request.connectionMode == ConnectionMode.proxyOnly;
     final host = request.server.trim();
@@ -375,7 +379,10 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
       tag: 'tunnel',
     );
     try {
-      await _tunnelRepository.disconnect();
+      await _tunnelRepository.disconnect(
+        connectionMode: state.connectionMode,
+        attemptId: state.activeAttemptId ?? '',
+      );
       _logDebug(
         cancelPendingConnect
             ? 'Cancel dispatched; waiting for Android stopped event...'
@@ -402,6 +409,7 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
     final update = event.update;
     final t = AppText.current;
     final currentAttemptId = state.activeAttemptId;
+    final proxyMode = state.connectionMode == ConnectionMode.proxyOnly;
     if (update.attemptId.isNotEmpty) {
       if (currentAttemptId == null) {
         _logWarning(
@@ -420,7 +428,17 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
         return;
       }
     }
-    final proxyMode = state.connectionMode == ConnectionMode.proxyOnly;
+    if (update.attemptId.isEmpty &&
+        currentAttemptId != null &&
+        proxyMode &&
+        _isTerminalTunnelState(update.state)) {
+      _logWarning(
+        'Ignoring untagged Android terminal event while active attempt is $currentAttemptId: state=${update.state}',
+        source: LogSource.kotlin,
+        tag: 'TunnelState',
+      );
+      return;
+    }
     if (state.timedOutThisAttempt &&
         (update.state == VpnTunnelState.connected ||
             update.state == VpnTunnelState.failed)) {
@@ -472,6 +490,25 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
         break;
       case VpnTunnelState.failed:
         _cancelAwaitTimer();
+        if (state.stopRequested && _isShutdownFailure(update.detail)) {
+          emit(
+            state.copyWith(
+              awaitingTunnel: false,
+              tunnelUp: false,
+              stopRequested: false,
+              timedOutThisAttempt: false,
+              clearActiveAttemptId: true,
+              clearConnectStartedAt: true,
+              clearProxyExposure: true,
+            ),
+          );
+          _logInfo(
+            'Android${state.activeAttemptId == null ? '' : ' attempt=${state.activeAttemptId!}'}: tunnel stopped during shutdown: ${update.detail}',
+            source: LogSource.kotlin,
+            tag: 'TunnelState',
+          );
+          break;
+        }
         emit(
           state.copyWith(
             awaitingTunnel: false,
@@ -551,6 +588,20 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
       return;
     }
     emit(state.copyWith(proxyExposure: event.exposure));
+  }
+
+  bool _isShutdownFailure(String detail) {
+    final normalized = detail.trim().toLowerCase();
+    return normalized == 'local proxy connection was lost.' ||
+        normalized == 'local proxy connection was lost' ||
+        normalized == 'proxy packet bridge stopped.' ||
+        normalized == 'proxy packet bridge stopped' ||
+        normalized == 'socket closed';
+  }
+
+  bool _isTerminalTunnelState(String tunnelState) {
+    return tunnelState == VpnTunnelState.failed ||
+        tunnelState == VpnTunnelState.stopped;
   }
 
   void _onAwaitTimedOut(TunnelAwaitTimedOut event, Emitter<TunnelState> emit) {

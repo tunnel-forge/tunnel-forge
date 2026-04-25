@@ -23,6 +23,9 @@ else
   cc -std=c99 -Wall -Wextra -o "${OUT}/test_ppp_ipcp" \
     "${ROOT}/test/native/test_ppp_ipcp.c" "${CPP}/util_endian.c" -I"${CPP}"
   "${OUT}/test_ppp_ipcp"
+  cc -std=c99 -Wall -Wextra -o "${OUT}/test_ppp_mschap_failure" \
+    "${ROOT}/test/native/test_ppp_mschap_failure.c" -I"${CPP}"
+  "${OUT}/test_ppp_mschap_failure"
   cc -std=c99 -Wall -Wextra -o "${OUT}/test_ppp_frame" \
     "${ROOT}/test/native/test_ppp_frame.c"
   "${OUT}/test_ppp_frame"

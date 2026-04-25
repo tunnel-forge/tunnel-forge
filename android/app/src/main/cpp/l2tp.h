@@ -59,4 +59,8 @@ int l2tp_dispatch_incoming(int esp_fd, esp_keys_t *esp, const struct sockaddr *p
 int l2tp_send_ppp(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len, l2tp_session_t *s,
                   const uint8_t *ppp, size_t ppp_len);
 
+/** Best-effort graceful close: CDN for the call, then STOPCCN for the control tunnel. */
+int l2tp_send_teardown(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
+                       l2tp_session_t *s);
+
 #endif

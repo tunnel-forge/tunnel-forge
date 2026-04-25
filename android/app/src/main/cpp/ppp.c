@@ -563,7 +563,22 @@ static int ppp_auth_mschapv2(int esp_fd, esp_keys_t *esp, const struct sockaddr 
         return 0;
       }
       if (len >= 4 && util_read_be16(p) == PROTO_CHAP && p[2] == 4) {
-        tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "ppp: MS-CHAPv2 failure");
+        uint16_t chap_len = len >= 6 ? util_read_be16(p + 4) : 0u;
+        ppp_mschapv2_failure_info_t failure;
+        if (chap_len >= 4u && (size_t)chap_len + 2u <= len &&
+            ppp_mschapv2_parse_failure(p + 6, (size_t)chap_len - 4u, &failure) == 0) {
+          char err[16];
+          char retry[16];
+          char version[16];
+          snprintf(err, sizeof(err), failure.has_error_code ? "%d" : "-", failure.error_code);
+          snprintf(retry, sizeof(retry), failure.has_retry ? "%d" : "-", failure.retry);
+          snprintf(version, sizeof(version), failure.has_version ? "%d" : "-", failure.version);
+          tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG,
+                            "ppp: MS-CHAPv2 failure E=%s R=%s V=%s M=%s", err, retry, version,
+                            failure.has_message ? failure.message : "-");
+        } else {
+          tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "ppp: MS-CHAPv2 failure");
+        }
         return -1;
       }
     }

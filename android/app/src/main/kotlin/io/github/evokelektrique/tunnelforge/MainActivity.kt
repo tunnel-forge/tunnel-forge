@@ -264,16 +264,34 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 VpnContract.DISCONNECT -> {
-                    AppLog.d(TAG, "vpn_call disconnect dispatched action=ACTION_STOP")
-                    val intent = Intent(this, TunnelVpnService::class.java).apply {
-                        action = TunnelVpnService.ACTION_STOP
-                    }
-                    startService(intent)
-                    startService(
-                        Intent(this, ProxyTunnelService::class.java).apply {
-                            action = ProxyTunnelService.ACTION_STOP
-                        },
+                    val args = call.arguments as? Map<*, *>
+                    val rawMode = args?.get(VpnContract.ARG_CONNECTION_MODE)?.toString()
+                    val attemptId = args?.get(VpnContract.ARG_ATTEMPT_ID)?.toString().orEmpty()
+                    val targets = VpnDisconnectDispatchPolicy.targetsForConnectionMode(rawMode)
+                    AppLog.d(
+                        TAG,
+                        "vpn_call disconnect dispatched action=ACTION_STOP mode=${rawMode.orEmpty().ifEmpty { "all" }} attempt=$attemptId vpn=${targets.stopVpn} proxy=${targets.stopProxy}",
                     )
+                    if (targets.stopVpn) {
+                        startService(
+                            Intent(this, TunnelVpnService::class.java).apply {
+                                action = TunnelVpnService.ACTION_STOP
+                                if (attemptId.isNotEmpty()) {
+                                    putExtra(TunnelVpnService.EXTRA_ATTEMPT_ID, attemptId)
+                                }
+                            },
+                        )
+                    }
+                    if (targets.stopProxy) {
+                        startService(
+                            Intent(this, ProxyTunnelService::class.java).apply {
+                                action = ProxyTunnelService.ACTION_STOP
+                                if (attemptId.isNotEmpty()) {
+                                    putExtra(ProxyTunnelService.EXTRA_ATTEMPT_ID, attemptId)
+                                }
+                            },
+                        )
+                    }
                     result.success(null)
                 }
                 else -> result.notImplemented()
@@ -619,4 +637,18 @@ class MainActivity : FlutterActivity() {
         private const val REQUEST_POST_NOTIFICATIONS = 0x4E51
         private const val ProfileTransferMimeType = "application/vnd.tunnelforge.profile+json"
     }
+}
+
+internal data class VpnDisconnectTargets(
+    val stopVpn: Boolean,
+    val stopProxy: Boolean,
+)
+
+internal object VpnDisconnectDispatchPolicy {
+    fun targetsForConnectionMode(mode: String?): VpnDisconnectTargets =
+        when (mode?.trim()) {
+            VpnContract.MODE_PROXY_ONLY -> VpnDisconnectTargets(stopVpn = false, stopProxy = true)
+            VpnContract.MODE_VPN_TUNNEL -> VpnDisconnectTargets(stopVpn = true, stopProxy = false)
+            else -> VpnDisconnectTargets(stopVpn = true, stopProxy = true)
+        }
 }

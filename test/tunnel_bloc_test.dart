@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:bloc_test/bloc_test.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:tunnel_forge/features/home/domain/home_models.dart';
 import 'package:tunnel_forge/features/home/domain/home_repositories.dart';
 import 'package:tunnel_forge/features/home/presentation/bloc/tunnel_bloc.dart';
@@ -58,6 +59,89 @@ void main() {
       ),
     ],
   );
+
+  blocTest<TunnelBloc, TunnelState>(
+    'shutdown-induced proxy failure during stop is treated as stopped',
+    build: () => TunnelBloc(_FakeTunnelRepository(), _FakeLogsRepository()),
+    seed: () => const TunnelState(
+      tunnelUp: true,
+      stopRequested: true,
+      connectionMode: ConnectionMode.proxyOnly,
+      activeAttemptId: 'attempt-current',
+    ),
+    act: (bloc) {
+      bloc.add(
+        const TunnelHostStateReceived(
+          TunnelHostUpdate(
+            state: VpnTunnelState.failed,
+            detail: 'Local proxy connection was lost.',
+            attemptId: 'attempt-current',
+          ),
+        ),
+      );
+    },
+    expect: () => const [TunnelState(connectionMode: ConnectionMode.proxyOnly)],
+  );
+
+  blocTest<TunnelBloc, TunnelState>(
+    'connect request is ignored while disconnect is pending',
+    build: () {
+      return TunnelBloc(_countingTunnelRepository, _FakeLogsRepository());
+    },
+    setUp: () {
+      _countingTunnelRepository = _CountingTunnelRepository();
+    },
+    seed: () => const TunnelState(stopRequested: true),
+    act: (bloc) {
+      bloc.add(TunnelConnectRequested(_connectRequest()));
+    },
+    expect: () => const <TunnelState>[],
+    verify: (_) {
+      expect(_countingTunnelRepository.connectCalls, 0);
+    },
+  );
+
+  blocTest<TunnelBloc, TunnelState>(
+    'untagged terminal event is ignored while an attempt is active',
+    build: () => TunnelBloc(_FakeTunnelRepository(), _FakeLogsRepository()),
+    seed: () => const TunnelState(
+      tunnelUp: true,
+      stopRequested: true,
+      connectionMode: ConnectionMode.proxyOnly,
+      activeAttemptId: 'attempt-current',
+    ),
+    act: (bloc) {
+      bloc.add(
+        const TunnelHostStateReceived(
+          TunnelHostUpdate(
+            state: VpnTunnelState.stopped,
+            detail: 'Stopped by app',
+            attemptId: '',
+          ),
+        ),
+      );
+    },
+    expect: () => const <TunnelState>[],
+  );
+}
+
+late _CountingTunnelRepository _countingTunnelRepository;
+
+TunnelConnectRequest _connectRequest() {
+  return const TunnelConnectRequest(
+    activeProfileId: null,
+    profileName: null,
+    server: 'vpn.example',
+    user: '',
+    password: '',
+    psk: '',
+    dnsAutomatic: true,
+    dnsServers: [],
+    mtu: Profile.defaultVpnMtu,
+    connectionMode: ConnectionMode.vpnTunnel,
+    splitTunnelSettings: SplitTunnelSettings(),
+    proxySettings: ProxySettings(),
+  );
 }
 
 class _FakeTunnelRepository implements TunnelRepository {
@@ -77,7 +161,10 @@ class _FakeTunnelRepository implements TunnelRepository {
   Future<void> connect(TunnelConnectRequest request) async {}
 
   @override
-  Future<void> disconnect() async {}
+  Future<void> disconnect({
+    required ConnectionMode connectionMode,
+    String attemptId = '',
+  }) async {}
 
   @override
   Future<Uint8List?> getAppIcon(String packageName) async => null;
@@ -90,6 +177,15 @@ class _FakeTunnelRepository implements TunnelRepository {
 
   @override
   void dispose() {}
+}
+
+class _CountingTunnelRepository extends _FakeTunnelRepository {
+  int connectCalls = 0;
+
+  @override
+  Future<void> connect(TunnelConnectRequest request) async {
+    connectCalls += 1;
+  }
 }
 
 class _FakeLogsRepository implements LogsRepository {

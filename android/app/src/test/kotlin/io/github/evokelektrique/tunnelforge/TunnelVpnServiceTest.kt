@@ -127,4 +127,26 @@ class TunnelVpnServiceTest {
             ),
         )
     }
+
+    @Test
+    fun staleStopRequestIsIgnoredWhenAttemptDoesNotMatchActiveAttempt() {
+        assertTrue(
+            VpnStopAttemptPolicy.shouldIgnoreStopRequest(
+                requestedAttemptId = "attempt-old",
+                activeAttemptId = "attempt-new",
+            ),
+        )
+        assertFalse(
+            VpnStopAttemptPolicy.shouldIgnoreStopRequest(
+                requestedAttemptId = "attempt-current",
+                activeAttemptId = "attempt-current",
+            ),
+        )
+        assertFalse(
+            VpnStopAttemptPolicy.shouldIgnoreStopRequest(
+                requestedAttemptId = "",
+                activeAttemptId = "attempt-current",
+            ),
+        )
+    }
 }
