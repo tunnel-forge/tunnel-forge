@@ -59,6 +59,27 @@ static int test_fifo_and_byte_counters(void) {
   return 0;
 }
 
+static int test_udp_shaped_ipv4_packet_round_trips_unchanged(void) {
+  packet_endpoint_t endpoint;
+  proxy_packet_queue_ctx_t ctx;
+  if (init_queue(&endpoint, &ctx) != 0) return 1;
+
+  const uint8_t udp_packet[] = {
+      0x45, 0x00, 0x00, 0x20, 0x12, 0x34, 0x40, 0x00, 0x40, 0x11, 0x00, 0x00,
+      10,   0,    0,    2,    93,   184,  216,  34,   0xc3, 0x50, 0x14, 0xe9,
+      0x00, 0x0c, 0x00, 0x00, 'p',  'i',  'n',  'g',
+  };
+  if (packet_endpoint_proxy_enqueue_outbound(&ctx, udp_packet, sizeof(udp_packet)) != 0) return 2;
+
+  uint8_t out[sizeof(udp_packet)] = {0};
+  ssize_t n = packet_endpoint_read(&endpoint, out, sizeof(out));
+  if (n != (ssize_t)sizeof(udp_packet)) return 3;
+  if (memcmp(out, udp_packet, sizeof(udp_packet)) != 0) return 4;
+
+  packet_endpoint_destroy_proxy_queue(&ctx);
+  return 0;
+}
+
 static int test_outbound_count_cap_returns_enobufs(void) {
   packet_endpoint_t endpoint;
   proxy_packet_queue_ctx_t ctx;
@@ -146,6 +167,11 @@ int main(void) {
   int rc = test_fifo_and_byte_counters();
   if (rc != 0) {
     fprintf(stderr, "test_fifo_and_byte_counters failed: %d\n", rc);
+    return rc;
+  }
+  rc = test_udp_shaped_ipv4_packet_round_trips_unchanged();
+  if (rc != 0) {
+    fprintf(stderr, "test_udp_shaped_ipv4_packet_round_trips_unchanged failed: %d\n", rc);
     return rc;
   }
   rc = test_outbound_count_cap_returns_enobufs();

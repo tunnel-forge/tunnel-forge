@@ -8,11 +8,14 @@ import java.io.EOFException
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.URI
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
+import java.net.SocketTimeoutException
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
@@ -358,7 +361,7 @@ class ProxyServerRuntime(
             warn("proxy reject proto=socks5 reason=malformed-request version=$reqVersion cmd=$cmd atyp=$atyp")
             return
         }
-        if (cmd != SOCKS_CMD_CONNECT) {
+        if (cmd != SOCKS_CMD_CONNECT && cmd != SOCKS_CMD_UDP_ASSOCIATE) {
             warn("proxy reject proto=socks5 reason=unsupported-command cmd=$cmd")
             writeSocksReply(output, SOCKS_REPLY_COMMAND_NOT_SUPPORTED)
             return
@@ -400,6 +403,10 @@ class ProxyServerRuntime(
         val portLo = input.read()
         if (portHi < 0 || portLo < 0) return
         val port = (portHi shl 8) or portLo
+        if (cmd == SOCKS_CMD_UDP_ASSOCIATE) {
+            handleSocksUdpAssociate(client, input, output, host, port)
+            return
+        }
         debug("SOCKS5 CONNECT request received: $host:$port")
         val request = ProxyConnectRequest(host = host, port = port, protocol = "socks5-connect")
         debug("proxy request proto=socks5-connect target=${request.host}:${request.port}")
@@ -433,6 +440,149 @@ class ProxyServerRuntime(
         }
     }
 
+    private fun handleSocksUdpAssociate(
+        client: Socket,
+        input: BufferedInputStream,
+        output: BufferedOutputStream,
+        requestedHost: String,
+        requestedPort: Int,
+    ) {
+        debug("SOCKS5 UDP ASSOCIATE request received: $requestedHost:$requestedPort")
+        if (requestedHost.isUnsupportedIpv6Target()) {
+            warn("proxy reject proto=socks5-udp reason=ipv6-unsupported target=$requestedHost:$requestedPort")
+            writeSocksReply(output, SOCKS_REPLY_HOST_UNREACHABLE)
+            return
+        }
+        var sessionId: Int? = null
+        try {
+            val requestedClientEndpoint =
+                requestedUdpClientEndpoint(
+                    client = client,
+                    requestedHost = requestedHost,
+                    requestedPort = requestedPort,
+                )
+            transport.openUdpAssociation(
+                ProxyConnectRequest(
+                    host = requestedHost,
+                    port = requestedPort,
+                    protocol = "socks5-udp",
+                ),
+            ).use { association ->
+                sessionId = association.descriptor.sessionId
+                DatagramSocket(0, client.localAddress).use { relaySocket ->
+                    relaySocket.soTimeout = UDP_RELAY_POLL_TIMEOUT_MS
+                    writeSocksReply(
+                        output = output,
+                        status = SOCKS_REPLY_SUCCEEDED,
+                        bindAddress = relaySocket.localAddress,
+                        bindPort = relaySocket.localPort,
+                    )
+                    debug("proxy udp associate ok sid=${association.descriptor.sessionId} relay=${relaySocket.localAddress.hostAddress}:${relaySocket.localPort}")
+                    client.soTimeout = 0
+                    val closed = AtomicBoolean(false)
+                    val clientAddress = AtomicReference(requestedClientEndpoint)
+                    val controlWatcher =
+                        Thread(
+                            {
+                                try {
+                                    while (!closed.get() && input.read() >= 0) {
+                                    }
+                                } catch (_: IOException) {
+                                } finally {
+                                    closed.set(true)
+                                    relaySocket.close()
+                                }
+                            },
+                            "proxy-socks5-udp-control-${association.descriptor.sessionId}",
+                        )
+                    val remotePump =
+                        Thread(
+                            {
+                                try {
+                                    while (!closed.get()) {
+                                        val datagram = association.receive(UDP_RELAY_POLL_TIMEOUT_MS.toLong()) ?: continue
+                                        val response = buildSocksUdpPacket(datagram) ?: continue
+                                        val targetClient = clientAddress.get() ?: continue
+                                        relaySocket.send(
+                                            DatagramPacket(
+                                                response,
+                                                response.size,
+                                                targetClient.address,
+                                                targetClient.port,
+                                            ),
+                                        )
+                                    }
+                                } catch (_: SocketException) {
+                                } catch (e: IOException) {
+                                    if (!closed.get()) warn("proxy udp remote pump error: ${e.message}")
+                                } finally {
+                                    closed.set(true)
+                                }
+                            },
+                            "proxy-socks5-udp-remote-${association.descriptor.sessionId}",
+                        )
+                    clientThreads.add(controlWatcher)
+                    clientThreads.add(remotePump)
+                    controlWatcher.start()
+                    remotePump.start()
+                    val buffer = ByteArray(MAX_UDP_RELAY_PACKET_BYTES)
+                    while (running.get() && !closed.get()) {
+                        val packet = DatagramPacket(buffer, buffer.size)
+                        try {
+                            relaySocket.receive(packet)
+                        } catch (_: SocketTimeoutException) {
+                            continue
+                        } catch (_: SocketException) {
+                            break
+                        }
+                        val observedClient = java.net.InetSocketAddress(packet.address, packet.port)
+                        val existingClient = clientAddress.get()
+                        if (existingClient == null) {
+                            if (packet.address != client.inetAddress) {
+                                warn("proxy udp drop reason=unexpected-client source=${packet.address.hostAddress}:${packet.port}")
+                                continue
+                            }
+                            clientAddress.compareAndSet(null, observedClient)
+                        } else if (existingClient != observedClient) {
+                            warn("proxy udp drop reason=client-endpoint-mismatch source=${packet.address.hostAddress}:${packet.port} expected=${existingClient.address.hostAddress}:${existingClient.port}")
+                            continue
+                        }
+                        val datagram = parseSocksUdpPacket(packet.data, packet.offset, packet.length)
+                        if (datagram == null) {
+                            warn("proxy udp drop reason=malformed-or-unsupported len=${packet.length}")
+                            continue
+                        }
+                        try {
+                            association.send(datagram)
+                        } catch (e: IOException) {
+                            warn("proxy udp drop reason=send-failed target=${datagram.host}:${datagram.port} error=${e.message}")
+                        }
+                    }
+                    closed.set(true)
+                    controlWatcher.interrupt()
+                    remotePump.interrupt()
+                }
+            }
+        } catch (e: IOException) {
+            warn(
+                "proxy fail proto=socks5-udp sid=${sessionId?.toString() ?: "pending"} target=$requestedHost:$requestedPort error=${e.message ?: DEFAULT_TRANSPORT_FAILURE}",
+            )
+            writeSocksReply(output, SOCKS_REPLY_GENERAL_FAILURE)
+        }
+    }
+
+    private fun requestedUdpClientEndpoint(
+        client: Socket,
+        requestedHost: String,
+        requestedPort: Int,
+    ): java.net.InetSocketAddress? {
+        if (requestedPort == 0) return null
+        if (requestedHost == "0.0.0.0") {
+            return java.net.InetSocketAddress(client.inetAddress, requestedPort)
+        }
+        return java.net.InetSocketAddress(InetAddress.getByName(requestedHost), requestedPort)
+    }
+
     private fun debug(message: String) = log(Log.DEBUG, message)
 
     private fun warn(message: String) = log(Log.WARN, message)
@@ -456,9 +606,86 @@ class ProxyServerRuntime(
         output.flush()
     }
 
-    private fun writeSocksReply(output: BufferedOutputStream, status: Int) {
-        output.write(byteArrayOf(0x05, status.toByte(), 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00))
+    private fun writeSocksReply(
+        output: BufferedOutputStream,
+        status: Int,
+        bindAddress: InetAddress = InetAddress.getByName("0.0.0.0"),
+        bindPort: Int = 0,
+    ) {
+        val address = bindAddress.address.takeIf { it.size == 4 } ?: byteArrayOf(0, 0, 0, 0)
+        output.write(
+            byteArrayOf(
+                0x05,
+                status.toByte(),
+                0x00,
+                0x01,
+                address[0],
+                address[1],
+                address[2],
+                address[3],
+                ((bindPort ushr 8) and 0xff).toByte(),
+                (bindPort and 0xff).toByte(),
+            ),
+        )
         output.flush()
+    }
+
+    private fun parseSocksUdpPacket(
+        packet: ByteArray,
+        offset: Int,
+        length: Int,
+    ): ProxyUdpDatagram? {
+        if (length < SOCKS_UDP_FIXED_PREFIX_LEN) return null
+        var cursor = offset
+        val end = offset + length
+        if (packet[cursor].toInt() != 0 || packet[cursor + 1].toInt() != 0) return null
+        cursor += 2
+        val frag = packet[cursor].toInt() and 0xff
+        cursor += 1
+        if (frag != 0) return null
+        val atyp = packet[cursor].toInt() and 0xff
+        cursor += 1
+        val host =
+            when (atyp) {
+                0x01 -> {
+                    if (cursor + 4 > end) return null
+                    val value = packet.copyOfRange(cursor, cursor + 4).joinToString(".") { (it.toInt() and 0xff).toString() }
+                    cursor += 4
+                    value
+                }
+                0x03 -> {
+                    if (cursor >= end) return null
+                    val hostLen = packet[cursor].toInt() and 0xff
+                    cursor += 1
+                    if (hostLen <= 0 || cursor + hostLen > end) return null
+                    val value = packet.copyOfRange(cursor, cursor + hostLen).toString(StandardCharsets.US_ASCII)
+                    cursor += hostLen
+                    value
+                }
+                0x04 -> return null
+                else -> return null
+            }
+        if (cursor + 2 > end) return null
+        val port = ((packet[cursor].toInt() and 0xff) shl 8) or (packet[cursor + 1].toInt() and 0xff)
+        cursor += 2
+        if (port !in 1..65535) return null
+        return ProxyUdpDatagram(
+            host = host,
+            port = port,
+            payload = packet.copyOfRange(cursor, end),
+        )
+    }
+
+    private fun buildSocksUdpPacket(datagram: ProxyUdpDatagram): ByteArray? {
+        val address = datagram.host.toIpv4LiteralOrNull()?.split('.')?.map { it.toInt().toByte() } ?: return null
+        val header = ByteArray(10)
+        header[3] = 0x01
+        for (i in 0 until 4) {
+            header[4 + i] = address[i]
+        }
+        header[8] = ((datagram.port ushr 8) and 0xff).toByte()
+        header[9] = (datagram.port and 0xff).toByte()
+        return header + datagram.payload
     }
 
     private fun readHttpRequest(input: BufferedInputStream): ParsedHttpRequest? {
@@ -884,10 +1111,14 @@ class ProxyServerRuntime(
         private const val IPV6_UNSUPPORTED_MESSAGE = "IPv6 targets are not supported in proxy mode."
         private const val RELAY_BUFFER_BYTES = 8192
         private const val SOCKS_CMD_CONNECT = 0x01
+        private const val SOCKS_CMD_UDP_ASSOCIATE = 0x03
         private const val SOCKS_REPLY_SUCCEEDED = 0x00
         private const val SOCKS_REPLY_GENERAL_FAILURE = 0x01
         private const val SOCKS_REPLY_HOST_UNREACHABLE = 0x04
         private const val SOCKS_REPLY_COMMAND_NOT_SUPPORTED = 0x07
+        private const val SOCKS_UDP_FIXED_PREFIX_LEN = 4
+        private const val UDP_RELAY_POLL_TIMEOUT_MS = 500
+        private const val MAX_UDP_RELAY_PACKET_BYTES = 65535
 
         private fun ByteArray.toIpv6Literal(): String {
             val groups = ArrayList<String>(8)

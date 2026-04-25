@@ -102,6 +102,131 @@ class UserspaceTunnelStackTest {
     }
 
     @Test
+    fun udpAssociationQueuesOutboundUdpAndDeliversMatchedReply() {
+        val backend = CapturingBackend()
+        val stack = BridgeUserspaceTunnelStack(bridge = ProxyPacketBridge(backend = backend), clientIpv4 = "10.0.0.2", logger = { _, _ -> })
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val association = stack.openUdpAssociation(ProxyConnectRequest(host = "0.0.0.0", port = 0, protocol = "socks5-udp"))
+        association.send(
+            ProxyUdpDatagram(
+                host = "93.184.216.34",
+                port = 5353,
+                payload = "ping".toByteArray(Charsets.US_ASCII),
+            ),
+        )
+
+        val outbound = backend.outboundPackets.single()
+        val outboundIpv4 = IpPacketParser.parseIpv4(outbound)!!
+        val outboundUdp = IpPacketParser.parseUdp(outbound, outboundIpv4)!!
+        assertEquals("10.0.0.2", outboundIpv4.sourceIp)
+        assertEquals("93.184.216.34", outboundIpv4.destinationIp)
+        assertEquals(5353, outboundUdp.destinationPort)
+
+        stack.processInboundPacketForTesting(
+            UdpPacketBuilder.buildIpv4UdpPacket(
+                sourceIp = "93.184.216.34",
+                destinationIp = "10.0.0.2",
+                sourcePort = 5353,
+                destinationPort = outboundUdp.sourcePort,
+                payload = "pong".toByteArray(Charsets.US_ASCII),
+            ),
+        )
+
+        val received = association.receive(500)
+        assertEquals("93.184.216.34", received!!.host)
+        assertEquals(5353, received.port)
+        assertEquals("pong", received.payload.toString(Charsets.US_ASCII))
+        association.close()
+        stack.stop()
+    }
+
+    @Test
+    fun udpAssociationRemovesRecordedRemoteWhenQueueFails() {
+        val backend = CapturingBackend(queueResult = { -1 })
+        val stack = BridgeUserspaceTunnelStack(bridge = ProxyPacketBridge(backend = backend), clientIpv4 = "10.0.0.2", logger = { _, _ -> })
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val association = stack.openUdpAssociation(ProxyConnectRequest(host = "0.0.0.0", port = 0, protocol = "socks5-udp"))
+        try {
+            association.send(
+                ProxyUdpDatagram(
+                    host = "93.184.216.34",
+                    port = 5353,
+                    payload = "ping".toByteArray(Charsets.US_ASCII),
+                ),
+            )
+            throw AssertionError("Expected UDP queue failure")
+        } catch (_: IOException) {
+        }
+
+        val outbound = backend.outboundPackets.single()
+        val outboundIpv4 = IpPacketParser.parseIpv4(outbound)!!
+        val outboundUdp = IpPacketParser.parseUdp(outbound, outboundIpv4)!!
+        stack.processInboundPacketForTesting(
+            UdpPacketBuilder.buildIpv4UdpPacket(
+                sourceIp = "93.184.216.34",
+                destinationIp = "10.0.0.2",
+                sourcePort = 5353,
+                destinationPort = outboundUdp.sourcePort,
+                payload = "late".toByteArray(Charsets.US_ASCII),
+            ),
+        )
+
+        assertNull(association.receive(50))
+        association.close()
+        stack.stop()
+    }
+
+    @Test
+    fun udpAssociationKeepsExistingRemoteWhenRetryQueueFails() {
+        val backend = CapturingBackend(queueResult = { if (outboundPackets.size == 1) 0 else -1 })
+        val stack = BridgeUserspaceTunnelStack(bridge = ProxyPacketBridge(backend = backend), clientIpv4 = "10.0.0.2", logger = { _, _ -> })
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val association = stack.openUdpAssociation(ProxyConnectRequest(host = "0.0.0.0", port = 0, protocol = "socks5-udp"))
+        association.send(
+            ProxyUdpDatagram(
+                host = "93.184.216.34",
+                port = 5353,
+                payload = "first".toByteArray(Charsets.US_ASCII),
+            ),
+        )
+        val firstOutbound = backend.outboundPackets.single()
+        val firstIpv4 = IpPacketParser.parseIpv4(firstOutbound)!!
+        val firstUdp = IpPacketParser.parseUdp(firstOutbound, firstIpv4)!!
+
+        try {
+            association.send(
+                ProxyUdpDatagram(
+                    host = "93.184.216.34",
+                    port = 5353,
+                    payload = "retry".toByteArray(Charsets.US_ASCII),
+                ),
+            )
+            throw AssertionError("Expected UDP queue failure")
+        } catch (_: IOException) {
+        }
+
+        stack.processInboundPacketForTesting(
+            UdpPacketBuilder.buildIpv4UdpPacket(
+                sourceIp = "93.184.216.34",
+                destinationIp = "10.0.0.2",
+                sourcePort = 5353,
+                destinationPort = firstUdp.sourcePort,
+                payload = "pong".toByteArray(Charsets.US_ASCII),
+            ),
+        )
+
+        val received = association.receive(500)
+        assertEquals("93.184.216.34", received!!.host)
+        assertEquals(5353, received.port)
+        assertEquals("pong", received.payload.toString(Charsets.US_ASCII))
+        association.close()
+        stack.stop()
+    }
+
+    @Test
     fun inboundSynAckQueuesFinalAckAndMarksSessionEstablished() {
         val backend = CapturingBackend()
         val stack = BridgeUserspaceTunnelStack(bridge = ProxyPacketBridge(backend = backend), clientIpv4 = "10.0.0.2", logger = { _, _ -> })

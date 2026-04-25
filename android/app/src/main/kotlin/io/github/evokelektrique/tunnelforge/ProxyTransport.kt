@@ -5,10 +5,13 @@ import java.io.Closeable
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -31,6 +34,12 @@ data class ProxyClientConnection(
     val output: OutputStream,
 )
 
+data class ProxyUdpDatagram(
+    val host: String,
+    val port: Int,
+    val payload: ByteArray,
+)
+
 interface ProxyTransportSession : Closeable {
     val descriptor: ProxySessionDescriptor
 
@@ -41,9 +50,24 @@ interface ProxyTransportSession : Closeable {
     fun pumpBidirectional(client: ProxyClientConnection)
 }
 
+interface ProxyUdpAssociation : Closeable {
+    val descriptor: ProxySessionDescriptor
+
+    @Throws(IOException::class)
+    fun send(datagram: ProxyUdpDatagram)
+
+    @Throws(IOException::class)
+    fun receive(timeoutMs: Long): ProxyUdpDatagram?
+}
+
 interface ProxyTransport {
     @Throws(IOException::class)
     fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession
+
+    @Throws(IOException::class)
+    fun openUdpAssociation(request: ProxyConnectRequest): ProxyUdpAssociation {
+        throw IOException("UDP forwarding is not attached yet.")
+    }
 }
 
 class StubProxyTransport(
@@ -78,6 +102,25 @@ class BridgeProxyTransport(
         }
     }
 
+    override fun openUdpAssociation(request: ProxyConnectRequest): ProxyUdpAssociation {
+        val association = stack.openUdpAssociation(request)
+        logDebug("proxy udp open sid=${association.descriptor.sessionId}")
+        return object : ProxyUdpAssociation {
+            override val descriptor: ProxySessionDescriptor = association.descriptor
+
+            override fun send(datagram: ProxyUdpDatagram) {
+                association.send(datagram)
+            }
+
+            override fun receive(timeoutMs: Long): ProxyUdpDatagram? = association.receive(timeoutMs)
+
+            override fun close() {
+                logDebug("proxy udp close sid=${descriptor.sessionId}")
+                association.close()
+            }
+        }
+    }
+
     private companion object {
         private const val TAG = "BridgeProxyTransport"
 
@@ -107,6 +150,97 @@ class DirectSocketProxyTransport(
             threadFactory = threadFactory,
             logger = logger,
         )
+
+    override fun openUdpAssociation(request: ProxyConnectRequest): ProxyUdpAssociation =
+        DirectSocketProxyUdpAssociation(
+            descriptor = ProxySessionDescriptor(nextSessionId.getAndIncrement(), request, System.currentTimeMillis()),
+            resolver = resolver,
+            socket = DatagramSocket(),
+            logger = logger,
+        )
+}
+
+private class DirectSocketProxyUdpAssociation(
+    override val descriptor: ProxySessionDescriptor,
+    private val resolver: (String) -> List<InetAddress>,
+    private val socket: DatagramSocket,
+    private val logger: (Int, String) -> Unit,
+) : ProxyUdpAssociation {
+    private val closed = AtomicBoolean(false)
+    private val remotes = ConcurrentHashMap.newKeySet<InetSocketAddress>()
+
+    override fun send(datagram: ProxyUdpDatagram) {
+        if (closed.get()) throw IOException("UDP association is already closed.")
+        val remoteAddress = resolveIpv4Target(datagram.host)
+        val remote = InetSocketAddress(remoteAddress, datagram.port)
+        val addedRemote = remotes.add(remote)
+        val packet = DatagramPacket(datagram.payload, datagram.payload.size, remoteAddress, datagram.port)
+        logger(
+            Log.DEBUG,
+            "proxy direct udp out sid=${descriptor.sessionId} target=${datagram.host}:${datagram.port} ip=${remoteAddress.hostAddress} bytes=${datagram.payload.size}",
+        )
+        try {
+            socket.send(packet)
+        } catch (e: IOException) {
+            if (addedRemote) remotes.remove(remote)
+            throw e
+        }
+    }
+
+    override fun receive(timeoutMs: Long): ProxyUdpDatagram? {
+        if (closed.get()) return null
+        val deadlineNs = System.nanoTime() + timeoutMs.coerceAtLeast(1L) * NANOS_PER_MILLI
+        val buffer = ByteArray(MAX_UDP_PACKET_BYTES)
+        while (!closed.get()) {
+            val remainingMs = ((deadlineNs - System.nanoTime()) / NANOS_PER_MILLI).coerceAtLeast(1L)
+            socket.soTimeout = remainingMs.coerceIn(1L, Int.MAX_VALUE.toLong()).toInt()
+            val packet = DatagramPacket(buffer, buffer.size)
+            try {
+                socket.receive(packet)
+                val remote = InetSocketAddress(packet.address, packet.port)
+                if (!remotes.contains(remote)) {
+                    logger(
+                        Log.DEBUG,
+                        "proxy direct udp drop sid=${descriptor.sessionId} reason=source-mismatch source=${packet.address.hostAddress}:${packet.port}",
+                    )
+                    if (System.nanoTime() >= deadlineNs) return null
+                    continue
+                }
+                return ProxyUdpDatagram(
+                    host = packet.address.hostAddress ?: packet.address.hostName,
+                    port = packet.port,
+                    payload = packet.data.copyOfRange(packet.offset, packet.offset + packet.length),
+                )
+            } catch (_: java.net.SocketTimeoutException) {
+                return null
+            }
+        }
+        return null
+    }
+
+    override fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        socket.close()
+    }
+
+    private fun resolveIpv4Target(host: String): InetAddress {
+        host.toIpv4LiteralOrNull()?.let { literal ->
+            return InetAddress.getByName(literal)
+        }
+        val resolved =
+            resolver(host).firstOrNull { it is Inet4Address }
+                ?: throw IOException("IPv6 destinations are not supported in proxy mode.")
+        logger(
+            Log.DEBUG,
+            "proxy direct udp resolve sid=${descriptor.sessionId} host=$host ip=${resolved.hostAddress}",
+        )
+        return resolved
+    }
+
+    private companion object {
+        private const val MAX_UDP_PACKET_BYTES = 65535
+        private const val NANOS_PER_MILLI = 1_000_000L
+    }
 }
 
 private class DirectSocketProxyTransportSession(

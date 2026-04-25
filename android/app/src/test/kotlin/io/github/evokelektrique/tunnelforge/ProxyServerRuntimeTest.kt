@@ -3,13 +3,17 @@ package io.github.evokelektrique.tunnelforge
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.InputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -1130,6 +1134,481 @@ class ProxyServerRuntimeTest {
                 assertEquals(0x07, input.read())
             }
             assertTrue(requests.isEmpty())
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun socksUdpAssociateRelaysDatagramsThroughTransport() {
+        val sent = CopyOnWriteArrayList<ProxyUdpDatagram>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
+                    throw AssertionError("TCP transport should not be used for UDP ASSOCIATE")
+                }
+
+                override fun openUdpAssociation(request: ProxyConnectRequest): ProxyUdpAssociation {
+                    val replies = ArrayBlockingQueue<ProxyUdpDatagram>(4)
+                    return object : ProxyUdpAssociation {
+                        override val descriptor = ProxySessionDescriptor(7, request, 0)
+
+                        override fun send(datagram: ProxyUdpDatagram) {
+                            sent.add(datagram)
+                            replies.offer(
+                                ProxyUdpDatagram(
+                                    host = "127.0.0.1",
+                                    port = datagram.port,
+                                    payload = "pong".toByteArray(StandardCharsets.US_ASCII),
+                                ),
+                            )
+                        }
+
+                        override fun receive(timeoutMs: Long): ProxyUdpDatagram? =
+                            replies.poll(timeoutMs, TimeUnit.MILLISECONDS)
+
+                        override fun close() = Unit
+                    }
+                }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config = ProxyRuntimeConfig(httpEnabled = false, httpPort = 8080, socksEnabled = true, socksPort = port),
+                logger = {},
+                transport = transport,
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            Socket("127.0.0.1", port).use { control ->
+                val output = BufferedOutputStream(control.getOutputStream())
+                val input = BufferedInputStream(control.getInputStream())
+                output.write(byteArrayOf(0x05, 0x01, 0x00))
+                output.flush()
+                assertEquals(0x05, input.read())
+                assertEquals(0x00, input.read())
+                output.write(
+                    byteArrayOf(
+                        0x05,
+                        0x03,
+                        0x00,
+                        0x01,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                    ),
+                )
+                output.flush()
+                val reply = input.readNBytes(10)
+                assertEquals(0x05, reply[0].toInt() and 0xff)
+                assertEquals(0x00, reply[1].toInt() and 0xff)
+                val relayPort = ((reply[8].toInt() and 0xff) shl 8) or (reply[9].toInt() and 0xff)
+                assertTrue(relayPort > 0)
+
+                DatagramSocket().use { udp ->
+                    udp.soTimeout = 2_000
+                    val request =
+                        byteArrayOf(
+                            0x00,
+                            0x00,
+                            0x00,
+                            0x01,
+                            127,
+                            0,
+                            0,
+                            1,
+                            0x14,
+                            0xe9.toByte(),
+                        ) + "ping".toByteArray(StandardCharsets.US_ASCII)
+                    udp.send(
+                        DatagramPacket(
+                            request,
+                            request.size,
+                            java.net.InetAddress.getByName("127.0.0.1"),
+                            relayPort,
+                        ),
+                    )
+                    val responseBuffer = ByteArray(64)
+                    val response = DatagramPacket(responseBuffer, responseBuffer.size)
+                    udp.receive(response)
+                    val responseBytes = response.data.copyOfRange(response.offset, response.offset + response.length)
+                    assertEquals("pong", responseBytes.copyOfRange(10, responseBytes.size).toString(StandardCharsets.US_ASCII))
+                }
+            }
+            assertEquals(1, sent.size)
+            assertEquals("127.0.0.1", sent.first().host)
+            assertEquals(5353, sent.first().port)
+            assertEquals("ping", sent.first().payload.toString(StandardCharsets.US_ASCII))
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun socksUdpAssociateDropsSendFailuresWithoutClosingAssociation() {
+        val sent = CopyOnWriteArrayList<ProxyUdpDatagram>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
+                    throw AssertionError("TCP transport should not be used for UDP ASSOCIATE")
+                }
+
+                override fun openUdpAssociation(request: ProxyConnectRequest): ProxyUdpAssociation {
+                    val replies = ArrayBlockingQueue<ProxyUdpDatagram>(4)
+                    return object : ProxyUdpAssociation {
+                        override val descriptor = ProxySessionDescriptor(10, request, 0)
+
+                        override fun send(datagram: ProxyUdpDatagram) {
+                            if (datagram.payload.toString(StandardCharsets.US_ASCII) == "bad") {
+                                throw java.io.IOException("send failed")
+                            }
+                            sent.add(datagram)
+                            replies.offer(
+                                ProxyUdpDatagram(
+                                    host = "127.0.0.1",
+                                    port = datagram.port,
+                                    payload = "pong".toByteArray(StandardCharsets.US_ASCII),
+                                ),
+                            )
+                        }
+
+                        override fun receive(timeoutMs: Long): ProxyUdpDatagram? =
+                            replies.poll(timeoutMs, TimeUnit.MILLISECONDS)
+
+                        override fun close() = Unit
+                    }
+                }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config = ProxyRuntimeConfig(httpEnabled = false, httpPort = 8080, socksEnabled = true, socksPort = port),
+                logger = {},
+                transport = transport,
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            Socket("127.0.0.1", port).use { control ->
+                val output = BufferedOutputStream(control.getOutputStream())
+                val input = BufferedInputStream(control.getInputStream())
+                output.write(byteArrayOf(0x05, 0x01, 0x00))
+                output.flush()
+                assertEquals(0x05, input.read())
+                assertEquals(0x00, input.read())
+                output.write(byteArrayOf(0x05, 0x03, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
+                output.flush()
+                val reply = input.readNBytes(10)
+                assertEquals(0x00, reply[1].toInt() and 0xff)
+                val relayPort = ((reply[8].toInt() and 0xff) shl 8) or (reply[9].toInt() and 0xff)
+
+                DatagramSocket().use { udp ->
+                    udp.soTimeout = 2_000
+                    fun socksUdpRequest(payload: String): ByteArray =
+                        byteArrayOf(
+                            0x00,
+                            0x00,
+                            0x00,
+                            0x01,
+                            127,
+                            0,
+                            0,
+                            1,
+                            0x14,
+                            0xe9.toByte(),
+                        ) + payload.toByteArray(StandardCharsets.US_ASCII)
+
+                    udp.send(
+                        DatagramPacket(
+                            socksUdpRequest("bad"),
+                            socksUdpRequest("bad").size,
+                            java.net.InetAddress.getByName("127.0.0.1"),
+                            relayPort,
+                        ),
+                    )
+                    udp.send(
+                        DatagramPacket(
+                            socksUdpRequest("good"),
+                            socksUdpRequest("good").size,
+                            java.net.InetAddress.getByName("127.0.0.1"),
+                            relayPort,
+                        ),
+                    )
+
+                    val responseBuffer = ByteArray(64)
+                    val response = DatagramPacket(responseBuffer, responseBuffer.size)
+                    udp.receive(response)
+                    val responseBytes = response.data.copyOfRange(response.offset, response.offset + response.length)
+                    assertEquals("pong", responseBytes.copyOfRange(10, responseBytes.size).toString(StandardCharsets.US_ASCII))
+                }
+            }
+            assertEquals(1, sent.size)
+            assertEquals("good", sent.first().payload.toString(StandardCharsets.US_ASCII))
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun socksUdpAssociateHonorsExplicitClientEndpoint() {
+        val sent = CopyOnWriteArrayList<ProxyUdpDatagram>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
+                    throw AssertionError("TCP transport should not be used for UDP ASSOCIATE")
+                }
+
+                override fun openUdpAssociation(request: ProxyConnectRequest): ProxyUdpAssociation =
+                    object : ProxyUdpAssociation {
+                        override val descriptor = ProxySessionDescriptor(8, request, 0)
+
+                        override fun send(datagram: ProxyUdpDatagram) {
+                            sent.add(datagram)
+                        }
+
+                        override fun receive(timeoutMs: Long): ProxyUdpDatagram? = null
+
+                        override fun close() = Unit
+                    }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config = ProxyRuntimeConfig(httpEnabled = false, httpPort = 8080, socksEnabled = true, socksPort = port),
+                logger = {},
+                transport = transport,
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            DatagramSocket().use { expectedUdp ->
+                DatagramSocket().use { rogueUdp ->
+                    Socket("127.0.0.1", port).use { control ->
+                        val output = BufferedOutputStream(control.getOutputStream())
+                        val input = BufferedInputStream(control.getInputStream())
+                        output.write(byteArrayOf(0x05, 0x01, 0x00))
+                        output.flush()
+                        assertEquals(0x05, input.read())
+                        assertEquals(0x00, input.read())
+                        output.write(
+                            byteArrayOf(
+                                0x05,
+                                0x03,
+                                0x00,
+                                0x01,
+                                127,
+                                0,
+                                0,
+                                1,
+                                ((expectedUdp.localPort ushr 8) and 0xff).toByte(),
+                                (expectedUdp.localPort and 0xff).toByte(),
+                            ),
+                        )
+                        output.flush()
+                        val reply = input.readNBytes(10)
+                        assertEquals(0x00, reply[1].toInt() and 0xff)
+                        val relayPort = ((reply[8].toInt() and 0xff) shl 8) or (reply[9].toInt() and 0xff)
+
+                        val request =
+                            byteArrayOf(
+                                0x00,
+                                0x00,
+                                0x00,
+                                0x01,
+                                127,
+                                0,
+                                0,
+                                1,
+                                0x14,
+                                0xe9.toByte(),
+                            ) + "ok".toByteArray(StandardCharsets.US_ASCII)
+                        rogueUdp.send(
+                            DatagramPacket(
+                                request,
+                                request.size,
+                                java.net.InetAddress.getByName("127.0.0.1"),
+                                relayPort,
+                            ),
+                        )
+                        Thread.sleep(100)
+                        assertTrue(sent.isEmpty())
+
+                        expectedUdp.send(
+                            DatagramPacket(
+                                request,
+                                request.size,
+                                java.net.InetAddress.getByName("127.0.0.1"),
+                                relayPort,
+                            ),
+                        )
+                        repeat(20) {
+                            if (sent.isNotEmpty()) return@repeat
+                            Thread.sleep(25)
+                        }
+                    }
+                }
+            }
+            assertEquals(1, sent.size)
+            assertEquals("ok", sent.first().payload.toString(StandardCharsets.US_ASCII))
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun socksUdpAssociateRejectsUnresolvableExplicitEndpointBeforeSuccess() {
+        val opened = AtomicBoolean(false)
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
+                    throw AssertionError("TCP transport should not be used for UDP ASSOCIATE")
+                }
+
+                override fun openUdpAssociation(request: ProxyConnectRequest): ProxyUdpAssociation {
+                    opened.set(true)
+                    return object : ProxyUdpAssociation {
+                        override val descriptor = ProxySessionDescriptor(11, request, 0)
+
+                        override fun send(datagram: ProxyUdpDatagram) = Unit
+
+                        override fun receive(timeoutMs: Long): ProxyUdpDatagram? = null
+
+                        override fun close() = Unit
+                    }
+                }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config = ProxyRuntimeConfig(httpEnabled = false, httpPort = 8080, socksEnabled = true, socksPort = port),
+                logger = {},
+                transport = transport,
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            Socket("127.0.0.1", port).use { control ->
+                control.soTimeout = 1_000
+                val output = BufferedOutputStream(control.getOutputStream())
+                val input = BufferedInputStream(control.getInputStream())
+                output.write(byteArrayOf(0x05, 0x01, 0x00))
+                output.flush()
+                assertEquals(0x05, input.read())
+                assertEquals(0x00, input.read())
+
+                val hostBytes = "999.999.999.999".toByteArray(StandardCharsets.US_ASCII)
+                output.write(
+                    byteArrayOf(
+                        0x05,
+                        0x03,
+                        0x00,
+                        0x03,
+                        hostBytes.size.toByte(),
+                    ) + hostBytes +
+                        byteArrayOf(
+                            0x12,
+                            0x34,
+                        ),
+                )
+                output.flush()
+
+                val reply = input.readNBytes(10)
+                assertEquals(10, reply.size)
+                assertEquals(0x05, reply[0].toInt() and 0xff)
+                assertEquals(0x01, reply[1].toInt() and 0xff)
+                assertTrue(!opened.get())
+
+                control.soTimeout = 200
+                try {
+                    assertEquals(-1, input.read())
+                } catch (_: SocketTimeoutException) {
+                }
+            }
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun socksUdpAssociateAcceptsShortDomainAddressedDatagram() {
+        val sent = CopyOnWriteArrayList<ProxyUdpDatagram>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
+                    throw AssertionError("TCP transport should not be used for UDP ASSOCIATE")
+                }
+
+                override fun openUdpAssociation(request: ProxyConnectRequest): ProxyUdpAssociation =
+                    object : ProxyUdpAssociation {
+                        override val descriptor = ProxySessionDescriptor(9, request, 0)
+
+                        override fun send(datagram: ProxyUdpDatagram) {
+                            sent.add(datagram)
+                        }
+
+                        override fun receive(timeoutMs: Long): ProxyUdpDatagram? = null
+
+                        override fun close() = Unit
+                    }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config = ProxyRuntimeConfig(httpEnabled = false, httpPort = 8080, socksEnabled = true, socksPort = port),
+                logger = {},
+                transport = transport,
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            Socket("127.0.0.1", port).use { control ->
+                val output = BufferedOutputStream(control.getOutputStream())
+                val input = BufferedInputStream(control.getInputStream())
+                output.write(byteArrayOf(0x05, 0x01, 0x00))
+                output.flush()
+                assertEquals(0x05, input.read())
+                assertEquals(0x00, input.read())
+                output.write(byteArrayOf(0x05, 0x03, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
+                output.flush()
+                val reply = input.readNBytes(10)
+                assertEquals(0x00, reply[1].toInt() and 0xff)
+                val relayPort = ((reply[8].toInt() and 0xff) shl 8) or (reply[9].toInt() and 0xff)
+
+                DatagramSocket().use { udp ->
+                    val request =
+                        byteArrayOf(
+                            0x00,
+                            0x00,
+                            0x00,
+                            0x03,
+                            0x01,
+                            'a'.code.toByte(),
+                            0x14,
+                            0xe9.toByte(),
+                            'x'.code.toByte(),
+                        )
+                    udp.send(
+                        DatagramPacket(
+                            request,
+                            request.size,
+                            java.net.InetAddress.getByName("127.0.0.1"),
+                            relayPort,
+                        ),
+                    )
+                    repeat(20) {
+                        if (sent.isNotEmpty()) return@repeat
+                        Thread.sleep(25)
+                    }
+                }
+            }
+            assertEquals(1, sent.size)
+            assertEquals("a", sent.first().host)
+            assertEquals(5353, sent.first().port)
+            assertEquals("x", sent.first().payload.toString(StandardCharsets.US_ASCII))
         } finally {
             runtime.stop()
         }

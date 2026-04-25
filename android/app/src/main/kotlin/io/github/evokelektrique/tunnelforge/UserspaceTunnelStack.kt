@@ -6,15 +6,19 @@ import java.io.OutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 interface UserspaceTunnelStack {
     fun waitUntilReady(timeoutMs: Long = 4000, pollIntervalMs: Long = 100): Boolean
 
     fun openTcpSession(request: ProxyConnectRequest): UserspaceTunnelSession
+
+    fun openUdpAssociation(request: ProxyConnectRequest): UserspaceUdpAssociation
 
     fun stop()
 }
@@ -27,6 +31,16 @@ interface UserspaceTunnelSession : AutoCloseable {
 
     @Throws(IOException::class)
     fun pumpBidirectional(client: ProxyClientConnection)
+}
+
+interface UserspaceUdpAssociation : AutoCloseable {
+    val descriptor: ProxySessionDescriptor
+
+    @Throws(IOException::class)
+    fun send(datagram: ProxyUdpDatagram)
+
+    @Throws(IOException::class)
+    fun receive(timeoutMs: Long): ProxyUdpDatagram?
 }
 
 enum class UserspaceSessionState {
@@ -57,8 +71,11 @@ internal class BridgeUserspaceTunnelStack(
 ) : UserspaceTunnelStack {
     private val nextSessionId = AtomicInteger(1)
     private val nextLocalPort = AtomicInteger(30000)
+    private val nextUdpLocalPort = AtomicInteger(20000)
     private val sessions = ConcurrentHashMap<Int, UserspaceSessionSnapshot>()
     private val tcpRuntimeBySessionId = ConcurrentHashMap<Int, TcpSessionRuntime>()
+    private val udpRuntimeBySessionId = ConcurrentHashMap<Int, UdpAssociationRuntime>()
+    private val udpRuntimeByLocalPort = ConcurrentHashMap<Int, UdpAssociationRuntime>()
     private val clientAttachments = ConcurrentHashMap<Int, ClientAttachment>()
     private val dnsResolver =
         TunneledDnsResolver(
@@ -69,6 +86,7 @@ internal class BridgeUserspaceTunnelStack(
             logger = logger,
         )
     private val maxTcpPayloadBytes = (linkMtu - IPV4_HEADER_LEN - TCP_HEADER_LEN).coerceAtLeast(1)
+    private val maxUdpPayloadBytes = (linkMtu - IPV4_HEADER_LEN - UDP_HEADER_LEN).coerceAtLeast(1)
     private val advertisedMss = maxTcpPayloadBytes.coerceAtMost(MAX_TCP_OPTION_VALUE)
 
     @Volatile
@@ -141,6 +159,45 @@ internal class BridgeUserspaceTunnelStack(
         )
     }
 
+    override fun openUdpAssociation(request: ProxyConnectRequest): UserspaceUdpAssociation {
+        if (!running || !bridge.isRunning()) {
+            throw IOException("Proxy packet bridge is not active.")
+        }
+        val descriptor =
+            ProxySessionDescriptor(
+                sessionId = nextSessionId.getAndIncrement(),
+                request = request,
+                openedAtMs = System.currentTimeMillis(),
+            )
+        val localPort = allocateUdpLocalPort()
+        val runtime =
+            UdpAssociationRuntime(
+                sessionId = descriptor.sessionId,
+                localPort = localPort,
+            )
+        udpRuntimeBySessionId[descriptor.sessionId] = runtime
+        udpRuntimeByLocalPort[localPort] = runtime
+        sessions[descriptor.sessionId] =
+            UserspaceSessionSnapshot(
+                descriptor = descriptor,
+                state = UserspaceSessionState.established,
+                lastEvent = "UDP association ready on $clientIpv4:$localPort",
+            )
+        logger(Log.DEBUG, "proxy udp association open sid=${descriptor.sessionId} local=$clientIpv4:$localPort")
+        return BridgeUserspaceUdpAssociation(
+            descriptor = descriptor,
+            onSend = { datagram -> sendUdpDatagram(runtime, datagram) },
+            onReceive = { timeoutMs -> runtime.receive(timeoutMs) },
+            onClose = {
+                runtime.close()
+                udpRuntimeBySessionId.remove(descriptor.sessionId, runtime)
+                udpRuntimeByLocalPort.remove(localPort, runtime)
+                sessions.remove(descriptor.sessionId)
+                logger(Log.DEBUG, "proxy udp association close sid=${descriptor.sessionId} local=$clientIpv4:$localPort")
+            },
+        )
+    }
+
     fun activeSessions(): List<ProxySessionDescriptor> = sessions.values.sortedBy { it.descriptor.sessionId }.map { it.descriptor }
 
     fun sessionSnapshots(): List<UserspaceSessionSnapshot> = sessions.values.sortedBy { it.descriptor.sessionId }
@@ -151,8 +208,11 @@ internal class BridgeUserspaceTunnelStack(
         running = false
         logger(Log.DEBUG, "userspace stack stop sessions=${sessions.size} runtimes=${tcpRuntimeBySessionId.size} attachments=${clientAttachments.size}")
         tcpRuntimeBySessionId.values.forEach { it.signalRuntimeFailure("Proxy packet bridge stopped.") }
+        udpRuntimeBySessionId.values.forEach { it.close() }
         sessions.clear()
         tcpRuntimeBySessionId.clear()
+        udpRuntimeBySessionId.clear()
+        udpRuntimeByLocalPort.clear()
         clientAttachments.values.forEach { it.close() }
         clientAttachments.clear()
         bridge.stop()
@@ -173,7 +233,7 @@ internal class BridgeUserspaceTunnelStack(
             else ->
                 logger(
                     Log.DEBUG,
-                    "Dropped IPv4 protocol=${ipv4.protocol} ${ipv4.sourceIp} -> ${ipv4.destinationIp} len=${ipv4.totalLength}; TCP forwarding only is planned",
+                    "Dropped unsupported IPv4 protocol=${ipv4.protocol} ${ipv4.sourceIp} -> ${ipv4.destinationIp} len=${ipv4.totalLength}",
                 )
         }
     }
@@ -223,10 +283,41 @@ internal class BridgeUserspaceTunnelStack(
             return
         }
         if (!dnsResolver.handleInboundPacket(ipv4, udp, packet)) {
+            handleInboundProxyUdpPacket(packet, ipv4, udp)
+        }
+    }
+
+    private fun handleInboundProxyUdpPacket(
+        packet: ByteArray,
+        ipv4: ParsedIpv4Packet,
+        udp: ParsedUdpDatagram,
+    ) {
+        val runtime = udpRuntimeByLocalPort[udp.destinationPort]
+        if (runtime == null) {
             logger(
                 Log.DEBUG,
-                "Dropped IPv4 protocol=${ipv4.protocol} ${ipv4.sourceIp} -> ${ipv4.destinationIp} len=${ipv4.totalLength}; TCP forwarding only is planned",
+                "Dropped inbound UDP without association ${ipv4.sourceIp}:${udp.sourcePort} -> ${ipv4.destinationIp}:${udp.destinationPort} len=${udp.payloadLength}",
             )
+            return
+        }
+        if (!runtime.acceptsRemote(ipv4.sourceIp, udp.sourcePort)) {
+            logger(
+                Log.DEBUG,
+                "Dropped inbound UDP source mismatch sid=${runtime.sessionId} source=${ipv4.sourceIp}:${udp.sourcePort} local=${udp.destinationPort}",
+            )
+            return
+        }
+        val payload = packet.copyOfRange(udp.payloadOffset, udp.payloadOffset + udp.payloadLength)
+        if (runtime.enqueue(ProxyUdpDatagram(host = ipv4.sourceIp, port = udp.sourcePort, payload = payload))) {
+            logger(Log.DEBUG, "proxy udp in sid=${runtime.sessionId} source=${ipv4.sourceIp}:${udp.sourcePort} bytes=${udp.payloadLength}")
+            updateSessionState(
+                runtime.sessionId,
+                UserspaceSessionState.established,
+                "Queued inbound UDP payload len=${udp.payloadLength}",
+            )
+        } else {
+            logger(Log.WARN, "proxy udp drop sid=${runtime.sessionId} reason=receive-queue-full")
+            updateSessionState(runtime.sessionId, UserspaceSessionState.failed, "UDP receive queue is full")
         }
     }
 
@@ -660,6 +751,51 @@ internal class BridgeUserspaceTunnelStack(
         }
     }
 
+    private fun sendUdpDatagram(runtime: UdpAssociationRuntime, datagram: ProxyUdpDatagram) {
+        if (datagram.port !in 1..65535) {
+            throw IOException("Invalid UDP port.")
+        }
+        if (datagram.payload.size > maxUdpPayloadBytes) {
+            throw IOException("UDP payload is too large for the tunnel MTU.")
+        }
+        val remoteIp = resolveUdpRemoteIpv4(datagram.host)
+        val addedRemote = runtime.recordRemote(remoteIp, datagram.port)
+        val packet =
+            UdpPacketBuilder.buildIpv4UdpPacket(
+                sourceIp = clientIpv4,
+                destinationIp = remoteIp,
+                sourcePort = runtime.localPort,
+                destinationPort = datagram.port,
+                payload = datagram.payload,
+            )
+        if (!bridge.queueOutboundPacket(packet)) {
+            val message = "Failed to queue outbound UDP payload."
+            if (addedRemote) runtime.removeRemote(remoteIp, datagram.port)
+            updateSessionState(runtime.sessionId, UserspaceSessionState.failed, message)
+            throw IOException(message)
+        }
+        logger(Log.DEBUG, "proxy udp out sid=${runtime.sessionId} target=${datagram.host}:${datagram.port} ip=$remoteIp bytes=${datagram.payload.size}")
+        updateSessionState(runtime.sessionId, UserspaceSessionState.established, "Queued outbound UDP payload len=${datagram.payload.size}")
+    }
+
+    private fun resolveUdpRemoteIpv4(host: String): String {
+        host.toIpv4LiteralOrNull()?.let { return it }
+        if (host.contains(':')) {
+            throw IOException("IPv6 destinations are not supported in proxy mode.")
+        }
+        return dnsResolver.resolve(host)
+    }
+
+    private fun allocateUdpLocalPort(): Int {
+        repeat(UDP_LOCAL_PORT_SPAN) {
+            val candidate = nextUdpLocalPort.getAndUpdate {
+                if (it >= UDP_LOCAL_PORT_MAX) UDP_LOCAL_PORT_MIN else it + 1
+            }
+            if (!udpRuntimeByLocalPort.containsKey(candidate)) return candidate
+        }
+        throw IOException("No UDP association source ports are available.")
+    }
+
     companion object {
         private const val TAG = "UserspaceTunnelStack"
         private const val IPV4_HEADER_LEN = 20
@@ -669,9 +805,13 @@ internal class BridgeUserspaceTunnelStack(
         private const val MAX_TCP_OPTION_VALUE = 0xffff
         private const val DEFAULT_CLIENT_IPV4 = "10.0.0.2"
         private const val DEFAULT_LINK_MTU = 1450
-        private const val DEFAULT_FAILURE_REASON = "TCP forwarding over the proxy packet bridge is not attached yet."
+        private const val DEFAULT_FAILURE_REASON = "Proxy forwarding over the packet bridge is not attached yet."
         private const val DEFAULT_CONNECT_TIMEOUT_MS = 10_000L
         private const val LOCALHOST_IPV4 = "127.0.0.1"
+        private const val UDP_HEADER_LEN = 8
+        private const val UDP_LOCAL_PORT_MIN = 20000
+        private const val UDP_LOCAL_PORT_MAX = 29999
+        private const val UDP_LOCAL_PORT_SPAN = UDP_LOCAL_PORT_MAX - UDP_LOCAL_PORT_MIN + 1
         private val DEFAULT_SYN_RETRANSMIT_DELAYS_MS = listOf(1_000L, 2_000L, 4_000L)
     }
 }
@@ -815,6 +955,62 @@ private class TcpSessionRuntime(
     }
 }
 
+private data class UdpRemoteEndpoint(
+    val ip: String,
+    val port: Int,
+)
+
+private class UdpAssociationRuntime(
+    val sessionId: Int,
+    val localPort: Int,
+) {
+    private val closed = AtomicBoolean(false)
+    private val remotes = ConcurrentHashMap.newKeySet<UdpRemoteEndpoint>()
+    private val receiveQueue = ArrayBlockingQueue<ProxyUdpDatagram>(RECEIVE_QUEUE_CAPACITY)
+
+    fun recordRemote(
+        ip: String,
+        port: Int,
+    ): Boolean = remotes.add(UdpRemoteEndpoint(ip, port))
+
+    fun removeRemote(
+        ip: String,
+        port: Int,
+    ) {
+        remotes.remove(UdpRemoteEndpoint(ip, port))
+    }
+
+    fun acceptsRemote(
+        ip: String,
+        port: Int,
+    ): Boolean = !closed.get() && remotes.contains(UdpRemoteEndpoint(ip, port))
+
+    fun enqueue(datagram: ProxyUdpDatagram): Boolean {
+        if (closed.get()) return false
+        return receiveQueue.offer(datagram)
+    }
+
+    fun receive(timeoutMs: Long): ProxyUdpDatagram? {
+        if (closed.get()) return null
+        return try {
+            receiveQueue.poll(timeoutMs.coerceAtLeast(1L), TimeUnit.MILLISECONDS)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            null
+        }
+    }
+
+    fun close() {
+        closed.set(true)
+        receiveQueue.clear()
+        remotes.clear()
+    }
+
+    private companion object {
+        private const val RECEIVE_QUEUE_CAPACITY = 256
+    }
+}
+
 private class ClientAttachment(
     client: ProxyClientConnection,
 ) {
@@ -880,6 +1076,31 @@ private class BridgeUserspaceTunnelSession(
             onStateChanged(UserspaceSessionState.failed, e.message ?: failureReason)
             throw e
         }
+    }
+
+    override fun close() {
+        if (closed) return
+        closed = true
+        onClose()
+    }
+}
+
+private class BridgeUserspaceUdpAssociation(
+    override val descriptor: ProxySessionDescriptor,
+    private val onSend: (ProxyUdpDatagram) -> Unit,
+    private val onReceive: (Long) -> ProxyUdpDatagram?,
+    private val onClose: () -> Unit,
+) : UserspaceUdpAssociation {
+    private var closed = false
+
+    override fun send(datagram: ProxyUdpDatagram) {
+        if (closed) throw IOException("UDP association ${descriptor.sessionId} is closed.")
+        onSend(datagram)
+    }
+
+    override fun receive(timeoutMs: Long): ProxyUdpDatagram? {
+        if (closed) return null
+        return onReceive(timeoutMs)
     }
 
     override fun close() {
