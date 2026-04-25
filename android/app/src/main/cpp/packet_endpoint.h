@@ -24,13 +24,23 @@ typedef struct {
 
 typedef struct proxy_packet_queue_ctx {
   pthread_mutex_t mutex;
+  pthread_cond_t inbound_cond;
+  pthread_cond_t inbound_idle_cond;
+  size_t inbound_waiters;
   void *outbound_head;
   void *outbound_tail;
   size_t outbound_count;
+  size_t outbound_bytes;
+  size_t outbound_high_water;
+  size_t outbound_drops;
   void *inbound_head;
   void *inbound_tail;
   size_t inbound_count;
+  size_t inbound_bytes;
+  size_t inbound_high_water;
+  size_t inbound_drops;
   int notify_pipe[2];
+  int closing;
 } proxy_packet_queue_ctx_t;
 
 ssize_t packet_endpoint_read(packet_endpoint_t *endpoint, uint8_t *buf, size_t len);
@@ -42,5 +52,7 @@ int packet_endpoint_init_proxy_queue(packet_endpoint_t *endpoint, proxy_packet_q
 void packet_endpoint_destroy_proxy_queue(proxy_packet_queue_ctx_t *ctx);
 int packet_endpoint_proxy_enqueue_outbound(proxy_packet_queue_ctx_t *ctx, const uint8_t *buf, size_t len);
 ssize_t packet_endpoint_proxy_dequeue_inbound(proxy_packet_queue_ctx_t *ctx, uint8_t *buf, size_t len);
+ssize_t packet_endpoint_proxy_dequeue_inbound_wait(proxy_packet_queue_ctx_t *ctx, uint8_t *buf, size_t len,
+                                                   int timeout_ms);
 
 #endif

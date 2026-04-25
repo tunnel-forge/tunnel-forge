@@ -5,9 +5,17 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
-#define PROXY_PACKET_QUEUE_CAPACITY 128
+/*
+ * Proxy-only mode can see short packet bursts when apps open many CONNECT streams at once.
+ * Keep both packet-count and byte-count caps so bursts are absorbed without unbounded memory use.
+ */
+#define PROXY_OUTBOUND_PACKET_QUEUE_CAPACITY 1024u
+#define PROXY_INBOUND_PACKET_QUEUE_CAPACITY 4096u
+#define PROXY_OUTBOUND_PACKET_QUEUE_BYTES (2u * 1024u * 1024u)
+#define PROXY_INBOUND_PACKET_QUEUE_BYTES (8u * 1024u * 1024u)
 #define PROXY_PACKET_MAX_LEN 65535
 
 typedef struct packet_node {
@@ -46,6 +54,23 @@ static packet_node_t *packet_queue_pop(packet_node_t **head, packet_node_t **tai
   if (*head == NULL) *tail = NULL;
   node->next = NULL;
   return node;
+}
+
+static int queue_would_exceed(size_t count, size_t bytes, size_t packet_len, size_t max_count, size_t max_bytes) {
+  if (count >= max_count) return 1;
+  if (packet_len > max_bytes) return 1;
+  if (bytes > max_bytes - packet_len) return 1;
+  return 0;
+}
+
+static void add_ms_to_timespec(struct timespec *ts, int timeout_ms) {
+  if (ts == NULL || timeout_ms <= 0) return;
+  ts->tv_sec += timeout_ms / 1000;
+  ts->tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
+  if (ts->tv_nsec >= 1000000000L) {
+    ts->tv_sec += 1;
+    ts->tv_nsec -= 1000000000L;
+  }
 }
 
 static int set_nonblock(int fd) {
@@ -123,6 +148,7 @@ static ssize_t proxy_queue_read(void *ctx, uint8_t *buf, size_t len) {
     return -1;
   }
   queue->outbound_count--;
+  queue->outbound_bytes -= node->len;
   proxy_queue_consume_signal(queue);
   const size_t original_len = node->len;
   const size_t copy_len = node->len > len ? len : node->len;
@@ -148,7 +174,15 @@ static int proxy_queue_write(void *ctx, const uint8_t *buf, size_t len) {
   packet_node_t *node = packet_node_new(buf, len);
   if (node == NULL) return -1;
   pthread_mutex_lock(&queue->mutex);
-  if (queue->inbound_count >= PROXY_PACKET_QUEUE_CAPACITY) {
+  if (queue->closing) {
+    pthread_mutex_unlock(&queue->mutex);
+    free(node);
+    errno = ECANCELED;
+    return -1;
+  }
+  if (queue_would_exceed(queue->inbound_count, queue->inbound_bytes, len, PROXY_INBOUND_PACKET_QUEUE_CAPACITY,
+                         PROXY_INBOUND_PACKET_QUEUE_BYTES)) {
+    queue->inbound_drops++;
     pthread_mutex_unlock(&queue->mutex);
     free(node);
     errno = ENOBUFS;
@@ -156,6 +190,9 @@ static int proxy_queue_write(void *ctx, const uint8_t *buf, size_t len) {
   }
   packet_queue_push((packet_node_t **)&queue->inbound_head, (packet_node_t **)&queue->inbound_tail, node);
   queue->inbound_count++;
+  queue->inbound_bytes += len;
+  if (queue->inbound_count > queue->inbound_high_water) queue->inbound_high_water = queue->inbound_count;
+  pthread_cond_signal(&queue->inbound_cond);
   pthread_mutex_unlock(&queue->mutex);
   return 0;
 }
@@ -225,13 +262,28 @@ int packet_endpoint_init_proxy_queue(packet_endpoint_t *endpoint, proxy_packet_q
     errno = EBUSY;
     return -1;
   }
+  if (pthread_cond_init(&ctx->inbound_cond, NULL) != 0) {
+    pthread_mutex_destroy(&ctx->mutex);
+    errno = EBUSY;
+    return -1;
+  }
+  if (pthread_cond_init(&ctx->inbound_idle_cond, NULL) != 0) {
+    pthread_cond_destroy(&ctx->inbound_cond);
+    pthread_mutex_destroy(&ctx->mutex);
+    errno = EBUSY;
+    return -1;
+  }
   if (pipe(ctx->notify_pipe) != 0) {
+    pthread_cond_destroy(&ctx->inbound_idle_cond);
+    pthread_cond_destroy(&ctx->inbound_cond);
     pthread_mutex_destroy(&ctx->mutex);
     return -1;
   }
   if (set_nonblock(ctx->notify_pipe[0]) != 0 || set_nonblock(ctx->notify_pipe[1]) != 0) {
     close(ctx->notify_pipe[0]);
     close(ctx->notify_pipe[1]);
+    pthread_cond_destroy(&ctx->inbound_idle_cond);
+    pthread_cond_destroy(&ctx->inbound_cond);
     pthread_mutex_destroy(&ctx->mutex);
     return -1;
   }
@@ -246,14 +298,24 @@ int packet_endpoint_init_proxy_queue(packet_endpoint_t *endpoint, proxy_packet_q
 void packet_endpoint_destroy_proxy_queue(proxy_packet_queue_ctx_t *ctx) {
   if (ctx == NULL) return;
   pthread_mutex_lock(&ctx->mutex);
+  ctx->closing = 1;
+  pthread_cond_broadcast(&ctx->inbound_cond);
+  /* Do not destroy condition variables while nativeReadProxyInboundPacket is still waking up. */
+  while (ctx->inbound_waiters > 0) {
+    pthread_cond_wait(&ctx->inbound_idle_cond, &ctx->mutex);
+  }
   packet_node_t *node;
   while ((node = packet_queue_pop((packet_node_t **)&ctx->outbound_head, (packet_node_t **)&ctx->outbound_tail)) != NULL) free(node);
   while ((node = packet_queue_pop((packet_node_t **)&ctx->inbound_head, (packet_node_t **)&ctx->inbound_tail)) != NULL) free(node);
   ctx->outbound_count = 0;
+  ctx->outbound_bytes = 0;
   ctx->inbound_count = 0;
+  ctx->inbound_bytes = 0;
   pthread_mutex_unlock(&ctx->mutex);
   if (ctx->notify_pipe[0] >= 0) close(ctx->notify_pipe[0]);
   if (ctx->notify_pipe[1] >= 0) close(ctx->notify_pipe[1]);
+  pthread_cond_destroy(&ctx->inbound_idle_cond);
+  pthread_cond_destroy(&ctx->inbound_cond);
   pthread_mutex_destroy(&ctx->mutex);
 }
 
@@ -265,7 +327,15 @@ int packet_endpoint_proxy_enqueue_outbound(proxy_packet_queue_ctx_t *ctx, const 
   packet_node_t *node = packet_node_new(buf, len);
   if (node == NULL) return -1;
   pthread_mutex_lock(&ctx->mutex);
-  if (ctx->outbound_count >= PROXY_PACKET_QUEUE_CAPACITY) {
+  if (ctx->closing) {
+    pthread_mutex_unlock(&ctx->mutex);
+    free(node);
+    errno = ECANCELED;
+    return -1;
+  }
+  if (queue_would_exceed(ctx->outbound_count, ctx->outbound_bytes, len, PROXY_OUTBOUND_PACKET_QUEUE_CAPACITY,
+                         PROXY_OUTBOUND_PACKET_QUEUE_BYTES)) {
+    ctx->outbound_drops++;
     pthread_mutex_unlock(&ctx->mutex);
     free(node);
     errno = ENOBUFS;
@@ -273,6 +343,8 @@ int packet_endpoint_proxy_enqueue_outbound(proxy_packet_queue_ctx_t *ctx, const 
   }
   packet_queue_push((packet_node_t **)&ctx->outbound_head, (packet_node_t **)&ctx->outbound_tail, node);
   ctx->outbound_count++;
+  ctx->outbound_bytes += len;
+  if (ctx->outbound_count > ctx->outbound_high_water) ctx->outbound_high_water = ctx->outbound_count;
   const int rc = proxy_queue_signal(ctx);
   pthread_mutex_unlock(&ctx->mutex);
   if (rc != 0) return -1;
@@ -280,18 +352,41 @@ int packet_endpoint_proxy_enqueue_outbound(proxy_packet_queue_ctx_t *ctx, const 
 }
 
 ssize_t packet_endpoint_proxy_dequeue_inbound(proxy_packet_queue_ctx_t *ctx, uint8_t *buf, size_t len) {
+  return packet_endpoint_proxy_dequeue_inbound_wait(ctx, buf, len, 0);
+}
+
+ssize_t packet_endpoint_proxy_dequeue_inbound_wait(proxy_packet_queue_ctx_t *ctx, uint8_t *buf, size_t len,
+                                                   int timeout_ms) {
   if (ctx == NULL || buf == NULL || len == 0) {
     errno = EINVAL;
     return -1;
   }
   pthread_mutex_lock(&ctx->mutex);
+  if (ctx->inbound_head == NULL && !ctx->closing && timeout_ms > 0) {
+    /* Timed waits reduce Kotlin-side polling latency without blocking tunnel shutdown indefinitely. */
+    struct timespec deadline;
+    if (clock_gettime(CLOCK_REALTIME, &deadline) == 0) {
+      add_ms_to_timespec(&deadline, timeout_ms);
+      ctx->inbound_waiters++;
+      while (ctx->inbound_head == NULL && !ctx->closing) {
+        int rc = pthread_cond_timedwait(&ctx->inbound_cond, &ctx->mutex, &deadline);
+        if (rc != 0) break;
+      }
+      ctx->inbound_waiters--;
+      if (ctx->closing && ctx->inbound_waiters == 0) {
+        pthread_cond_signal(&ctx->inbound_idle_cond);
+      }
+    }
+  }
   packet_node_t *node = packet_queue_pop((packet_node_t **)&ctx->inbound_head, (packet_node_t **)&ctx->inbound_tail);
   if (node == NULL) {
+    const int closing = ctx->closing;
     pthread_mutex_unlock(&ctx->mutex);
-    errno = EAGAIN;
+    errno = closing ? ECANCELED : EAGAIN;
     return -1;
   }
   ctx->inbound_count--;
+  ctx->inbound_bytes -= node->len;
   const size_t copy_len = node->len > len ? len : node->len;
   memcpy(buf, node->data, copy_len);
   pthread_mutex_unlock(&ctx->mutex);

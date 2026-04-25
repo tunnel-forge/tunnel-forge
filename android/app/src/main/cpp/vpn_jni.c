@@ -131,7 +131,7 @@ static jbyteArray native_read_proxy_inbound_packet(JNIEnv *env, jclass clazz, ji
   if (max_len <= 0) return NULL;
   uint8_t *buf = (uint8_t *)malloc((size_t)max_len);
   if (buf == NULL) return NULL;
-  ssize_t n = tunnel_proxy_dequeue_inbound_packet(buf, (size_t)max_len);
+  ssize_t n = tunnel_proxy_dequeue_inbound_packet_wait(buf, (size_t)max_len, 50);
   if (n <= 0) {
     free(buf);
     return NULL;

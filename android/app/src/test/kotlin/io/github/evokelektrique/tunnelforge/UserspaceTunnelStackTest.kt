@@ -125,6 +125,63 @@ class UserspaceTunnelStackTest {
     }
 
     @Test
+    fun openingSessionRetransmitsSynUntilEstablished() {
+        val backend = CapturingBackend()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, _ -> },
+                synRetransmitDelaysMs = listOf(20L, 20L),
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val session = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+
+        waitForOutboundCount(backend, 3)
+        val synPackets = backend.outboundPackets.take(3)
+        val firstIpv4 = IpPacketParser.parseIpv4(synPackets.first())!!
+        val firstTcp = IpPacketParser.parseTcp(synPackets.first(), firstIpv4)!!
+        synPackets.forEach { packet ->
+            val ipv4 = IpPacketParser.parseIpv4(packet)!!
+            val tcp = IpPacketParser.parseTcp(packet, ipv4)!!
+            assertEquals("93.184.216.34", ipv4.destinationIp)
+            assertEquals(443, tcp.destinationPort)
+            assertEquals(TcpPacketBuilder.TCP_FLAG_SYN, tcp.flags)
+            assertEquals(firstTcp.sourcePort, tcp.sourcePort)
+            assertEquals(firstTcp.sequenceNumber, tcp.sequenceNumber)
+        }
+
+        session.close()
+        stack.stop()
+    }
+
+    @Test
+    fun synRetransmitStopsAfterSessionEstablished() {
+        val backend = CapturingBackend()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, _ -> },
+                synRetransmitDelaysMs = listOf(30L, 30L, 30L),
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val session = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        establishSession(stack, backend)
+        Thread.sleep(120)
+
+        assertEquals(2, backend.outboundPackets.size)
+        val ackIpv4 = IpPacketParser.parseIpv4(backend.outboundPackets.last())!!
+        val ackTcp = IpPacketParser.parseTcp(backend.outboundPackets.last(), ackIpv4)!!
+        assertEquals(TcpPacketBuilder.TCP_FLAG_ACK, ackTcp.flags)
+
+        session.close()
+        stack.stop()
+    }
+
+    @Test
     fun awaitEstablishedBlocksUntilSynAckArrives() {
         val backend = CapturingBackend()
         val stack = BridgeUserspaceTunnelStack(bridge = ProxyPacketBridge(backend = backend), clientIpv4 = "10.0.0.2", logger = { _, _ -> })
@@ -1011,12 +1068,14 @@ class UserspaceTunnelStackTest {
     @Test
     fun connectTimeoutReturnsSpecificError() {
         val backend = CapturingBackend()
+        val logs = CopyOnWriteArrayList<String>()
         val stack =
             BridgeUserspaceTunnelStack(
                 bridge = ProxyPacketBridge(backend = backend),
                 clientIpv4 = "10.0.0.2",
-                logger = { _, _ -> },
-                connectTimeoutMs = 100,
+                logger = { _, message -> logs.add(message) },
+                connectTimeoutMs = 60,
+                synRetransmitDelaysMs = listOf(20L, 100L),
             )
         assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
 
@@ -1031,6 +1090,10 @@ class UserspaceTunnelStackTest {
                             throw AssertionError("Expected connect timeout")
                         } catch (e: java.io.IOException) {
                             assertTrue(e.message.orEmpty().contains("timed out"))
+                            assertTrue(e.message.orEmpty().contains("host=93.184.216.34"))
+                            assertTrue(e.message.orEmpty().contains("ip=93.184.216.34"))
+                            assertTrue(e.message.orEmpty().contains("sport="))
+                            assertTrue(e.message.orEmpty().contains("synAttempts=2"))
                         }
                     }
                 }
@@ -1043,6 +1106,9 @@ class UserspaceTunnelStackTest {
 
         assertEquals(UserspaceSessionState.failed, stack.sessionSnapshots().single().state)
         assertTrue(stack.sessionSnapshots().single().lastEvent.contains("timed out"))
+        assertTrue(logs.any { it.contains("reason=connect-timeout") && it.contains("host=93.184.216.34") })
+        Thread.sleep(140)
+        assertEquals(2, backend.outboundPackets.size)
         session.close()
         stack.stop()
     }

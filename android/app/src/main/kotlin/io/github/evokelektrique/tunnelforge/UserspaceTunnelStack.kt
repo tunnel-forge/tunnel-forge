@@ -53,6 +53,7 @@ internal class BridgeUserspaceTunnelStack(
     },
     private val failureReason: String = DEFAULT_FAILURE_REASON,
     private val connectTimeoutMs: Long = DEFAULT_CONNECT_TIMEOUT_MS,
+    private val synRetransmitDelaysMs: List<Long> = DEFAULT_SYN_RETRANSMIT_DELAYS_MS,
 ) : UserspaceTunnelStack {
     private val nextSessionId = AtomicInteger(1)
     private val nextLocalPort = AtomicInteger(30000)
@@ -402,6 +403,7 @@ internal class BridgeUserspaceTunnelStack(
         val runtime =
             TcpSessionRuntime(
                 sessionId = descriptor.sessionId,
+                targetHost = descriptor.request.host,
                 localPort = localPort,
                 remoteIp = remoteIp,
                 remotePort = descriptor.request.port,
@@ -414,24 +416,70 @@ internal class BridgeUserspaceTunnelStack(
             "Queued synthetic TCP SYN $clientIpv4:$localPort -> $remoteIp:${descriptor.request.port}",
         )
 
-        val synPacket =
-            TcpPacketBuilder.buildIpv4TcpPacket(
-                sourceIp = clientIpv4,
-                destinationIp = remoteIp,
-                sourcePort = localPort,
-                destinationPort = descriptor.request.port,
-                sequenceNumber = sequenceNumber,
-                flags = TcpPacketBuilder.TCP_FLAG_SYN,
-                mss = advertisedMss,
-            )
-        if (!bridge.queueOutboundPacket(synPacket)) {
+        if (!queueSyntheticSynPacket(runtime, reason = "initial")) {
             tcpRuntimeBySessionId.remove(descriptor.sessionId, runtime)
             runtime.signalConnectFailure("Failed to queue TCP SYN into proxy packet bridge.")
             logger(Log.WARN, "proxy tcp fail sid=${descriptor.sessionId} reason=syn-queue-failed")
             updateSessionState(descriptor.sessionId, UserspaceSessionState.failed, "Failed to queue TCP SYN into proxy packet bridge")
             throw IOException("Failed to queue outbound TCP SYN into proxy packet bridge.")
         }
-        logger(Log.DEBUG, "proxy tcp syn sid=${descriptor.sessionId} sport=$localPort daddr=$remoteIp:${descriptor.request.port} mss=$advertisedMss")
+        startSynRetransmitter(runtime)
+    }
+
+    private fun queueSyntheticSynPacket(runtime: TcpSessionRuntime, reason: String): Boolean {
+        val attempt = runtime.recordSynAttempt()
+        val synPacket =
+            runtime.withLock {
+                TcpPacketBuilder.buildIpv4TcpPacket(
+                    sourceIp = clientIpv4,
+                    destinationIp = remoteIp,
+                    sourcePort = localPort,
+                    destinationPort = remotePort,
+                    sequenceNumber = initialSequenceNumber,
+                    flags = TcpPacketBuilder.TCP_FLAG_SYN,
+                    mss = advertisedMss,
+                )
+            }
+        if (!bridge.queueOutboundPacket(synPacket)) {
+            logger(Log.WARN, "proxy tcp syn failed sid=${runtime.sessionId} reason=$reason attempt=$attempt ${runtime.describeConnectTarget()}")
+            return false
+        }
+        logger(Log.DEBUG, "proxy tcp syn sid=${runtime.sessionId} reason=$reason attempt=$attempt ${runtime.describeConnectTarget()} mss=$advertisedMss")
+        if (runtime.isConnectPending()) {
+            updateSessionState(
+                runtime.sessionId,
+                UserspaceSessionState.opening,
+                "Queued TCP SYN attempt=$attempt ${runtime.describeConnectTarget()}",
+            )
+        }
+        return true
+    }
+
+    private fun startSynRetransmitter(runtime: TcpSessionRuntime) {
+        if (synRetransmitDelaysMs.isEmpty()) return
+        val thread = Thread(
+            {
+                for (delayMs in synRetransmitDelaysMs) {
+                    if (!running || !runtime.isConnectPending()) return@Thread
+                    try {
+                        Thread.sleep(delayMs.coerceAtLeast(1L))
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        return@Thread
+                    }
+                    if (!running || !runtime.isConnectPending()) return@Thread
+                    if (!queueSyntheticSynPacket(runtime, reason = "retransmit")) {
+                        val message = "Failed to queue TCP SYN retransmit ${runtime.describeConnectTarget()}."
+                        runtime.signalConnectFailure(message)
+                        updateSessionState(runtime.sessionId, UserspaceSessionState.failed, message)
+                        return@Thread
+                    }
+                }
+            },
+            "proxy-syn-retry-${runtime.sessionId}",
+        )
+        runtime.attachSynRetransmitThread(thread)
+        thread.start()
     }
 
     private fun updateSessionState(sessionId: Int, state: UserspaceSessionState, event: String) {
@@ -538,9 +586,11 @@ internal class BridgeUserspaceTunnelStack(
                 throw IOException(message)
             }
             ConnectWaitState.pending -> {
-                val message = "TCP connect timed out."
+                val message = "TCP connect timed out ${runtime.describeConnectTarget()}."
                 runtime.signalConnectFailure(message)
-                logger(Log.WARN, "proxy tcp fail sid=$sessionId reason=connect-timeout timeoutMs=$timeoutMs")
+                tcpRuntimeBySessionId.remove(sessionId, runtime)
+                clientAttachments.remove(sessionId)?.close()
+                logger(Log.WARN, "proxy tcp fail sid=$sessionId reason=connect-timeout timeoutMs=$timeoutMs ${runtime.describeConnectTarget()}")
                 updateSessionState(sessionId, UserspaceSessionState.failed, message)
                 throw IOException(message)
             }
@@ -622,6 +672,7 @@ internal class BridgeUserspaceTunnelStack(
         private const val DEFAULT_FAILURE_REASON = "TCP forwarding over the proxy packet bridge is not attached yet."
         private const val DEFAULT_CONNECT_TIMEOUT_MS = 10_000L
         private const val LOCALHOST_IPV4 = "127.0.0.1"
+        private val DEFAULT_SYN_RETRANSMIT_DELAYS_MS = listOf(1_000L, 2_000L, 4_000L)
     }
 }
 
@@ -639,6 +690,7 @@ private enum class SessionWaitState {
 
 private class TcpSessionRuntime(
     val sessionId: Int,
+    val targetHost: String,
     val localPort: Int,
     var remoteIp: String,
     val remotePort: Int,
@@ -652,17 +704,38 @@ private class TcpSessionRuntime(
         private set
     var terminalFailureMessage: String? = null
         private set
+    private var synAttempts: Int = 0
 
     private var connectState: ConnectWaitState = ConnectWaitState.pending
     private var sessionWaitState: SessionWaitState = SessionWaitState.pending
     private val connectLatch = CountDownLatch(1)
     private val sessionWaitLatch = CountDownLatch(1)
+    private var synRetransmitThread: Thread? = null
 
     @Synchronized
     fun <T> withLock(block: TcpSessionRuntime.() -> T): T = block()
 
     @Synchronized
     fun isConnectPending(): Boolean = connectState == ConnectWaitState.pending
+
+    @Synchronized
+    fun recordSynAttempt(): Int {
+        synAttempts += 1
+        return synAttempts
+    }
+
+    @Synchronized
+    fun describeConnectTarget(): String =
+        "host=$targetHost ip=$remoteIp port=$remotePort sport=$localPort synAttempts=$synAttempts"
+
+    @Synchronized
+    fun attachSynRetransmitThread(thread: Thread) {
+        if (connectState == ConnectWaitState.pending) {
+            synRetransmitThread = thread
+        } else {
+            thread.interrupt()
+        }
+    }
 
     fun awaitConnect(timeoutMs: Long): ConnectWaitState =
         try {
@@ -684,6 +757,7 @@ private class TcpSessionRuntime(
         remoteIp = establishedRemoteIp
         remoteSequenceNumber = establishedRemoteSequence
         connectState = ConnectWaitState.established
+        stopSynRetransmitter()
         connectLatch.countDown()
     }
 
@@ -692,6 +766,7 @@ private class TcpSessionRuntime(
         if (connectState != ConnectWaitState.pending) return
         connectFailureMessage = message
         connectState = ConnectWaitState.failed
+        stopSynRetransmitter()
         connectLatch.countDown()
     }
 
@@ -725,12 +800,18 @@ private class TcpSessionRuntime(
         if (connectState == ConnectWaitState.pending) {
             connectFailureMessage = message
             connectState = ConnectWaitState.failed
+            stopSynRetransmitter()
             connectLatch.countDown()
         }
         if (sessionWaitState != SessionWaitState.pending) return
         terminalFailureMessage = message
         sessionWaitState = SessionWaitState.failed
         sessionWaitLatch.countDown()
+    }
+
+    private fun stopSynRetransmitter() {
+        synRetransmitThread?.interrupt()
+        synRetransmitThread = null
     }
 }
 

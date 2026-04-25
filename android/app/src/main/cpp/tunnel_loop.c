@@ -284,11 +284,15 @@ int tunnel_proxy_enqueue_outbound_packet(const uint8_t *packet, size_t len) {
 }
 
 ssize_t tunnel_proxy_dequeue_inbound_packet(uint8_t *packet, size_t len) {
+  return tunnel_proxy_dequeue_inbound_packet_wait(packet, len, 0);
+}
+
+ssize_t tunnel_proxy_dequeue_inbound_packet_wait(uint8_t *packet, size_t len, int timeout_ms) {
   if (!atomic_load(&g_proxy_bridge_active)) {
     errno = ENOSYS;
     return -1;
   }
-  return packet_endpoint_proxy_dequeue_inbound(&g_proxy_queue, packet, len);
+  return packet_endpoint_proxy_dequeue_inbound_wait(&g_proxy_queue, packet, len, timeout_ms);
 }
 
 /* --- Dataplane counters (tunnel_run_loop + ppp_dispatch) --- */

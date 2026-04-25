@@ -29,4 +29,7 @@ else
   cc -std=c99 -Wall -Wextra -o "${OUT}/test_nat_t_keepalive" \
     "${ROOT}/test/native/test_nat_t_keepalive.c" "${CPP}/nat_t_keepalive.c" -I"${CPP}"
   "${OUT}/test_nat_t_keepalive"
+  cc -std=c99 -Wall -Wextra -pthread -o "${OUT}/test_packet_endpoint" \
+    "${ROOT}/test/native/test_packet_endpoint.c" "${CPP}/packet_endpoint.c" -I"${CPP}"
+  "${OUT}/test_packet_endpoint"
 fi

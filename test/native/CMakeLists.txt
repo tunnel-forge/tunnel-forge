@@ -28,3 +28,8 @@ add_test(NAME ppp_frame COMMAND test_ppp_frame)
 add_executable(test_nat_t_keepalive test_nat_t_keepalive.c ../../android/app/src/main/cpp/nat_t_keepalive.c)
 target_include_directories(test_nat_t_keepalive PRIVATE ../../android/app/src/main/cpp)
 add_test(NAME nat_t_keepalive COMMAND test_nat_t_keepalive)
+
+add_executable(test_packet_endpoint test_packet_endpoint.c ../../android/app/src/main/cpp/packet_endpoint.c)
+target_include_directories(test_packet_endpoint PRIVATE ../../android/app/src/main/cpp)
+target_link_libraries(test_packet_endpoint PRIVATE pthread)
+add_test(NAME packet_endpoint COMMAND test_packet_endpoint)
