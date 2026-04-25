@@ -250,6 +250,9 @@ class ProxyTunnelService : Service() {
                     clientIpv4 = negotiatedClientIp.joinToString("."),
                     dnsServers = effectiveDnsServers,
                     linkMtu = proxyMtu,
+                    connectTimeoutMs = PROXY_ONLY_CONNECT_TIMEOUT_MS,
+                    synRetransmitDelaysMs = PROXY_ONLY_SYN_RETRANSMIT_DELAYS_MS,
+                    maxTcpSessions = PROXY_ONLY_MAX_TCP_SESSIONS,
                     logger = { level, message ->
                         VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
                     },
@@ -282,11 +285,16 @@ class ProxyTunnelService : Service() {
                     lanRequested = proxyConfig.allowLanConnections,
                 )
             val runtime = ProxyServerRuntime(
-                config = proxyConfig.copy(exposure = exposure),
+                config =
+                    proxyConfig.copy(
+                        exposure = exposure,
+                        maxConcurrentClients = PROXY_ONLY_MAX_CONCURRENT_CLIENTS,
+                    ),
                 levelLogger = { level, message ->
                     VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
                 },
                 transport = transport,
+                connectTimeoutMs = PROXY_ONLY_CONNECT_TIMEOUT_MS,
             )
             localRuntime = runtime
             var workerReplaced = false
@@ -565,6 +573,10 @@ class ProxyTunnelService : Service() {
         const val DEFAULT_SOCKS_PORT = 1080
         const val DEFAULT_LINK_MTU = TunnelVpnService.DEFAULT_TUN_MTU
         internal const val WORKER_JOIN_TIMEOUT_MS = 5_000L
+        internal const val PROXY_ONLY_MAX_CONCURRENT_CLIENTS = 128
+        internal const val PROXY_ONLY_MAX_TCP_SESSIONS = 128
+        internal const val PROXY_ONLY_CONNECT_TIMEOUT_MS = 5_000L
+        internal val PROXY_ONLY_SYN_RETRANSMIT_DELAYS_MS = listOf(750L, 1_250L, 2_000L)
 
         private const val CHANNEL_ID = "tunnel_forge_proxy"
         private const val NOTIFICATION_ID = 7111

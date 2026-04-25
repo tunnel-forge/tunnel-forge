@@ -131,7 +131,10 @@ internal class BridgeUserspaceTunnelStack(
             throw IOException("Proxy packet bridge is not active.")
         }
         if (!tcpSessionPermits.tryAcquire()) {
-            logger(Log.WARN, "proxy session reject reason=too-many-tcp-sessions limit=$maxTcpSessions target=${request.host}:${request.port}")
+            logger(
+                Log.WARN,
+                "proxy session reject reason=too-many-tcp-sessions limit=$maxTcpSessions active=${sessions.size} states=${sessionStateSummary()} target=${request.host}:${request.port}",
+            )
             throw IOException("Too many active proxy TCP sessions; try again shortly.")
         }
         val descriptor =
@@ -589,6 +592,13 @@ internal class BridgeUserspaceTunnelStack(
     private fun updateSessionState(sessionId: Int, state: UserspaceSessionState, event: String) {
         sessions.computeIfPresent(sessionId) { _, current ->
             current.copy(state = state, lastEvent = event)
+        }
+    }
+
+    private fun sessionStateSummary(): String {
+        val counts = sessions.values.groupingBy { it.state }.eachCount()
+        return UserspaceSessionState.values().joinToString(",") { state ->
+            "${state.name}=${counts[state] ?: 0}"
         }
     }
 

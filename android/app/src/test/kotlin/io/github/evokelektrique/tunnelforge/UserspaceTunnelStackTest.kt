@@ -80,6 +80,70 @@ class UserspaceTunnelStackTest {
     }
 
     @Test
+    fun proxyOnlyCapacityAllowsBurstBeyondLegacyBridgeLimit() {
+        val logs = CopyOnWriteArrayList<String>()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = CapturingBackend()),
+                logger = { _, message -> logs.add(message) },
+                maxTcpSessions = ProxyTunnelService.PROXY_ONLY_MAX_TCP_SESSIONS,
+                connectTimeoutMs = ProxyTunnelService.PROXY_ONLY_CONNECT_TIMEOUT_MS,
+                synRetransmitDelaysMs = ProxyTunnelService.PROXY_ONLY_SYN_RETRANSMIT_DELAYS_MS,
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+        val sessions = ArrayList<UserspaceTunnelSession>()
+
+        try {
+            repeat(40) { index ->
+                sessions.add(
+                    stack.openTcpSession(
+                        ProxyConnectRequest(
+                            host = "93.184.216.${index + 1}",
+                            port = 443,
+                            protocol = "http-connect",
+                        ),
+                    ),
+                )
+            }
+
+            assertEquals(40, stack.activeSessions().size)
+            assertFalse(logs.any { it.contains("reason=too-many-tcp-sessions") })
+        } finally {
+            sessions.forEach { it.close() }
+            stack.stop()
+        }
+    }
+
+    @Test
+    fun timedOutConnectReleasesSessionPermitAfterClose() {
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = CapturingBackend()),
+                logger = { _, _ -> },
+                maxTcpSessions = 1,
+                connectTimeoutMs = 30,
+                synRetransmitDelaysMs = emptyList(),
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val first = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        try {
+            try {
+                first.awaitEstablished(30)
+                throw AssertionError("Expected connect timeout")
+            } catch (e: IOException) {
+                assertTrue(e.message.orEmpty().contains("timed out"))
+            }
+        } finally {
+            first.close()
+        }
+
+        val second = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.35", port = 443, protocol = "http-connect"))
+        second.close()
+        stack.stop()
+    }
+
+    @Test
     fun failedPumpUpdatesSessionState() {
         val stack =
             BridgeUserspaceTunnelStack(
