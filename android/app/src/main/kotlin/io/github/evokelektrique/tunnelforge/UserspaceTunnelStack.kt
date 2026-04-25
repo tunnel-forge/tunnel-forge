@@ -9,6 +9,7 @@ import java.net.Socket
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -68,10 +69,16 @@ internal class BridgeUserspaceTunnelStack(
     private val failureReason: String = DEFAULT_FAILURE_REASON,
     private val connectTimeoutMs: Long = DEFAULT_CONNECT_TIMEOUT_MS,
     private val synRetransmitDelaysMs: List<Long> = DEFAULT_SYN_RETRANSMIT_DELAYS_MS,
+    private val maxTcpSessions: Int = DEFAULT_MAX_TCP_SESSIONS,
 ) : UserspaceTunnelStack {
+    init {
+        require(maxTcpSessions >= 1) { "TCP session limit must be at least 1" }
+    }
+
     private val nextSessionId = AtomicInteger(1)
     private val nextLocalPort = AtomicInteger(30000)
     private val nextUdpLocalPort = AtomicInteger(20000)
+    private val tcpSessionPermits = Semaphore(maxTcpSessions, true)
     private val sessions = ConcurrentHashMap<Int, UserspaceSessionSnapshot>()
     private val tcpRuntimeBySessionId = ConcurrentHashMap<Int, TcpSessionRuntime>()
     private val udpRuntimeBySessionId = ConcurrentHashMap<Int, UdpAssociationRuntime>()
@@ -123,6 +130,10 @@ internal class BridgeUserspaceTunnelStack(
         if (!running || !bridge.isRunning()) {
             throw IOException("Proxy packet bridge is not active.")
         }
+        if (!tcpSessionPermits.tryAcquire()) {
+            logger(Log.WARN, "proxy session reject reason=too-many-tcp-sessions limit=$maxTcpSessions target=${request.host}:${request.port}")
+            throw IOException("Too many active proxy TCP sessions; try again shortly.")
+        }
         val descriptor =
             ProxySessionDescriptor(
                 sessionId = nextSessionId.getAndIncrement(),
@@ -142,6 +153,7 @@ internal class BridgeUserspaceTunnelStack(
         } catch (e: IOException) {
             logger(Log.WARN, "proxy session open failed sid=${descriptor.sessionId} target=${request.host}:${request.port} error=${e.message}")
             sessions.remove(descriptor.sessionId)
+            tcpSessionPermits.release()
             throw e
         }
         return BridgeUserspaceTunnelSession(
@@ -154,6 +166,7 @@ internal class BridgeUserspaceTunnelStack(
                 clientAttachments.remove(descriptor.sessionId)?.close()
                 updateSessionState(descriptor.sessionId, UserspaceSessionState.closed, "Session closed")
                 sessions.remove(descriptor.sessionId)
+                tcpSessionPermits.release()
             },
             failureReason = failureReason,
         )
@@ -807,6 +820,7 @@ internal class BridgeUserspaceTunnelStack(
         private const val DEFAULT_LINK_MTU = 1450
         private const val DEFAULT_FAILURE_REASON = "Proxy forwarding over the packet bridge is not attached yet."
         private const val DEFAULT_CONNECT_TIMEOUT_MS = 10_000L
+        private const val DEFAULT_MAX_TCP_SESSIONS = 32
         private const val LOCALHOST_IPV4 = "127.0.0.1"
         private const val UDP_HEADER_LEN = 8
         private const val UDP_LOCAL_PORT_MIN = 20000

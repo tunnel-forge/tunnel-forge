@@ -1654,6 +1654,121 @@ class ProxyServerRuntimeTest {
         assertTrue(logs.any { it.contains("http client crash: IllegalStateException: boom") })
     }
 
+    @Test
+    fun httpRejectsWhenClientLimitIsReachedWithoutOpeningTransport() {
+        val releasePump = CountDownLatch(1)
+        val requests = CopyOnWriteArrayList<ProxyConnectRequest>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
+                    requests.add(request)
+                    return blockingSession(request, releasePump)
+                }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config =
+                    ProxyRuntimeConfig(
+                        httpEnabled = true,
+                        httpPort = port,
+                        socksEnabled = false,
+                        socksPort = 1080,
+                        maxConcurrentClients = 1,
+                    ),
+                logger = {},
+                transport = transport,
+            )
+        runtime.start()
+        val first = Socket("127.0.0.1", port)
+        try {
+            val firstOutput = BufferedOutputStream(first.getOutputStream())
+            val firstInput = BufferedInputStream(first.getInputStream())
+            firstOutput.write("CONNECT 93.184.216.34:443 HTTP/1.1\r\nHost: 93.184.216.34:443\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
+            firstOutput.flush()
+            assertTrue(readResponse(firstInput).startsWith("HTTP/1.1 200 Connection Established"))
+
+            Socket("127.0.0.1", port).use { second ->
+                val output = BufferedOutputStream(second.getOutputStream())
+                val input = BufferedInputStream(second.getInputStream())
+                output.write("CONNECT 93.184.216.35:443 HTTP/1.1\r\nHost: 93.184.216.35:443\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
+                output.flush()
+                assertTrue(readResponse(input).startsWith("HTTP/1.1 503 Service Unavailable"))
+            }
+            assertEquals(1, requests.size)
+        } finally {
+            releasePump.countDown()
+            first.close()
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun socksRejectsWhenClientLimitIsReachedWithoutOpeningTransport() {
+        val releasePump = CountDownLatch(1)
+        val requests = CopyOnWriteArrayList<ProxyConnectRequest>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
+                    requests.add(request)
+                    return blockingSession(request, releasePump)
+                }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config =
+                    ProxyRuntimeConfig(
+                        httpEnabled = false,
+                        httpPort = 8080,
+                        socksEnabled = true,
+                        socksPort = port,
+                        maxConcurrentClients = 1,
+                    ),
+                logger = {},
+                transport = transport,
+            )
+        runtime.start()
+        val first = Socket("127.0.0.1", port)
+        try {
+            val firstOutput = BufferedOutputStream(first.getOutputStream())
+            val firstInput = BufferedInputStream(first.getInputStream())
+            firstOutput.write(byteArrayOf(0x05, 0x01, 0x00))
+            firstOutput.flush()
+            assertEquals(0x05, firstInput.read())
+            assertEquals(0x00, firstInput.read())
+            firstOutput.write(
+                byteArrayOf(
+                    0x05,
+                    0x01,
+                    0x00,
+                    0x01,
+                    93.toByte(),
+                    184.toByte(),
+                    216.toByte(),
+                    34,
+                ) + byteArrayOf(0x01, 0xbb.toByte()),
+            )
+            firstOutput.flush()
+            assertEquals(0x05, firstInput.read())
+            assertEquals(0x00, firstInput.read())
+
+            Socket("127.0.0.1", port).use { second ->
+                second.soTimeout = 1000
+                val output = BufferedOutputStream(second.getOutputStream())
+                val input = BufferedInputStream(second.getInputStream())
+                output.write(byteArrayOf(0x05, 0x01, 0x00))
+                output.flush()
+                assertEquals(-1, input.read())
+            }
+            assertEquals(1, requests.size)
+        } finally {
+            releasePump.countDown()
+            first.close()
+            runtime.stop()
+        }
+    }
+
     private fun successfulSession(request: ProxyConnectRequest): ProxyTransportSession =
         object : ProxyTransportSession {
             override val descriptor = ProxySessionDescriptor(1, request, 0)
@@ -1661,6 +1776,19 @@ class ProxyServerRuntimeTest {
             override fun awaitConnected(timeoutMs: Long) = Unit
 
             override fun pumpBidirectional(client: ProxyClientConnection) = Unit
+
+            override fun close() = Unit
+        }
+
+    private fun blockingSession(request: ProxyConnectRequest, releasePump: CountDownLatch): ProxyTransportSession =
+        object : ProxyTransportSession {
+            override val descriptor = ProxySessionDescriptor(1, request, 0)
+
+            override fun awaitConnected(timeoutMs: Long) = Unit
+
+            override fun pumpBidirectional(client: ProxyClientConnection) {
+                releasePump.await(5, TimeUnit.SECONDS)
+            }
 
             override fun close() = Unit
         }

@@ -53,6 +53,33 @@ class UserspaceTunnelStackTest {
     }
 
     @Test
+    fun openTcpSessionRejectsWhenSessionLimitIsReachedAndAllowsAfterClose() {
+        val logs = CopyOnWriteArrayList<String>()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = AlwaysActiveBackend()),
+                logger = { _, message -> logs.add(message) },
+                maxTcpSessions = 1,
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val first = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+
+        try {
+            stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.35", port = 443, protocol = "http-connect"))
+            throw AssertionError("Expected TCP session limit failure")
+        } catch (e: IOException) {
+            assertTrue(e.message!!.contains("Too many active proxy TCP sessions"))
+        }
+        assertTrue(logs.any { it.contains("reason=too-many-tcp-sessions") })
+
+        first.close()
+        val second = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.35", port = 443, protocol = "http-connect"))
+        second.close()
+        stack.stop()
+    }
+
+    @Test
     fun failedPumpUpdatesSessionState() {
         val stack =
             BridgeUserspaceTunnelStack(

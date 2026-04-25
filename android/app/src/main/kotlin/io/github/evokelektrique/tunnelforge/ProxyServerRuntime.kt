@@ -18,6 +18,7 @@ import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.SSLSocket
@@ -29,6 +30,7 @@ data class ProxyRuntimeConfig(
     val socksEnabled: Boolean,
     val socksPort: Int,
     val allowLanConnections: Boolean = false,
+    val maxConcurrentClients: Int = ProxyServerRuntime.DEFAULT_MAX_CONCURRENT_CLIENTS,
     val exposure: ProxyExposureInfo =
         ProxyExposureInfo.loopback(
             httpPort = httpPort,
@@ -55,6 +57,7 @@ class ProxyServerRuntime(
     private val listenerThreads = CopyOnWriteArrayList<Thread>()
     private val clientThreads = CopyOnWriteArrayList<Thread>()
     private val serverSockets = CopyOnWriteArrayList<ServerSocket>()
+    private val clientPermits = Semaphore(config.maxConcurrentClients, true)
 
     fun start() {
         if (!config.httpEnabled && !config.socksEnabled) {
@@ -62,6 +65,9 @@ class ProxyServerRuntime(
         }
         if (config.httpEnabled && config.socksEnabled && config.httpPort == config.socksPort) {
             throw IllegalArgumentException("HTTP and SOCKS5 ports must differ")
+        }
+        if (config.maxConcurrentClients < 1) {
+            throw IllegalArgumentException("Proxy client limit must be at least 1")
         }
         if (!running.compareAndSet(false, true)) return
         val bindHosts = config.exposure.listenerBindAddresses()
@@ -153,6 +159,10 @@ class ProxyServerRuntime(
         client: Socket,
         handler: (Socket) -> Unit,
     ) {
+        if (!clientPermits.tryAcquire()) {
+            rejectOverloadedClient(name, client)
+            return
+        }
         val thread = Thread(
             {
                 try {
@@ -168,12 +178,34 @@ class ProxyServerRuntime(
                     if (running.get()) {
                         warn("$name client crash: ${t.javaClass.simpleName}: ${t.message}")
                     }
+                } finally {
+                    clientThreads.remove(Thread.currentThread())
+                    clientPermits.release()
                 }
             },
             "proxy-$name-client",
         )
         clientThreads.add(thread)
         thread.start()
+    }
+
+    private fun rejectOverloadedClient(name: String, client: Socket) {
+        warn("proxy reject proto=$name reason=too-many-clients limit=${config.maxConcurrentClients}")
+        try {
+            client.use { socket ->
+                if (name == "http") {
+                    val output = BufferedOutputStream(socket.getOutputStream())
+                    writeHttpError(
+                        output,
+                        503,
+                        "Service Unavailable",
+                        "Too many active proxy clients; try again shortly.",
+                    )
+                }
+            }
+        } catch (e: IOException) {
+            warn("proxy reject proto=$name reason=too-many-clients write-failed error=${e.message}")
+        }
     }
 
     private fun handleHttpClient(client: Socket) {
@@ -1103,6 +1135,7 @@ class ProxyServerRuntime(
     }
 
     companion object {
+        const val DEFAULT_MAX_CONCURRENT_CLIENTS = 64
         private const val LOOPBACK_HOST = "127.0.0.1"
         private const val CLIENT_SO_TIMEOUT_MS = 5000
         private const val MAX_HEADER_LINE_LEN = 8192
