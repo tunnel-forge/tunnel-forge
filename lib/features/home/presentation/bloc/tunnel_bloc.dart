@@ -294,7 +294,14 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
             ),
             error: true,
           );
-          emit(state.copyWith(busy: false));
+          emit(
+            state.copyWith(
+              busy: false,
+              clearActiveAttemptId: true,
+              clearConnectStartedAt: true,
+              clearProxyExposure: true,
+            ),
+          );
           return;
         }
         _logDebug('VPN permission OK attempt=$attemptId', tag: 'tunnel');
@@ -361,7 +368,14 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
         tag: 'tunnel',
       );
       _toast(emit, error.message ?? error.code, error: true);
-      emit(state.copyWith(busy: false));
+      emit(
+        state.copyWith(
+          busy: false,
+          clearActiveAttemptId: true,
+          clearConnectStartedAt: true,
+          clearProxyExposure: true,
+        ),
+      );
     }
   }
 
@@ -615,24 +629,10 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
         ? null
         : DateTime.now().difference(startedAt);
     _logWarning(
-      'Timeout waiting for VPN interface from Android${event.attemptId.isEmpty ? '' : ' attempt=${event.attemptId}'}${elapsed == null ? '' : ' elapsed_ms=${elapsed.inMilliseconds}'}',
+      'Still waiting for Android ${state.connectionMode == ConnectionMode.proxyOnly ? 'proxy readiness' : 'VPN interface'}${event.attemptId.isEmpty ? '' : ' attempt=${event.attemptId}'}${elapsed == null ? '' : ' elapsed_ms=${elapsed.inMilliseconds}'}',
       tag: 'tunnel',
     );
-    emit(
-      state.copyWith(
-        awaitingTunnel: false,
-        stopRequested: false,
-        timedOutThisAttempt: true,
-      ),
-    );
-    _toast(
-      emit,
-      AppText.pick(
-        'Still connecting. Check logs or try again.',
-        'اتصال هنوز ادامه دارد. گزارش‌ها را بررسی کنید یا دوباره تلاش کنید.',
-      ),
-      error: true,
-    );
+    _scheduleAwaitTimeout(event.attemptId);
   }
 
   void _scheduleAwaitTimeout(String attemptId) {

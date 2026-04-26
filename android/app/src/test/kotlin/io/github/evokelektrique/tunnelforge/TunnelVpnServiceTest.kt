@@ -2,6 +2,7 @@ package io.github.evokelektrique.tunnelforge
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -78,6 +79,29 @@ class TunnelVpnServiceTest {
             )
 
         assertEquals(listOf("com.example.alpha", "com.example.beta"), requested)
+    }
+
+    @Test
+    fun localProxyRuntimeConfigKeepsClientCapacityUnlimited() {
+        val config =
+            ProxyRuntimeConfig(
+                httpEnabled = true,
+                httpPort = 8080,
+                socksEnabled = true,
+                socksPort = 1080,
+                maxConcurrentClients = 1,
+            )
+        val exposure =
+            ProxyExposureInfo.loopback(
+                httpPort = config.httpPort,
+                socksPort = config.socksPort,
+                lanRequested = false,
+            )
+
+        val runtimeConfig = TunnelVpnService.localProxyRuntimeConfig(config, exposure)
+
+        assertNull(runtimeConfig.maxConcurrentClients)
+        assertEquals(exposure, runtimeConfig.exposure)
     }
 
     @Test

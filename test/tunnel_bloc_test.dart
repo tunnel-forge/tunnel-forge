@@ -123,6 +123,26 @@ void main() {
     },
     expect: () => const <TunnelState>[],
   );
+
+  blocTest<TunnelBloc, TunnelState>(
+    'await timeout stays non-terminal while Android is still connecting',
+    build: () => TunnelBloc(_FakeTunnelRepository(), _FakeLogsRepository()),
+    seed: () => const TunnelState(
+      awaitingTunnel: true,
+      activeAttemptId: 'attempt-current',
+      connectionMode: ConnectionMode.proxyOnly,
+    ),
+    act: (bloc) {
+      bloc.add(const TunnelAwaitTimedOut('attempt-current'));
+    },
+    expect: () => const <TunnelState>[],
+    verify: (bloc) {
+      expect(bloc.state.awaitingTunnel, isTrue);
+      expect(bloc.state.activeAttemptId, 'attempt-current');
+      expect(bloc.state.message, isNull);
+      expect(bloc.state.timedOutThisAttempt, isFalse);
+    },
+  );
 }
 
 late _CountingTunnelRepository _countingTunnelRepository;

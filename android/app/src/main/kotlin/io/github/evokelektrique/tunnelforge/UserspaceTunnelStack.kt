@@ -9,10 +9,14 @@ import java.net.Socket
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 interface UserspaceTunnelStack {
     fun waitUntilReady(timeoutMs: Long = 4000, pollIntervalMs: Long = 100): Boolean
@@ -69,21 +73,37 @@ internal class BridgeUserspaceTunnelStack(
     private val failureReason: String = DEFAULT_FAILURE_REASON,
     private val connectTimeoutMs: Long = DEFAULT_CONNECT_TIMEOUT_MS,
     private val synRetransmitDelaysMs: List<Long> = DEFAULT_SYN_RETRANSMIT_DELAYS_MS,
-    private val maxTcpSessions: Int = DEFAULT_MAX_TCP_SESSIONS,
+    private val maxTcpSessions: Int? = DEFAULT_MAX_TCP_SESSIONS,
+    private val maxPendingTcpConnects: Int? = DEFAULT_MAX_PENDING_TCP_CONNECTS,
+    private val synPacingIntervalMs: Long = DEFAULT_SYN_PACING_INTERVAL_MS,
+    private val tcpFinDrainTimeoutMs: Long = DEFAULT_TCP_FIN_DRAIN_TIMEOUT_MS,
+    private val noReplyFailureCacheTtlMs: Long = DEFAULT_NO_REPLY_FAILURE_CACHE_TTL_MS,
 ) : UserspaceTunnelStack {
     init {
-        require(maxTcpSessions >= 1) { "TCP session limit must be at least 1" }
+        require(maxTcpSessions == null || maxTcpSessions >= 1) { "TCP session limit must be at least 1" }
+        require(maxPendingTcpConnects == null || maxPendingTcpConnects >= 1) { "Pending TCP connect limit must be at least 1" }
+        require(synPacingIntervalMs >= 0) { "SYN pacing interval must not be negative" }
+        require(tcpFinDrainTimeoutMs >= 1) { "TCP FIN drain timeout must be at least 1ms" }
     }
 
     private val nextSessionId = AtomicInteger(1)
-    private val nextLocalPort = AtomicInteger(30000)
+    private val nextLocalPort = AtomicInteger(TCP_LOCAL_PORT_MIN)
     private val nextUdpLocalPort = AtomicInteger(20000)
-    private val tcpSessionPermits = Semaphore(maxTcpSessions, true)
+    private val tcpSessionPermits = maxTcpSessions?.let { Semaphore(it, true) }
+    private val pendingTcpConnectPermits = maxPendingTcpConnects?.let { Semaphore(it, true) }
+    private val pendingTcpConnectPermitsByBudgetKey = ConcurrentHashMap<String, Semaphore>()
     private val sessions = ConcurrentHashMap<Int, UserspaceSessionSnapshot>()
     private val tcpRuntimeBySessionId = ConcurrentHashMap<Int, TcpSessionRuntime>()
+    private val tcpRuntimeByLocalPort = ConcurrentHashMap<Int, TcpSessionRuntime>()
+    private val noReplyFailureCache = ConcurrentHashMap<NoReplyTargetKey, CachedNoReplyFailure>()
     private val udpRuntimeBySessionId = ConcurrentHashMap<Int, UdpAssociationRuntime>()
     private val udpRuntimeByLocalPort = ConcurrentHashMap<Int, UdpAssociationRuntime>()
     private val clientAttachments = ConcurrentHashMap<Int, ClientAttachment>()
+    private val nextSynSendAtMs = AtomicLong(0)
+    private val tcpScheduler: ScheduledExecutorService =
+        Executors.newSingleThreadScheduledExecutor { runnable ->
+            Thread(runnable, "proxy-tcp-scheduler").apply { isDaemon = true }
+        }
     private val dnsResolver =
         TunneledDnsResolver(
             bridge = bridge,
@@ -128,14 +148,14 @@ internal class BridgeUserspaceTunnelStack(
 
     override fun openTcpSession(request: ProxyConnectRequest): UserspaceTunnelSession {
         if (!running || !bridge.isRunning()) {
-            throw IOException("Proxy packet bridge is not active.")
+            throw ProxyTransportException(ProxyTransportFailureReason.localServiceUnavailable, "Proxy packet bridge is not active.")
         }
-        if (!tcpSessionPermits.tryAcquire()) {
+        if (tcpSessionPermits?.tryAcquire() == false) {
             logger(
                 Log.WARN,
-                "proxy session reject reason=too-many-tcp-sessions limit=$maxTcpSessions active=${sessions.size} states=${sessionStateSummary()} target=${request.host}:${request.port}",
+                "proxy session reject reason=too-many-tcp-sessions limit=${maxTcpSessions ?: "unlimited"} active=${sessions.size} states=${sessionStateSummary()} target=${request.host}:${request.port}",
             )
-            throw IOException("Too many active proxy TCP sessions; try again shortly.")
+            throw ProxyTransportException(ProxyTransportFailureReason.localServiceUnavailable, "Too many active proxy TCP sessions; try again shortly.")
         }
         val descriptor =
             ProxySessionDescriptor(
@@ -143,20 +163,35 @@ internal class BridgeUserspaceTunnelStack(
                 request = request,
                 openedAtMs = System.currentTimeMillis(),
             )
-        logger(Log.DEBUG, "proxy session open sid=${descriptor.sessionId} target=${request.host}:${request.port}")
         sessions[descriptor.sessionId] =
             UserspaceSessionSnapshot(
                 descriptor = descriptor,
                 state = UserspaceSessionState.opening,
                 lastEvent = "Session allocated; waiting for remote TCP endpoint",
             )
+        var pendingConnectLease: PendingConnectLease? = null
         try {
             val remoteIp = resolveRemoteIpv4(descriptor)
-            queueSyntheticSyn(descriptor, remoteIp)
+            rejectCachedNoReplyFailure(descriptor, remoteIp)
+            val connectBudget = pendingConnectBudgetFor(descriptor.request)
+            val connectLease = acquirePendingConnectLease(descriptor.request, connectBudget)
+            pendingConnectLease = connectLease
+            if (!running || !bridge.isRunning()) {
+                throw ProxyTransportException(ProxyTransportFailureReason.localServiceUnavailable, "Proxy packet bridge is not active.")
+            }
+            queueSyntheticSyn(
+                descriptor = descriptor,
+                remoteIp = remoteIp,
+                pendingConnectLease = connectLease,
+                effectiveConnectTimeoutMs = connectBudget.connectTimeoutMs,
+            )
         } catch (e: IOException) {
             logger(Log.WARN, "proxy session open failed sid=${descriptor.sessionId} target=${request.host}:${request.port} error=${e.message}")
             sessions.remove(descriptor.sessionId)
-            tcpSessionPermits.release()
+            removeTcpRuntime(descriptor.sessionId)?.let { runtime ->
+                releasePendingConnectPermit(runtime)
+            } ?: pendingConnectLease?.release()
+            tcpSessionPermits?.release()
             throw e
         }
         return BridgeUserspaceTunnelSession(
@@ -165,11 +200,14 @@ internal class BridgeUserspaceTunnelStack(
             onAwaitEstablished = { timeoutMs -> awaitSessionEstablished(descriptor.sessionId, timeoutMs) },
             onStateChanged = { state, event -> updateSessionState(descriptor.sessionId, state, event) },
             onClose = {
-                tcpRuntimeBySessionId.remove(descriptor.sessionId)?.signalRuntimeFailure("Session closed")
+                removeTcpRuntime(descriptor.sessionId)?.let { runtime ->
+                    runtime.signalRuntimeFailure("Session closed")
+                    releasePendingConnectPermit(runtime)
+                }
                 clientAttachments.remove(descriptor.sessionId)?.close()
                 updateSessionState(descriptor.sessionId, UserspaceSessionState.closed, "Session closed")
                 sessions.remove(descriptor.sessionId)
-                tcpSessionPermits.release()
+                tcpSessionPermits?.release()
             },
             failureReason = failureReason,
         )
@@ -177,7 +215,7 @@ internal class BridgeUserspaceTunnelStack(
 
     override fun openUdpAssociation(request: ProxyConnectRequest): UserspaceUdpAssociation {
         if (!running || !bridge.isRunning()) {
-            throw IOException("Proxy packet bridge is not active.")
+            throw ProxyTransportException(ProxyTransportFailureReason.localServiceUnavailable, "Proxy packet bridge is not active.")
         }
         val descriptor =
             ProxySessionDescriptor(
@@ -222,15 +260,30 @@ internal class BridgeUserspaceTunnelStack(
 
     override fun stop() {
         running = false
-        logger(Log.DEBUG, "userspace stack stop sessions=${sessions.size} runtimes=${tcpRuntimeBySessionId.size} attachments=${clientAttachments.size}")
-        tcpRuntimeBySessionId.values.forEach { it.signalRuntimeFailure("Proxy packet bridge stopped.") }
+        val tcpRuntimeCount = tcpRuntimeBySessionId.size
+        val attachmentCount = clientAttachments.size
+        logger(Log.DEBUG, "userspace stack stop sessions=${sessions.size} runtimes=$tcpRuntimeCount attachments=$attachmentCount")
+        tcpRuntimeBySessionId.values.toList().forEach {
+            failTcpRuntime(
+                runtime = it,
+                reason = "bridge-stopped",
+                message = "Proxy packet bridge stopped.",
+                closeClient = true,
+                logWarning = false,
+            )
+        }
+        if (tcpRuntimeCount > 0 || attachmentCount > 0) {
+            logger(Log.DEBUG, "proxy tcp stop summary runtimes=$tcpRuntimeCount attachments=$attachmentCount")
+        }
         udpRuntimeBySessionId.values.forEach { it.close() }
         sessions.clear()
         tcpRuntimeBySessionId.clear()
+        tcpRuntimeByLocalPort.clear()
         udpRuntimeBySessionId.clear()
         udpRuntimeByLocalPort.clear()
         clientAttachments.values.forEach { it.close() }
         clientAttachments.clear()
+        tcpScheduler.shutdownNow()
         bridge.stop()
         inboundPump?.interrupt()
         inboundPump = null
@@ -267,11 +320,11 @@ internal class BridgeUserspaceTunnelStack(
         ) {
             val quotedIpv4 = icmp.quotedIpv4
             val quotedTcp = icmp.quotedTcp
-            val runtime = tcpRuntimeBySessionId.values.firstOrNull {
-                it.localPort == quotedTcp.sourcePort &&
+            val runtime = tcpRuntimeByLocalPort[quotedTcp.sourcePort]
+                ?.takeIf {
                     it.remotePort == quotedTcp.destinationPort &&
-                    it.remoteIp == quotedIpv4.destinationIp
-            }
+                        it.remoteIp == quotedIpv4.destinationIp
+                }
             if (runtime != null) {
                 val pmtu = icmp.nextHopMtu ?: 0
                 logger(
@@ -282,6 +335,31 @@ internal class BridgeUserspaceTunnelStack(
                     runtime.sessionId,
                     sessions[runtime.sessionId]?.state ?: UserspaceSessionState.opening,
                     "Observed ICMP fragmentation-needed nextHopMtu=$pmtu",
+                )
+                return
+            }
+        }
+        if (icmp.type == ICMP_TYPE_DESTINATION_UNREACHABLE &&
+            icmp.code != ICMP_CODE_FRAGMENTATION_NEEDED &&
+            icmp.quotedIpv4 != null &&
+            icmp.quotedTcp != null
+        ) {
+            val quotedIpv4 = icmp.quotedIpv4
+            val quotedTcp = icmp.quotedTcp
+            val runtime = tcpRuntimeByLocalPort[quotedTcp.sourcePort]
+                ?.takeIf {
+                    it.remotePort == quotedTcp.destinationPort &&
+                        it.remoteIp == quotedIpv4.destinationIp
+                }
+            if (runtime != null) {
+                runtime.noteIcmpUnreachable()
+                clearNoReplyFailure(runtime)
+                val message = "Observed ICMP destination unreachable code=${icmp.code} from ${ipv4.sourceIp} for ${runtime.describeConnectTarget()}."
+                failTcpRuntime(
+                    runtime = runtime,
+                    reason = "icmp-unreachable code=${icmp.code}",
+                    message = message,
+                    closeClient = !runtime.isConnectPending(),
                 )
                 return
             }
@@ -310,10 +388,6 @@ internal class BridgeUserspaceTunnelStack(
     ) {
         val runtime = udpRuntimeByLocalPort[udp.destinationPort]
         if (runtime == null) {
-            logger(
-                Log.DEBUG,
-                "Dropped inbound UDP without association ${ipv4.sourceIp}:${udp.sourcePort} -> ${ipv4.destinationIp}:${udp.destinationPort} len=${udp.payloadLength}",
-            )
             return
         }
         if (!runtime.acceptsRemote(ipv4.sourceIp, udp.sourcePort)) {
@@ -343,22 +417,27 @@ internal class BridgeUserspaceTunnelStack(
             logger(Log.DEBUG, "Dropped malformed TCP segment ${ipv4.sourceIp} -> ${ipv4.destinationIp} len=${ipv4.totalLength}")
             return
         }
-        logger(
-            Log.DEBUG,
-            "Observed inbound TCP packet ${ipv4.sourceIp}:${tcp.sourcePort} -> ${ipv4.destinationIp}:${tcp.destinationPort} flags=0x${tcp.flags.toString(16)} seq=${tcp.sequenceNumber} payload=${tcp.payloadLength}",
-        )
-        val match = tcpRuntimeBySessionId.values.firstOrNull {
-            it.localPort == tcp.destinationPort &&
-                it.remotePort == tcp.sourcePort &&
-                (it.remoteIp == ipv4.sourceIp || sessions[it.sessionId]?.state == UserspaceSessionState.opening)
+        val runtimeForPort = tcpRuntimeByLocalPort[tcp.destinationPort]
+        val match = runtimeForPort?.takeIf {
+            it.remotePort == tcp.sourcePort &&
+                it.remoteIp == ipv4.sourceIp
         }
         if (match != null) {
+            match.noteInboundTcp()
             handleInboundTcpMatch(match, packet, ipv4, tcp)
         } else {
-            logger(
-                Log.DEBUG,
-                "Dropped inbound TCP without session match ${ipv4.sourceIp}:${tcp.sourcePort} -> ${ipv4.destinationIp}:${tcp.destinationPort} flags=0x${tcp.flags.toString(16)}",
-            )
+            if (runtimeForPort == null) {
+                logger(
+                    Log.DEBUG,
+                    "Dropped inbound TCP no local runtime ${ipv4.sourceIp}:${tcp.sourcePort} -> ${ipv4.destinationIp}:${tcp.destinationPort} flags=0x${tcp.flags.toString(16)}",
+                )
+            } else {
+                runtimeForPort.noteSourceMismatch()
+                logger(
+                    Log.DEBUG,
+                    "Dropped inbound TCP source mismatch sid=${runtimeForPort.sessionId} expected=${runtimeForPort.remoteIp}:${runtimeForPort.remotePort} actual=${ipv4.sourceIp}:${tcp.sourcePort} local=${tcp.destinationPort} flags=0x${tcp.flags.toString(16)}",
+                )
+            }
         }
     }
 
@@ -369,11 +448,15 @@ internal class BridgeUserspaceTunnelStack(
         tcp: ParsedTcpSegment,
     ) {
         if ((tcp.flags and TcpPacketBuilder.TCP_FLAG_RST) != 0) {
-            clientAttachments.remove(runtime.sessionId)?.close()
+            runtime.noteRst()
+            clearNoReplyFailure(runtime)
             val message = "Observed TCP RST from ${ipv4.sourceIp}:${tcp.sourcePort}"
-            runtime.signalRuntimeFailure(message)
-            logger(Log.WARN, "proxy tcp fail sid=${runtime.sessionId} reason=rst-in")
-            updateSessionState(runtime.sessionId, UserspaceSessionState.failed, message)
+            failTcpRuntime(
+                runtime = runtime,
+                reason = "rst-in",
+                message = message,
+                closeClient = !runtime.isConnectPending(),
+            )
             return
         }
 
@@ -381,6 +464,7 @@ internal class BridgeUserspaceTunnelStack(
             (tcp.flags and TcpPacketBuilder.TCP_FLAG_ACK) != 0 &&
             runtime.isConnectPending()
         ) {
+            runtime.noteSynAckMatched()
             val ackPacket =
                 runtime.withLock {
                     TcpPacketBuilder.buildIpv4TcpPacket(
@@ -394,7 +478,10 @@ internal class BridgeUserspaceTunnelStack(
                     )
                 }
             if (bridge.queueOutboundPacket(ackPacket)) {
-                runtime.markEstablished(ipv4.sourceIp, tcp.sequenceNumber + 1)
+                clearNoReplyFailure(runtime)
+                if (runtime.markEstablished(ipv4.sourceIp, tcp.sequenceNumber + 1)) {
+                    releasePendingConnectPermit(runtime)
+                }
                 logger(Log.DEBUG, "proxy tcp established sid=${runtime.sessionId}")
                 updateSessionState(
                     runtime.sessionId,
@@ -403,8 +490,7 @@ internal class BridgeUserspaceTunnelStack(
                 )
             } else {
                 val message = "Observed SYN/ACK but failed to queue final TCP ACK"
-                runtime.signalConnectFailure(message)
-                updateSessionState(runtime.sessionId, UserspaceSessionState.failed, message)
+                failTcpRuntime(runtime, reason = "ack-queue-failed", message = message, closeClient = false)
             }
             return
         }
@@ -414,7 +500,6 @@ internal class BridgeUserspaceTunnelStack(
             val expectedSequence = runtime.withLock { remoteSequenceNumber }
             if (tcp.sequenceNumber < expectedSequence) {
                 queuePureAck(runtime, expectedSequence)
-                logger(Log.DEBUG, "proxy tcp reack sid=${runtime.sessionId} reason=duplicate ack=$expectedSequence")
                 updateSessionState(
                     runtime.sessionId,
                     UserspaceSessionState.established,
@@ -424,7 +509,6 @@ internal class BridgeUserspaceTunnelStack(
             }
             if (tcp.sequenceNumber > expectedSequence) {
                 queuePureAck(runtime, expectedSequence)
-                logger(Log.DEBUG, "proxy tcp reack sid=${runtime.sessionId} reason=out-of-order ack=$expectedSequence")
                 updateSessionState(
                     runtime.sessionId,
                     UserspaceSessionState.established,
@@ -437,22 +521,16 @@ internal class BridgeUserspaceTunnelStack(
                 val attachment = clientAttachments[runtime.sessionId]
                 if (attachment == null) {
                     val message = "Inbound TCP payload arrived without attached client socket"
-                    runtime.signalRuntimeFailure(message)
-                    logger(Log.WARN, "proxy tcp fail sid=${runtime.sessionId} reason=no-client-attachment")
-                    updateSessionState(runtime.sessionId, UserspaceSessionState.failed, message)
+                    failTcpRuntime(runtime, reason = "no-client-attachment", message = message, closeClient = true)
                     return
                 }
                 try {
                     attachment.write(payload)
                 } catch (e: IOException) {
-                    clientAttachments.remove(runtime.sessionId)?.close()
                     val message = e.message ?: "Failed writing inbound payload to client"
-                    runtime.signalRuntimeFailure(message)
-                    logger(Log.WARN, "proxy tcp fail sid=${runtime.sessionId} reason=client-write error=$message")
-                    updateSessionState(runtime.sessionId, UserspaceSessionState.failed, message)
+                    failTcpRuntime(runtime, reason = "client-write", message = message, closeClient = true)
                     return
                 }
-                logger(Log.DEBUG, "proxy tcp in sid=${runtime.sessionId} bytes=${tcp.payloadLength}")
                 updateSessionState(
                     runtime.sessionId,
                     UserspaceSessionState.established,
@@ -492,7 +570,7 @@ internal class BridgeUserspaceTunnelStack(
             return it
         }
         if (descriptor.request.host.contains(':')) {
-            throw IOException("IPv6 destinations are not supported in proxy mode.")
+            throw ProxyTransportException(ProxyTransportFailureReason.networkUnreachable, "IPv6 destinations are not supported in proxy mode.")
         }
         updateSessionState(
             descriptor.sessionId,
@@ -504,33 +582,128 @@ internal class BridgeUserspaceTunnelStack(
         return resolved
     }
 
-    private fun queueSyntheticSyn(descriptor: ProxySessionDescriptor, remoteIp: String) {
-        val localPort = nextLocalPort.getAndIncrement().coerceIn(1024, 65535)
+    private fun queueSyntheticSyn(
+        descriptor: ProxySessionDescriptor,
+        remoteIp: String,
+        pendingConnectLease: PendingConnectLease,
+        effectiveConnectTimeoutMs: Long,
+    ) {
         val sequenceNumber = descriptor.sessionId.toLong() shl 20
-        val runtime =
-            TcpSessionRuntime(
-                sessionId = descriptor.sessionId,
-                targetHost = descriptor.request.host,
-                localPort = localPort,
-                remoteIp = remoteIp,
-                remotePort = descriptor.request.port,
-                initialSequenceNumber = sequenceNumber,
-            )
+        val runtime = reserveTcpRuntime(descriptor, remoteIp, sequenceNumber, pendingConnectLease, effectiveConnectTimeoutMs)
         tcpRuntimeBySessionId[descriptor.sessionId] = runtime
         updateSessionState(
             descriptor.sessionId,
             UserspaceSessionState.opening,
-            "Queued synthetic TCP SYN $clientIpv4:$localPort -> $remoteIp:${descriptor.request.port}",
+            "Queued synthetic TCP SYN $clientIpv4:${runtime.localPort} -> $remoteIp:${descriptor.request.port}",
         )
 
-        if (!queueSyntheticSynPacket(runtime, reason = "initial")) {
-            tcpRuntimeBySessionId.remove(descriptor.sessionId, runtime)
-            runtime.signalConnectFailure("Failed to queue TCP SYN into proxy packet bridge.")
-            logger(Log.WARN, "proxy tcp fail sid=${descriptor.sessionId} reason=syn-queue-failed")
-            updateSessionState(descriptor.sessionId, UserspaceSessionState.failed, "Failed to queue TCP SYN into proxy packet bridge")
-            throw IOException("Failed to queue outbound TCP SYN into proxy packet bridge.")
+        if (!scheduleSyntheticSynPacket(runtime, reason = "initial", delayMs = 0L)) {
+            if (!running || !bridge.isRunning()) {
+                val message = "Proxy packet bridge is not active."
+                runtime.signalRuntimeFailure(message)
+                updateSessionState(descriptor.sessionId, UserspaceSessionState.failed, message)
+                if (runtime.markFailureLogged()) {
+                    logger(Log.WARN, "proxy tcp fail sid=${descriptor.sessionId} reason=bridge-inactive error=$message")
+                }
+                throw ProxyTransportException(ProxyTransportFailureReason.localServiceUnavailable, message)
+            }
+            logger(
+                Log.DEBUG,
+                "proxy tcp queue retry sid=${descriptor.sessionId} reason=syn-queue-backpressure ${runtime.describeConnectTarget()}",
+            )
+            scheduleSyntheticSynPacket(runtime, reason = "queue-retry", delayMs = SYN_QUEUE_RETRY_DELAY_MS)
         }
-        startSynRetransmitter(runtime)
+        startConnectTimers(runtime)
+    }
+
+    private fun reserveTcpRuntime(
+        descriptor: ProxySessionDescriptor,
+        remoteIp: String,
+        sequenceNumber: Long,
+        pendingConnectLease: PendingConnectLease,
+        effectiveConnectTimeoutMs: Long,
+    ): TcpSessionRuntime {
+        repeat(TCP_LOCAL_PORT_SPAN) {
+            val candidate = nextTcpLocalPortCandidate()
+            val runtime =
+                TcpSessionRuntime(
+                    sessionId = descriptor.sessionId,
+                    targetHost = descriptor.request.host,
+                    localPort = candidate,
+                    remoteIp = remoteIp,
+                    remotePort = descriptor.request.port,
+                    initialSequenceNumber = sequenceNumber,
+                    connectTimeoutMs = effectiveConnectTimeoutMs,
+                    pendingConnectLease = pendingConnectLease,
+                )
+            if (tcpRuntimeByLocalPort.putIfAbsent(candidate, runtime) == null) {
+                return runtime
+            }
+        }
+        throw IOException("No local proxy TCP source ports are available.")
+    }
+
+    private fun nextTcpLocalPortCandidate(): Int =
+        nextLocalPort.getAndUpdate {
+            if (it >= TCP_LOCAL_PORT_MAX) TCP_LOCAL_PORT_MIN else it + 1
+        }
+
+    private fun scheduleSyntheticSynPacket(runtime: TcpSessionRuntime, reason: String, delayMs: Long): Boolean {
+        if (delayMs > 0L) {
+            val task =
+                tcpScheduler.schedule(
+                    {
+                        if (running && runtime.isConnectPending() && !scheduleSyntheticSynPacket(runtime, reason, delayMs = 0L)) {
+                            if (!bridge.isRunning()) {
+                                val message = "Proxy packet bridge is not active."
+                                failTcpRuntime(runtime, reason = "bridge-inactive", message = message, closeClient = false)
+                            } else {
+                                logger(Log.DEBUG, "proxy tcp queue retry sid=${runtime.sessionId} reason=syn-$reason ${runtime.describeConnectTarget()}")
+                                scheduleSyntheticSynPacket(runtime, reason = "queue-retry", delayMs = SYN_QUEUE_RETRY_DELAY_MS)
+                            }
+                        }
+                    },
+                    delayMs,
+                    TimeUnit.MILLISECONDS,
+                )
+            runtime.attachScheduledTask(task)
+            return true
+        }
+        val effectiveDelayMs = pacedSynDelayMs()
+        if (effectiveDelayMs <= 0L) {
+            return queueSyntheticSynPacket(runtime, reason)
+        }
+        val task =
+            tcpScheduler.schedule(
+                {
+                    if (running && runtime.isConnectPending() && !queueSyntheticSynPacket(runtime, reason)) {
+                        if (!bridge.isRunning()) {
+                            val message = "Proxy packet bridge is not active."
+                            failTcpRuntime(runtime, reason = "bridge-inactive", message = message, closeClient = false)
+                        } else {
+                            logger(Log.DEBUG, "proxy tcp queue retry sid=${runtime.sessionId} reason=syn-$reason ${runtime.describeConnectTarget()}")
+                            scheduleSyntheticSynPacket(runtime, reason = "queue-retry", delayMs = SYN_QUEUE_RETRY_DELAY_MS)
+                        }
+                    }
+                },
+                effectiveDelayMs,
+                TimeUnit.MILLISECONDS,
+            )
+        runtime.attachScheduledTask(task)
+        return true
+    }
+
+    private fun pacedSynDelayMs(): Long {
+        if (synPacingIntervalMs == 0L) return 0L
+        val now = System.currentTimeMillis()
+        while (true) {
+            val current = nextSynSendAtMs.get()
+            val sendAtMs = maxOf(now, current)
+            val next = sendAtMs + synPacingIntervalMs
+            if (nextSynSendAtMs.compareAndSet(current, next)) {
+                return (sendAtMs - now).coerceAtLeast(0L)
+            }
+        }
     }
 
     private fun queueSyntheticSynPacket(runtime: TcpSessionRuntime, reason: String): Boolean {
@@ -548,10 +721,12 @@ internal class BridgeUserspaceTunnelStack(
                 )
             }
         if (!bridge.queueOutboundPacket(synPacket)) {
-            logger(Log.WARN, "proxy tcp syn failed sid=${runtime.sessionId} reason=$reason attempt=$attempt ${runtime.describeConnectTarget()}")
             return false
         }
-        logger(Log.DEBUG, "proxy tcp syn sid=${runtime.sessionId} reason=$reason attempt=$attempt ${runtime.describeConnectTarget()} mss=$advertisedMss")
+        logger(
+            Log.DEBUG,
+            "proxy tcp syn sid=${runtime.sessionId} reason=$reason attempt=$attempt ${runtime.describeConnectTarget()} seq=${runtime.initialSequenceNumber}",
+        )
         if (runtime.isConnectPending()) {
             updateSessionState(
                 runtime.sessionId,
@@ -562,36 +737,146 @@ internal class BridgeUserspaceTunnelStack(
         return true
     }
 
-    private fun startSynRetransmitter(runtime: TcpSessionRuntime) {
-        if (synRetransmitDelaysMs.isEmpty()) return
-        val thread = Thread(
-            {
-                for (delayMs in synRetransmitDelaysMs) {
-                    if (!running || !runtime.isConnectPending()) return@Thread
-                    try {
-                        Thread.sleep(delayMs.coerceAtLeast(1L))
-                    } catch (_: InterruptedException) {
-                        Thread.currentThread().interrupt()
-                        return@Thread
+    private fun startConnectTimers(runtime: TcpSessionRuntime) {
+        for (delayMs in synRetransmitDelaysMs.filter { it < runtime.connectTimeoutMs.coerceAtLeast(1L) }) {
+            scheduleSyntheticSynPacket(runtime, reason = "retransmit", delayMs = delayMs.coerceAtLeast(1L))
+        }
+        runtime.attachScheduledTask(
+            tcpScheduler.schedule(
+                {
+                    if (running && runtime.isConnectPending()) {
+                        val message = buildConnectTimeoutMessage(runtime)
+                        recordNoReplyFailureIfApplicable(runtime)
+                        failTcpRuntime(runtime, reason = "connect-timeout timeoutMs=${runtime.connectTimeoutMs}", message = message, closeClient = false)
                     }
-                    if (!running || !runtime.isConnectPending()) return@Thread
-                    if (!queueSyntheticSynPacket(runtime, reason = "retransmit")) {
-                        val message = "Failed to queue TCP SYN retransmit ${runtime.describeConnectTarget()}."
-                        runtime.signalConnectFailure(message)
-                        updateSessionState(runtime.sessionId, UserspaceSessionState.failed, message)
-                        return@Thread
-                    }
-                }
-            },
-            "proxy-syn-retry-${runtime.sessionId}",
+                },
+                runtime.connectTimeoutMs.coerceAtLeast(1L),
+                TimeUnit.MILLISECONDS,
+            ),
         )
-        runtime.attachSynRetransmitThread(thread)
-        thread.start()
+    }
+
+    private fun acquirePendingConnectLease(
+        request: ProxyConnectRequest,
+        budget: PendingConnectBudget,
+    ): PendingConnectLease {
+        val releases = ArrayList<() -> Unit>(2)
+        try {
+            pendingTcpConnectPermits?.let { permit ->
+                acquireConnectPermit(
+                    permit = permit,
+                    request = request,
+                    timeoutMs = budget.waitTimeoutMs,
+                    reason = "pending-tcp-connects",
+                    limitLabel = maxPendingTcpConnects?.toString() ?: "unlimited",
+                    scopeLabel = budget.label,
+                )
+                releases += { permit.release() }
+            }
+            if (budget.key != null && budget.limit != null) {
+                val permit = pendingTcpConnectPermitsByBudgetKey.computeIfAbsent(budget.key) { Semaphore(budget.limit, true) }
+                acquireConnectPermit(
+                    permit = permit,
+                    request = request,
+                    timeoutMs = budget.waitTimeoutMs,
+                    reason = "pending-destination-connects",
+                    limitLabel = budget.limit.toString(),
+                    scopeLabel = budget.label,
+                )
+                releases += { permit.release() }
+            }
+            return PendingConnectLease(releases)
+        } catch (e: IOException) {
+            releases.asReversed().forEach { it() }
+            throw e
+        }
+    }
+
+    private fun acquireConnectPermit(
+        permit: Semaphore,
+        request: ProxyConnectRequest,
+        timeoutMs: Long,
+        reason: String,
+        limitLabel: String,
+        scopeLabel: String,
+    ) {
+        if (permit.tryAcquire()) return
+
+        logger(
+            Log.DEBUG,
+            "proxy session wait reason=$reason scope=$scopeLabel limit=$limitLabel timeoutMs=$timeoutMs active=${sessions.size} states=${sessionStateSummary()} target=${request.host}:${request.port}",
+        )
+        val acquired =
+            try {
+                permit.tryAcquire(timeoutMs.coerceAtLeast(1L), TimeUnit.MILLISECONDS)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                logger(
+                    Log.DEBUG,
+                    "proxy session wait interrupted reason=$reason scope=$scopeLabel limit=$limitLabel active=${sessions.size} states=${sessionStateSummary()} target=${request.host}:${request.port}",
+                )
+                throw IOException("Interrupted while waiting for a pending proxy TCP connection slot.", e)
+            }
+        if (acquired) return
+
+        val timeoutReason = if (reason.endsWith("s")) reason.dropLast(1) else reason
+        logger(
+            Log.WARN,
+            "proxy session reject reason=${timeoutReason}-wait-timeout scope=$scopeLabel limit=$limitLabel timeoutMs=$timeoutMs active=${sessions.size} states=${sessionStateSummary()} target=${request.host}:${request.port}",
+        )
+        throw ProxyTransportException(ProxyTransportFailureReason.localServiceUnavailable, "Timed out while waiting for a pending proxy TCP connection slot.")
+    }
+
+    private fun pendingConnectBudgetFor(request: ProxyConnectRequest): PendingConnectBudget {
+        val label =
+            when {
+                request.protocol.startsWith("dnsOver") -> "infrastructure"
+                request.port == 443 -> "https"
+                request.port == 80 -> "http"
+                else -> "tcp"
+            }
+        return PendingConnectBudget(
+            key = null,
+            limit = null,
+            label = label,
+            connectTimeoutMs = connectTimeoutMs,
+            waitTimeoutMs = connectTimeoutMs,
+        )
     }
 
     private fun updateSessionState(sessionId: Int, state: UserspaceSessionState, event: String) {
         sessions.computeIfPresent(sessionId) { _, current ->
             current.copy(state = state, lastEvent = event)
+        }
+    }
+
+    private fun releasePendingConnectPermit(runtime: TcpSessionRuntime) {
+        runtime.releasePendingConnectPermit()
+    }
+
+    private fun removeTcpRuntime(sessionId: Int): TcpSessionRuntime? {
+        val runtime = tcpRuntimeBySessionId.remove(sessionId) ?: return null
+        tcpRuntimeByLocalPort.remove(runtime.localPort, runtime)
+        runtime.cancelScheduledTasks()
+        return runtime
+    }
+
+    private fun failTcpRuntime(
+        runtime: TcpSessionRuntime,
+        reason: String,
+        message: String,
+        closeClient: Boolean,
+        logWarning: Boolean = true,
+    ) {
+        runtime.signalRuntimeFailure(message)
+        releasePendingConnectPermit(runtime)
+        removeTcpRuntime(runtime.sessionId)
+        if (closeClient) {
+            clientAttachments.remove(runtime.sessionId)?.close()
+        }
+        updateSessionState(runtime.sessionId, UserspaceSessionState.failed, message)
+        if (logWarning && runtime.markFailureLogged()) {
+            logger(Log.WARN, "proxy tcp fail sid=${runtime.sessionId} reason=$reason error=$message")
         }
     }
 
@@ -605,7 +890,6 @@ internal class BridgeUserspaceTunnelStack(
     private fun pumpSessionTraffic(sessionId: Int, client: ProxyClientConnection) {
         clientAttachments[sessionId] = ClientAttachment(client)
         val runtime = tcpRuntimeBySessionId[sessionId] ?: throw IOException("TCP session runtime closed before activation.")
-        logger(Log.DEBUG, "proxy session attach sid=$sessionId localPort=${runtime.localPort} remote=${runtime.remoteIp}:${runtime.remotePort}")
         awaitSessionEstablished(sessionId, connectTimeoutMs)
         logger(Log.DEBUG, "proxy session active sid=$sessionId localPort=${runtime.localPort} remote=${runtime.remoteIp}:${runtime.remotePort}")
 
@@ -631,15 +915,12 @@ internal class BridgeUserspaceTunnelStack(
             }
             if (!bridge.queueOutboundPacket(packet)) {
                 val message = "Failed to queue outbound TCP payload."
-                runtime.signalRuntimeFailure(message)
-                logger(Log.WARN, "proxy tcp fail sid=$sessionId reason=payload-queue-failed bytes=$read")
-                updateSessionState(sessionId, UserspaceSessionState.failed, "Failed to queue outbound TCP payload len=$read")
+                failTcpRuntime(runtime, reason = "payload-queue-failed bytes=$read", message = message, closeClient = true)
                 throw IOException(message)
             }
             runtime.withLock {
                 nextSendSequenceNumber += read
             }
-            logger(Log.DEBUG, "proxy tcp out sid=$sessionId bytes=$read")
             updateSessionState(sessionId, UserspaceSessionState.established, "Queued outbound TCP payload len=$read")
         }
 
@@ -660,9 +941,7 @@ internal class BridgeUserspaceTunnelStack(
             }
         if (!bridge.queueOutboundPacket(finPacket)) {
             val message = "Failed to queue outbound TCP FIN."
-            runtime.signalRuntimeFailure(message)
-            logger(Log.WARN, "proxy tcp fail sid=$sessionId reason=fin-queue-failed")
-            updateSessionState(sessionId, UserspaceSessionState.failed, "Failed to queue outbound TCP FIN")
+            failTcpRuntime(runtime, reason = "fin-queue-failed", message = message, closeClient = true)
             throw IOException(message)
         }
         runtime.withLock {
@@ -671,9 +950,15 @@ internal class BridgeUserspaceTunnelStack(
         logger(Log.DEBUG, "proxy tcp close sid=$sessionId reason=fin-out")
         updateSessionState(sessionId, UserspaceSessionState.established, "Queued outbound TCP FIN; awaiting remote close")
 
-        when (runtime.awaitRemoteCloseOrFailure()) {
+        when (runtime.awaitRemoteCloseOrFailure(tcpFinDrainTimeoutMs)) {
             SessionWaitState.remoteClosed -> {
                 updateSessionState(sessionId, UserspaceSessionState.closed, "TCP session closed cleanly")
+            }
+            SessionWaitState.drainTimedOut -> {
+                removeTcpRuntime(sessionId)
+                clientAttachments.remove(sessionId)?.close()
+                updateSessionState(sessionId, UserspaceSessionState.closed, "TCP session closed after FIN drain timeout")
+                logger(Log.DEBUG, "proxy tcp close sid=$sessionId reason=fin-drain-timeout timeoutMs=$tcpFinDrainTimeoutMs")
             }
             SessionWaitState.failed -> {
                 val message = runtime.terminalFailureMessage ?: "TCP session closed with failure."
@@ -695,20 +980,56 @@ internal class BridgeUserspaceTunnelStack(
             ConnectWaitState.established -> Unit
             ConnectWaitState.failed -> {
                 val message = runtime.connectFailureMessage ?: "TCP session failed to connect."
-                logger(Log.WARN, "proxy tcp fail sid=$sessionId reason=connect-failed error=$message")
+                releasePendingConnectPermit(runtime)
                 updateSessionState(sessionId, UserspaceSessionState.failed, message)
-                throw IOException(message)
+                throw runtime.connectFailure(message)
             }
             ConnectWaitState.pending -> {
-                val message = "TCP connect timed out ${runtime.describeConnectTarget()}."
-                runtime.signalConnectFailure(message)
-                tcpRuntimeBySessionId.remove(sessionId, runtime)
-                clientAttachments.remove(sessionId)?.close()
-                logger(Log.WARN, "proxy tcp fail sid=$sessionId reason=connect-timeout timeoutMs=$timeoutMs ${runtime.describeConnectTarget()}")
-                updateSessionState(sessionId, UserspaceSessionState.failed, message)
-                throw IOException(message)
+                val message = buildConnectTimeoutMessage(runtime)
+                recordNoReplyFailureIfApplicable(runtime)
+                failTcpRuntime(runtime, reason = "connect-timeout timeoutMs=$timeoutMs", message = message, closeClient = false)
+                throw ProxyTransportException(ProxyTransportFailureReason.upstreamTimeout, message)
             }
         }
+    }
+
+    private fun buildConnectTimeoutMessage(runtime: TcpSessionRuntime): String =
+        "TCP connect timed out ${runtime.describeConnectTarget()} ${runtime.describeConnectDiagnostics()}."
+
+    private fun rejectCachedNoReplyFailure(descriptor: ProxySessionDescriptor, remoteIp: String) {
+        if (noReplyFailureCacheTtlMs <= 0L) return
+        val key = NoReplyTargetKey(remoteIp, descriptor.request.port)
+        val cached = noReplyFailureCache[key] ?: return
+        val now = System.currentTimeMillis()
+        val ageMs = now - cached.createdAtMs
+        if (ageMs >= noReplyFailureCacheTtlMs) {
+            noReplyFailureCache.remove(key, cached)
+            return
+        }
+        val message =
+            "Recent TCP connect had no reply through tunnel host=${descriptor.request.host} ip=$remoteIp port=${descriptor.request.port} " +
+                "upstreamReply=none-through-tunnel cachedAgeMs=$ageMs ttlMs=$noReplyFailureCacheTtlMs previousSynAttempts=${cached.synAttempts}."
+        logger(
+            Log.WARN,
+            "proxy session reject reason=upstream-no-reply-cache sid=${descriptor.sessionId} target=${descriptor.request.host}:${descriptor.request.port} " +
+                "ip=$remoteIp cachedAgeMs=$ageMs ttlMs=$noReplyFailureCacheTtlMs",
+        )
+        throw ProxyTransportException(ProxyTransportFailureReason.upstreamTimeout, message)
+    }
+
+    private fun recordNoReplyFailureIfApplicable(runtime: TcpSessionRuntime) {
+        if (noReplyFailureCacheTtlMs <= 0L || !runtime.isNoReplyThroughTunnel()) return
+        val key = NoReplyTargetKey(runtime.remoteIp, runtime.remotePort)
+        noReplyFailureCache[key] =
+            CachedNoReplyFailure(
+                createdAtMs = System.currentTimeMillis(),
+                synAttempts = runtime.synAttemptCount(),
+            )
+    }
+
+    private fun clearNoReplyFailure(runtime: TcpSessionRuntime) {
+        if (noReplyFailureCache.isEmpty()) return
+        noReplyFailureCache.remove(NoReplyTargetKey(runtime.remoteIp, runtime.remotePort))
     }
 
     private fun queuePureAck(runtime: TcpSessionRuntime, acknowledgementNumber: Long) {
@@ -725,7 +1046,6 @@ internal class BridgeUserspaceTunnelStack(
                 )
             }
         if (bridge.queueOutboundPacket(ackPacket)) {
-            logger(Log.DEBUG, "proxy tcp ack sid=${runtime.sessionId} ack=$acknowledgementNumber")
             updateSessionState(runtime.sessionId, UserspaceSessionState.established, "Queued TCP ACK ack=$acknowledgementNumber")
         } else {
             updateSessionState(runtime.sessionId, UserspaceSessionState.failed, "Failed to queue TCP ACK ack=$acknowledgementNumber")
@@ -804,7 +1124,7 @@ internal class BridgeUserspaceTunnelStack(
     private fun resolveUdpRemoteIpv4(host: String): String {
         host.toIpv4LiteralOrNull()?.let { return it }
         if (host.contains(':')) {
-            throw IOException("IPv6 destinations are not supported in proxy mode.")
+            throw ProxyTransportException(ProxyTransportFailureReason.networkUnreachable, "IPv6 destinations are not supported in proxy mode.")
         }
         return dnsResolver.resolve(host)
     }
@@ -829,14 +1149,22 @@ internal class BridgeUserspaceTunnelStack(
         private const val DEFAULT_CLIENT_IPV4 = "10.0.0.2"
         private const val DEFAULT_LINK_MTU = 1450
         private const val DEFAULT_FAILURE_REASON = "Proxy forwarding over the packet bridge is not attached yet."
-        private const val DEFAULT_CONNECT_TIMEOUT_MS = 10_000L
-        private const val DEFAULT_MAX_TCP_SESSIONS = 32
+        private const val DEFAULT_CONNECT_TIMEOUT_MS = 15_000L
+        private val DEFAULT_MAX_TCP_SESSIONS: Int? = null
+        private val DEFAULT_MAX_PENDING_TCP_CONNECTS: Int? = null
+        private const val DEFAULT_SYN_PACING_INTERVAL_MS = 0L
+        private const val DEFAULT_TCP_FIN_DRAIN_TIMEOUT_MS = 5_000L
+        private const val DEFAULT_NO_REPLY_FAILURE_CACHE_TTL_MS = 60_000L
+        private const val SYN_QUEUE_RETRY_DELAY_MS = 50L
         private const val LOCALHOST_IPV4 = "127.0.0.1"
         private const val UDP_HEADER_LEN = 8
+        private const val TCP_LOCAL_PORT_MIN = 30000
+        private const val TCP_LOCAL_PORT_MAX = 65535
+        private const val TCP_LOCAL_PORT_SPAN = TCP_LOCAL_PORT_MAX - TCP_LOCAL_PORT_MIN + 1
         private const val UDP_LOCAL_PORT_MIN = 20000
         private const val UDP_LOCAL_PORT_MAX = 29999
         private const val UDP_LOCAL_PORT_SPAN = UDP_LOCAL_PORT_MAX - UDP_LOCAL_PORT_MIN + 1
-        private val DEFAULT_SYN_RETRANSMIT_DELAYS_MS = listOf(1_000L, 2_000L, 4_000L)
+        private val DEFAULT_SYN_RETRANSMIT_DELAYS_MS = listOf(1_000L, 2_000L, 4_000L, 8_000L)
     }
 }
 
@@ -849,8 +1177,19 @@ private enum class ConnectWaitState {
 private enum class SessionWaitState {
     pending,
     remoteClosed,
+    drainTimedOut,
     failed,
 }
+
+private data class NoReplyTargetKey(
+    val ip: String,
+    val port: Int,
+)
+
+private data class CachedNoReplyFailure(
+    val createdAtMs: Long,
+    val synAttempts: Int,
+)
 
 private class TcpSessionRuntime(
     val sessionId: Int,
@@ -859,6 +1198,8 @@ private class TcpSessionRuntime(
     var remoteIp: String,
     val remotePort: Int,
     val initialSequenceNumber: Long,
+    val connectTimeoutMs: Long,
+    private var pendingConnectLease: PendingConnectLease?,
 ) {
     var remoteSequenceNumber: Long = 0
     var handshakeAckQueued: Boolean = false
@@ -869,12 +1210,19 @@ private class TcpSessionRuntime(
     var terminalFailureMessage: String? = null
         private set
     private var synAttempts: Int = 0
+    private var inboundTcpSeen: Int = 0
+    private var synAckMatched: Int = 0
+    private var rstSeen: Int = 0
+    private var icmpUnreachableSeen: Int = 0
+    private var sourceMismatchDrops: Int = 0
 
     private var connectState: ConnectWaitState = ConnectWaitState.pending
     private var sessionWaitState: SessionWaitState = SessionWaitState.pending
+    private var pendingConnectPermitReleased: Boolean = false
+    private var failureLogged: Boolean = false
     private val connectLatch = CountDownLatch(1)
     private val sessionWaitLatch = CountDownLatch(1)
-    private var synRetransmitThread: Thread? = null
+    private val scheduledTasks = ArrayList<ScheduledFuture<*>>()
 
     @Synchronized
     fun <T> withLock(block: TcpSessionRuntime.() -> T): T = block()
@@ -893,11 +1241,54 @@ private class TcpSessionRuntime(
         "host=$targetHost ip=$remoteIp port=$remotePort sport=$localPort synAttempts=$synAttempts"
 
     @Synchronized
-    fun attachSynRetransmitThread(thread: Thread) {
-        if (connectState == ConnectWaitState.pending) {
-            synRetransmitThread = thread
+    fun describeConnectDiagnostics(): String =
+        "connectDiag=inboundTcp=$inboundTcpSeen synAck=$synAckMatched rst=$rstSeen icmpUnreachable=$icmpUnreachableSeen sourceMismatchDrops=$sourceMismatchDrops${noReplyDiagnosticSuffix()}"
+
+    @Synchronized
+    fun isNoReplyThroughTunnel(): Boolean =
+        inboundTcpSeen == 0 && synAckMatched == 0 && rstSeen == 0 && icmpUnreachableSeen == 0 && sourceMismatchDrops == 0
+
+    @Synchronized
+    fun synAttemptCount(): Int = synAttempts
+
+    private fun noReplyDiagnosticSuffix(): String =
+        if (inboundTcpSeen == 0 && rstSeen == 0 && icmpUnreachableSeen == 0 && sourceMismatchDrops == 0) {
+            " upstreamReply=none-through-tunnel"
         } else {
-            thread.interrupt()
+            ""
+        }
+
+    @Synchronized
+    fun noteInboundTcp() {
+        inboundTcpSeen += 1
+    }
+
+    @Synchronized
+    fun noteSynAckMatched() {
+        synAckMatched += 1
+    }
+
+    @Synchronized
+    fun noteRst() {
+        rstSeen += 1
+    }
+
+    @Synchronized
+    fun noteIcmpUnreachable() {
+        icmpUnreachableSeen += 1
+    }
+
+    @Synchronized
+    fun noteSourceMismatch() {
+        sourceMismatchDrops += 1
+    }
+
+    @Synchronized
+    fun attachScheduledTask(task: ScheduledFuture<*>) {
+        if (connectState == ConnectWaitState.pending) {
+            scheduledTasks += task
+        } else {
+            task.cancel(true)
         }
     }
 
@@ -915,14 +1306,15 @@ private class TcpSessionRuntime(
         }
 
     @Synchronized
-    fun markEstablished(establishedRemoteIp: String, establishedRemoteSequence: Long) {
-        if (connectState != ConnectWaitState.pending) return
+    fun markEstablished(establishedRemoteIp: String, establishedRemoteSequence: Long): Boolean {
+        if (connectState != ConnectWaitState.pending) return false
         handshakeAckQueued = true
         remoteIp = establishedRemoteIp
         remoteSequenceNumber = establishedRemoteSequence
         connectState = ConnectWaitState.established
-        stopSynRetransmitter()
+        cancelScheduledTasks()
         connectLatch.countDown()
+        return true
     }
 
     @Synchronized
@@ -930,8 +1322,21 @@ private class TcpSessionRuntime(
         if (connectState != ConnectWaitState.pending) return
         connectFailureMessage = message
         connectState = ConnectWaitState.failed
-        stopSynRetransmitter()
+        cancelScheduledTasks()
         connectLatch.countDown()
+    }
+
+    @Synchronized
+    fun connectFailure(message: String): IOException {
+        val normalized = message.lowercase()
+        val reason =
+            when {
+                normalized.contains("timed out") -> ProxyTransportFailureReason.upstreamTimeout
+                normalized.contains("bridge") || normalized.contains("queue") -> ProxyTransportFailureReason.localServiceUnavailable
+                normalized.contains("rst") || normalized.contains("reset") -> ProxyTransportFailureReason.upstreamConnectFailed
+                else -> ProxyTransportFailureReason.upstreamConnectFailed
+            }
+        return ProxyTransportException(reason, message)
     }
 
     @Synchronized
@@ -948,10 +1353,18 @@ private class TcpSessionRuntime(
         sessionWaitLatch.countDown()
     }
 
-    fun awaitRemoteCloseOrFailure(): SessionWaitState {
+    fun awaitRemoteCloseOrFailure(timeoutMs: Long): SessionWaitState {
         return try {
-            sessionWaitLatch.await()
-            synchronized(this) { sessionWaitState }
+            if (sessionWaitLatch.await(timeoutMs.coerceAtLeast(1L), TimeUnit.MILLISECONDS)) {
+                synchronized(this) { sessionWaitState }
+            } else {
+                synchronized(this) {
+                    if (sessionWaitState == SessionWaitState.pending) {
+                        sessionWaitState = SessionWaitState.drainTimedOut
+                    }
+                    sessionWaitState
+                }
+            }
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
             signalRuntimeFailure("Proxy session interrupted while waiting for remote close.")
@@ -964,7 +1377,7 @@ private class TcpSessionRuntime(
         if (connectState == ConnectWaitState.pending) {
             connectFailureMessage = message
             connectState = ConnectWaitState.failed
-            stopSynRetransmitter()
+            cancelScheduledTasks()
             connectLatch.countDown()
         }
         if (sessionWaitState != SessionWaitState.pending) return
@@ -973,11 +1386,46 @@ private class TcpSessionRuntime(
         sessionWaitLatch.countDown()
     }
 
-    private fun stopSynRetransmitter() {
-        synRetransmitThread?.interrupt()
-        synRetransmitThread = null
+    @Synchronized
+    fun markFailureLogged(): Boolean {
+        if (failureLogged) return false
+        failureLogged = true
+        return true
+    }
+
+    @Synchronized
+    fun releasePendingConnectPermit(): Boolean {
+        if (pendingConnectPermitReleased) return false
+        pendingConnectPermitReleased = true
+        pendingConnectLease?.release()
+        pendingConnectLease = null
+        return true
+    }
+
+    @Synchronized
+    fun cancelScheduledTasks() {
+        for (task in scheduledTasks) {
+            task.cancel(true)
+        }
+        scheduledTasks.clear()
     }
 }
+
+private data class PendingConnectLease(
+    val releases: List<() -> Unit>,
+) {
+    fun release() {
+        releases.asReversed().forEach { it() }
+    }
+}
+
+private data class PendingConnectBudget(
+    val key: String?,
+    val limit: Int?,
+    val label: String,
+    val connectTimeoutMs: Long,
+    val waitTimeoutMs: Long,
+)
 
 private data class UdpRemoteEndpoint(
     val ip: String,

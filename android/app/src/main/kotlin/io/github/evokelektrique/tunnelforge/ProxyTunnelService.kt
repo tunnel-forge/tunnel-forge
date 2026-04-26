@@ -253,6 +253,9 @@ class ProxyTunnelService : Service() {
                     connectTimeoutMs = PROXY_ONLY_CONNECT_TIMEOUT_MS,
                     synRetransmitDelaysMs = PROXY_ONLY_SYN_RETRANSMIT_DELAYS_MS,
                     maxTcpSessions = PROXY_ONLY_MAX_TCP_SESSIONS,
+                    maxPendingTcpConnects = PROXY_ONLY_MAX_PENDING_TCP_CONNECTS,
+                    synPacingIntervalMs = PROXY_ONLY_SYN_PACING_INTERVAL_MS,
+                    tcpFinDrainTimeoutMs = PROXY_ONLY_TCP_FIN_DRAIN_TIMEOUT_MS,
                     logger = { level, message ->
                         VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
                     },
@@ -295,6 +298,7 @@ class ProxyTunnelService : Service() {
                 },
                 transport = transport,
                 connectTimeoutMs = PROXY_ONLY_CONNECT_TIMEOUT_MS,
+                connectResponseTimeoutMs = PROXY_ONLY_CONNECT_RESPONSE_TIMEOUT_MS,
             )
             localRuntime = runtime
             var workerReplaced = false
@@ -573,10 +577,14 @@ class ProxyTunnelService : Service() {
         const val DEFAULT_SOCKS_PORT = 1080
         const val DEFAULT_LINK_MTU = TunnelVpnService.DEFAULT_TUN_MTU
         internal const val WORKER_JOIN_TIMEOUT_MS = 5_000L
-        internal const val PROXY_ONLY_MAX_CONCURRENT_CLIENTS = 128
-        internal const val PROXY_ONLY_MAX_TCP_SESSIONS = 128
-        internal const val PROXY_ONLY_CONNECT_TIMEOUT_MS = 5_000L
-        internal val PROXY_ONLY_SYN_RETRANSMIT_DELAYS_MS = listOf(750L, 1_250L, 2_000L)
+        internal val PROXY_ONLY_MAX_CONCURRENT_CLIENTS: Int? = null
+        internal val PROXY_ONLY_MAX_TCP_SESSIONS: Int? = null
+        internal val PROXY_ONLY_MAX_PENDING_TCP_CONNECTS: Int? = null
+        internal const val PROXY_ONLY_CONNECT_TIMEOUT_MS = 60_000L
+        internal const val PROXY_ONLY_CONNECT_RESPONSE_TIMEOUT_MS = 25_000L
+        internal val PROXY_ONLY_SYN_RETRANSMIT_DELAYS_MS = listOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L, 32_000L)
+        internal const val PROXY_ONLY_SYN_PACING_INTERVAL_MS = 20L
+        internal const val PROXY_ONLY_TCP_FIN_DRAIN_TIMEOUT_MS = 5_000L
 
         private const val CHANNEL_ID = "tunnel_forge_proxy"
         private const val NOTIFICATION_ID = 7111

@@ -7,6 +7,9 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -80,34 +83,200 @@ class UserspaceTunnelStackTest {
     }
 
     @Test
-    fun proxyOnlyCapacityAllowsBurstBeyondLegacyBridgeLimit() {
+    fun openTcpSessionWaitsForPendingConnectPermitBeforeQueueingSyn() {
+        val backend = CapturingBackend()
         val logs = CopyOnWriteArrayList<String>()
         val stack =
             BridgeUserspaceTunnelStack(
-                bridge = ProxyPacketBridge(backend = CapturingBackend()),
+                bridge = ProxyPacketBridge(backend = backend),
                 logger = { _, message -> logs.add(message) },
-                maxTcpSessions = ProxyTunnelService.PROXY_ONLY_MAX_TCP_SESSIONS,
-                connectTimeoutMs = ProxyTunnelService.PROXY_ONLY_CONNECT_TIMEOUT_MS,
-                synRetransmitDelaysMs = ProxyTunnelService.PROXY_ONLY_SYN_RETRANSMIT_DELAYS_MS,
+                maxTcpSessions = 4,
+                maxPendingTcpConnects = 1,
+                synRetransmitDelaysMs = emptyList(),
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val first = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        val secondRef = AtomicReference<UserspaceTunnelSession?>()
+        val errorRef = AtomicReference<Throwable?>()
+        val opened = CountDownLatch(1)
+        val waiter =
+            Thread {
+                try {
+                    secondRef.set(
+                        stack.openTcpSession(
+                            ProxyConnectRequest(host = "93.184.216.35", port = 443, protocol = "http-connect"),
+                        ),
+                    )
+                } catch (t: Throwable) {
+                    errorRef.set(t)
+                } finally {
+                    opened.countDown()
+                }
+            }
+        waiter.start()
+
+        Thread.sleep(40)
+        assertFalse(opened.await(10, TimeUnit.MILLISECONDS))
+        assertEquals(1, backend.outboundPackets.size)
+        assertTrue(logs.any { it.contains("reason=pending-tcp-connects") })
+
+        first.close()
+        assertTrue(opened.await(500, TimeUnit.MILLISECONDS))
+        assertNull(errorRef.get())
+        assertEquals(2, backend.outboundPackets.size)
+
+        secondRef.get()?.close()
+        stack.stop()
+    }
+
+    @Test
+    fun establishedSessionReleasesPendingConnectPermit() {
+        val backend = CapturingBackend()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, _ -> },
+                maxTcpSessions = 4,
+                maxPendingTcpConnects = 1,
+                synRetransmitDelaysMs = emptyList(),
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val first = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        establishSession(stack, backend)
+        val second = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.35", port = 443, protocol = "http-connect"))
+
+        assertEquals(2, stack.activeSessions().size)
+
+        first.close()
+        second.close()
+        stack.stop()
+    }
+
+    @Test
+    fun timedOutConnectReleasesPendingConnectPermitBeforeClose() {
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = CapturingBackend()),
+                logger = { _, _ -> },
+                maxTcpSessions = 2,
+                maxPendingTcpConnects = 1,
+                connectTimeoutMs = 30,
+                synRetransmitDelaysMs = emptyList(),
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val first = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        try {
+            first.awaitEstablished(30)
+            throw AssertionError("Expected connect timeout")
+        } catch (e: IOException) {
+            assertTrue(e.message.orEmpty().contains("timed out"))
+        }
+
+        val second = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.35", port = 443, protocol = "http-connect"))
+        first.close()
+        second.close()
+        stack.stop()
+    }
+
+    @Test
+    fun openTcpSessionTimesOutWhileWaitingForPendingConnectPermit() {
+        val backend = CapturingBackend()
+        val logs = CopyOnWriteArrayList<String>()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                logger = { _, message -> logs.add(message) },
+                maxTcpSessions = 4,
+                maxPendingTcpConnects = 1,
+                connectTimeoutMs = 40,
+                synRetransmitDelaysMs = emptyList(),
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+        val first = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+
+        try {
+            stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.35", port = 443, protocol = "http-connect"))
+            throw AssertionError("Expected pending TCP connect wait timeout")
+        } catch (e: IOException) {
+            assertTrue(e.message!!.contains("Timed out while waiting for a pending proxy TCP connection slot"))
+        }
+        assertEquals(1, backend.outboundPackets.size)
+        assertTrue(logs.any { it.contains("reason=pending-tcp-connect-wait-timeout") })
+
+        first.close()
+        stack.stop()
+    }
+
+    @Test
+    fun proxyOnlyCapacityMatchesAppPolicy() {
+        assertNull(ProxyTunnelService.PROXY_ONLY_MAX_TCP_SESSIONS)
+        assertNull(ProxyTunnelService.PROXY_ONLY_MAX_CONCURRENT_CLIENTS)
+        assertNull(ProxyTunnelService.PROXY_ONLY_MAX_PENDING_TCP_CONNECTS)
+        assertEquals(60_000L, ProxyTunnelService.PROXY_ONLY_CONNECT_TIMEOUT_MS)
+        assertEquals(25_000L, ProxyTunnelService.PROXY_ONLY_CONNECT_RESPONSE_TIMEOUT_MS)
+        assertEquals(
+            listOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L, 32_000L),
+            ProxyTunnelService.PROXY_ONLY_SYN_RETRANSMIT_DELAYS_MS,
+        )
+        assertEquals(20L, ProxyTunnelService.PROXY_ONLY_SYN_PACING_INTERVAL_MS)
+        assertEquals(5_000L, ProxyTunnelService.PROXY_ONLY_TCP_FIN_DRAIN_TIMEOUT_MS)
+    }
+
+    @Test
+    fun initialSynQueueBackpressureRetriesInsteadOfFailingSessionOpen() {
+        val logs = CopyOnWriteArrayList<String>()
+        val backend =
+            CapturingBackend(
+                queueResult = { if (outboundPackets.size == 1) -1 else 0 },
+            )
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, message -> logs.add(message) },
+                connectTimeoutMs = 500,
+                synRetransmitDelaysMs = emptyList(),
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val session = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        waitForOutboundCount(backend, 2)
+        establishSession(stack, backend)
+        session.awaitEstablished(500)
+
+        assertTrue(logs.any { it.contains("queue retry") })
+        session.close()
+        stack.stop()
+    }
+
+    @Test
+    fun synPacingAcceptsBurstButStaggersOutboundSyns() {
+        val backend = CapturingBackend()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, _ -> },
+                synRetransmitDelaysMs = emptyList(),
+                synPacingIntervalMs = 80,
             )
         assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
         val sessions = ArrayList<UserspaceTunnelSession>()
 
         try {
-            repeat(40) { index ->
-                sessions.add(
-                    stack.openTcpSession(
-                        ProxyConnectRequest(
-                            host = "93.184.216.${index + 1}",
-                            port = 443,
-                            protocol = "http-connect",
-                        ),
-                    ),
-                )
+            repeat(3) { index ->
+                sessions += stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.${index + 34}", port = 443, protocol = "http-connect"))
             }
 
-            assertEquals(40, stack.activeSessions().size)
-            assertFalse(logs.any { it.contains("reason=too-many-tcp-sessions") })
+            assertEquals(3, stack.activeSessions().size)
+            waitForOutboundCount(backend, 1)
+            Thread.sleep(30)
+            assertEquals(1, backend.outboundPackets.size)
+            waitForOutboundCount(backend, 3)
         } finally {
             sessions.forEach { it.close() }
             stack.stop()
@@ -189,6 +358,32 @@ class UserspaceTunnelStackTest {
         assertEquals(443, tcp!!.destinationPort)
         assertEquals(TcpPacketBuilder.TCP_FLAG_SYN, tcp.flags)
         session.close()
+        stack.stop()
+    }
+
+    @Test
+    fun tcpSourcePortAllocationWrapsAndReusesOnlyAfterClose() {
+        val backend = CapturingBackend()
+        val stack = BridgeUserspaceTunnelStack(bridge = ProxyPacketBridge(backend = backend), clientIpv4 = "10.0.0.2", logger = { _, _ -> })
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+        val nextLocalPort = BridgeUserspaceTunnelStack::class.java.getDeclaredField("nextLocalPort").apply { isAccessible = true }
+            .get(stack) as AtomicInteger
+
+        nextLocalPort.set(65535)
+        val first = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        assertEquals(65535, tcpSourcePort(backend.outboundPackets.last()))
+
+        nextLocalPort.set(65535)
+        val second = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.35", port = 443, protocol = "http-connect"))
+        assertEquals(30000, tcpSourcePort(backend.outboundPackets.last()))
+
+        first.close()
+        nextLocalPort.set(65535)
+        val third = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.36", port = 443, protocol = "http-connect"))
+        assertEquals(65535, tcpSourcePort(backend.outboundPackets.last()))
+
+        second.close()
+        third.close()
         stack.stop()
     }
 
@@ -398,6 +593,28 @@ class UserspaceTunnelStackTest {
     }
 
     @Test
+    fun pendingSessionCloseCancelsSynRetransmits() {
+        val backend = CapturingBackend()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, _ -> },
+                synRetransmitDelaysMs = listOf(30L, 30L, 30L),
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val session = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        assertEquals(1, backend.outboundPackets.size)
+        session.close()
+        Thread.sleep(120)
+
+        assertEquals(1, backend.outboundPackets.size)
+        assertTrue(stack.activeSessions().isEmpty())
+        stack.stop()
+    }
+
+    @Test
     fun awaitEstablishedBlocksUntilSynAckArrives() {
         val backend = CapturingBackend()
         val stack = BridgeUserspaceTunnelStack(bridge = ProxyPacketBridge(backend = backend), clientIpv4 = "10.0.0.2", logger = { _, _ -> })
@@ -531,6 +748,95 @@ class UserspaceTunnelStackTest {
         val finTcp = IpPacketParser.parseTcp(finPacket, finIpv4)!!
         assertEquals(TcpPacketBuilder.TCP_FLAG_ACK or TcpPacketBuilder.TCP_FLAG_FIN, finTcp.flags)
         assertEquals(101, finTcp.acknowledgementNumber)
+
+        session.close()
+        stack.stop()
+    }
+
+    @Test
+    fun localFinDrainTimeoutReleasesSessionWithoutRemoteFin() {
+        val backend = CapturingBackend()
+        val logs = CopyOnWriteArrayList<String>()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, message -> logs.add(message) },
+                tcpFinDrainTimeoutMs = 50,
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val session = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        establishSession(stack, backend)
+
+        ServerSocket(0).use { server ->
+            val pumpDone = CountDownLatch(1)
+            val pumpThread =
+                Thread {
+                    server.accept().use { accepted ->
+                        session.pumpBidirectional(accepted.asProxyClientConnection())
+                    }
+                    pumpDone.countDown()
+                }
+            pumpThread.start()
+            Socket("127.0.0.1", server.localPort).use { peer ->
+                peer.shutdownOutput()
+            }
+            assertTrue(pumpDone.await(1, TimeUnit.SECONDS))
+        }
+
+        assertTrue(stack.sessionSnapshots().single().lastEvent.contains("FIN drain timeout"))
+        assertTrue(logs.any { it.contains("reason=fin-drain-timeout") })
+        session.close()
+        stack.stop()
+    }
+
+    @Test
+    fun establishedSessionSurvivesBeyondConnectTimeoutAndReceivesData() {
+        val backend = CapturingBackend()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, _ -> },
+                connectTimeoutMs = 40,
+                synRetransmitDelaysMs = emptyList(),
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val session = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        establishSession(stack, backend)
+
+        ServerSocket(0).use { server ->
+            val pumpThread =
+                Thread {
+                    server.accept().use { accepted ->
+                        session.pumpBidirectional(accepted.asProxyClientConnection())
+                    }
+                }
+            pumpThread.start()
+            Socket("127.0.0.1", server.localPort).use { peer ->
+                peer.soTimeout = 500
+                Thread.sleep(120)
+                assertEquals(UserspaceSessionState.established, stack.sessionSnapshots().single().state)
+                stack.processInboundPacketForTesting(
+                    TcpPacketBuilder.buildIpv4TcpPacket(
+                        sourceIp = "93.184.216.34",
+                        destinationIp = "10.0.0.2",
+                        sourcePort = 443,
+                        destinationPort = sessionLocalPort(backend),
+                        sequenceNumber = 101,
+                        acknowledgementNumber = sessionInitialAck(backend),
+                        flags = TcpPacketBuilder.TCP_FLAG_ACK,
+                        payload = "download".toByteArray(),
+                    ),
+                )
+
+                assertEquals("download", String(peer.getInputStream().readNBytes(8), Charsets.UTF_8))
+                peer.shutdownOutput()
+            }
+            pumpThread.join(1000)
+        }
 
         session.close()
         stack.stop()
@@ -1310,6 +1616,8 @@ class UserspaceTunnelStackTest {
                             assertTrue(e.message.orEmpty().contains("ip=93.184.216.34"))
                             assertTrue(e.message.orEmpty().contains("sport="))
                             assertTrue(e.message.orEmpty().contains("synAttempts=2"))
+                            assertTrue(e.message.orEmpty().contains("connectDiag="))
+                            assertTrue(e.message.orEmpty().contains("upstreamReply=none-through-tunnel"))
                         }
                     }
                 }
@@ -1323,8 +1631,218 @@ class UserspaceTunnelStackTest {
         assertEquals(UserspaceSessionState.failed, stack.sessionSnapshots().single().state)
         assertTrue(stack.sessionSnapshots().single().lastEvent.contains("timed out"))
         assertTrue(logs.any { it.contains("reason=connect-timeout") && it.contains("host=93.184.216.34") })
+        assertFalse(logs.any { it.contains("reason=connect-failed") })
         Thread.sleep(140)
         assertEquals(2, backend.outboundPackets.size)
+        session.close()
+        stack.stop()
+    }
+
+    @Test
+    fun noReplyConnectTimeoutCachesDuplicateTargetBriefly() {
+        val backend = CapturingBackend()
+        val logs = CopyOnWriteArrayList<String>()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, message -> logs.add(message) },
+                connectTimeoutMs = 40,
+                synRetransmitDelaysMs = emptyList(),
+                noReplyFailureCacheTtlMs = 1_000,
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val first = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        try {
+            first.awaitEstablished(100)
+            throw AssertionError("Expected first connect timeout")
+        } catch (e: ProxyTransportException) {
+            assertEquals(ProxyTransportFailureReason.upstreamTimeout, e.failureReason)
+            assertTrue(e.message.orEmpty().contains("upstreamReply=none-through-tunnel"))
+        }
+        first.close()
+        val outboundAfterFirst = backend.outboundPackets.size
+
+        try {
+            stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+            throw AssertionError("Expected cached no-reply failure")
+        } catch (e: ProxyTransportException) {
+            assertEquals(ProxyTransportFailureReason.upstreamTimeout, e.failureReason)
+            assertTrue(e.message.orEmpty().contains("cachedAgeMs="))
+            assertTrue(e.message.orEmpty().contains("upstreamReply=none-through-tunnel"))
+        }
+
+        assertEquals(outboundAfterFirst, backend.outboundPackets.size)
+        assertTrue(logs.any { it.contains("reason=upstream-no-reply-cache") })
+        stack.stop()
+    }
+
+    @Test
+    fun rstConnectFailureDoesNotCacheTarget() {
+        val backend = CapturingBackend()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, _ -> },
+                connectTimeoutMs = 5_000,
+                synRetransmitDelaysMs = emptyList(),
+                noReplyFailureCacheTtlMs = 1_000,
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val first = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        val synPacket = backend.outboundPackets.first()
+        val synIpv4 = IpPacketParser.parseIpv4(synPacket)!!
+        val synTcp = IpPacketParser.parseTcp(synPacket, synIpv4)!!
+        stack.processInboundPacketForTesting(
+            TcpPacketBuilder.buildIpv4TcpPacket(
+                sourceIp = "93.184.216.34",
+                destinationIp = "10.0.0.2",
+                sourcePort = 443,
+                destinationPort = synTcp.sourcePort,
+                sequenceNumber = 100,
+                acknowledgementNumber = synTcp.sequenceNumber + 1,
+                flags = TcpPacketBuilder.TCP_FLAG_RST or TcpPacketBuilder.TCP_FLAG_ACK,
+            ),
+        )
+        try {
+            first.awaitEstablished(200)
+            throw AssertionError("Expected TCP RST failure")
+        } catch (e: ProxyTransportException) {
+            assertEquals(ProxyTransportFailureReason.upstreamConnectFailed, e.failureReason)
+        }
+        first.close()
+        val outboundAfterFirst = backend.outboundPackets.size
+
+        val second = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+
+        assertEquals(outboundAfterFirst + 1, backend.outboundPackets.size)
+        second.close()
+        stack.stop()
+    }
+
+    @Test
+    fun tcpRstBeforeEstablishmentFailsConnectImmediately() {
+        val backend = CapturingBackend()
+        val logs = CopyOnWriteArrayList<String>()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, message -> logs.add(message) },
+                connectTimeoutMs = 5_000,
+                synRetransmitDelaysMs = emptyList(),
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val session = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        val synPacket = backend.outboundPackets.first()
+        val synIpv4 = IpPacketParser.parseIpv4(synPacket)!!
+        val synTcp = IpPacketParser.parseTcp(synPacket, synIpv4)!!
+        stack.processInboundPacketForTesting(
+            TcpPacketBuilder.buildIpv4TcpPacket(
+                sourceIp = "93.184.216.34",
+                destinationIp = "10.0.0.2",
+                sourcePort = 443,
+                destinationPort = synTcp.sourcePort,
+                sequenceNumber = 100,
+                acknowledgementNumber = synTcp.sequenceNumber + 1,
+                flags = TcpPacketBuilder.TCP_FLAG_RST or TcpPacketBuilder.TCP_FLAG_ACK,
+            ),
+        )
+
+        try {
+            session.awaitEstablished(200)
+            throw AssertionError("Expected TCP RST failure")
+        } catch (e: ProxyTransportException) {
+            assertEquals(ProxyTransportFailureReason.upstreamConnectFailed, e.failureReason)
+            assertTrue(e.message.orEmpty().contains("TCP RST"))
+        }
+        assertTrue(logs.any { it.contains("reason=rst-in") })
+
+        session.close()
+        stack.stop()
+    }
+
+    @Test
+    fun icmpDestinationUnreachableFailsPendingConnectImmediately() {
+        val backend = CapturingBackend()
+        val logs = CopyOnWriteArrayList<String>()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, message -> logs.add(message) },
+                connectTimeoutMs = 5_000,
+                synRetransmitDelaysMs = emptyList(),
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val session = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        val quotedPacket = backend.outboundPackets.first()
+        stack.processInboundPacketForTesting(
+            buildIcmpDestinationUnreachablePacket(
+                sourceIp = "172.16.200.5",
+                destinationIp = "10.0.0.2",
+                code = 3,
+                quotedPacket = quotedPacket,
+            ),
+        )
+
+        try {
+            session.awaitEstablished(200)
+            throw AssertionError("Expected ICMP unreachable failure")
+        } catch (e: ProxyTransportException) {
+            assertEquals(ProxyTransportFailureReason.upstreamConnectFailed, e.failureReason)
+            assertTrue(e.message.orEmpty().contains("ICMP destination unreachable"))
+        }
+        assertTrue(logs.any { it.contains("reason=icmp-unreachable code=3") })
+
+        session.close()
+        stack.stop()
+    }
+
+    @Test
+    fun inboundTcpSourceMismatchIsLoggedAndIncludedInTimeoutDiagnostics() {
+        val backend = CapturingBackend()
+        val logs = CopyOnWriteArrayList<String>()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, message -> logs.add(message) },
+                connectTimeoutMs = 60,
+                synRetransmitDelaysMs = emptyList(),
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val session = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        val synPacket = backend.outboundPackets.first()
+        val synIpv4 = IpPacketParser.parseIpv4(synPacket)!!
+        val synTcp = IpPacketParser.parseTcp(synPacket, synIpv4)!!
+        stack.processInboundPacketForTesting(
+            TcpPacketBuilder.buildIpv4TcpPacket(
+                sourceIp = "203.0.113.10",
+                destinationIp = "10.0.0.2",
+                sourcePort = 443,
+                destinationPort = synTcp.sourcePort,
+                sequenceNumber = 100,
+                acknowledgementNumber = synTcp.sequenceNumber + 1,
+                flags = TcpPacketBuilder.TCP_FLAG_SYN or TcpPacketBuilder.TCP_FLAG_ACK,
+            ),
+        )
+
+        try {
+            session.awaitEstablished(200)
+            throw AssertionError("Expected connect timeout")
+        } catch (e: ProxyTransportException) {
+            assertEquals(ProxyTransportFailureReason.upstreamTimeout, e.failureReason)
+            assertTrue(e.message.orEmpty().contains("sourceMismatchDrops=1"))
+        }
+        assertTrue(logs.any { it.contains("Dropped inbound TCP source mismatch") })
+
         session.close()
         stack.stop()
     }
@@ -1456,6 +1974,30 @@ class UserspaceTunnelStackTest {
         return packet
     }
 
+    private fun buildIcmpDestinationUnreachablePacket(
+        sourceIp: String,
+        destinationIp: String,
+        code: Int,
+        quotedPacket: ByteArray,
+    ): ByteArray {
+        val payload = ByteArray(8 + quotedPacket.size)
+        payload[0] = 3
+        payload[1] = code.toByte()
+        quotedPacket.copyInto(payload, destinationOffset = 8)
+        val source = java.net.InetAddress.getByName(sourceIp).address
+        val destination = java.net.InetAddress.getByName(destinationIp).address
+        val packet = ByteArray(20 + payload.size)
+        packet[0] = 0x45
+        writeUint16(packet, 2, packet.size)
+        writeUint16(packet, 6, 0x4000)
+        packet[8] = 64
+        packet[9] = IpPacketParser.IP_PROTOCOL_ICMP.toByte()
+        source.copyInto(packet, destinationOffset = 12)
+        destination.copyInto(packet, destinationOffset = 16)
+        payload.copyInto(packet, destinationOffset = 20)
+        return packet
+    }
+
     private fun encodeDnsName(hostname: String): ByteArray {
         val bytes = ArrayList<Byte>()
         hostname.split('.').forEach { label ->
@@ -1468,6 +2010,11 @@ class UserspaceTunnelStackTest {
 
     private fun readUint16(buf: ByteArray, offset: Int): Int =
         ((buf[offset].toInt() and 0xff) shl 8) or (buf[offset + 1].toInt() and 0xff)
+
+    private fun tcpSourcePort(packet: ByteArray): Int {
+        val ipv4 = IpPacketParser.parseIpv4(packet)!!
+        return IpPacketParser.parseTcp(packet, ipv4)!!.sourcePort
+    }
 
     private fun writeUint16(buf: ByteArray, offset: Int, value: Int) {
         buf[offset] = ((value ushr 8) and 0xff).toByte()

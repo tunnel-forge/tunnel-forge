@@ -740,7 +740,7 @@ class TunnelVpnService : VpnService() {
         }
         val runtime =
             ProxyServerRuntime(
-                config = config.copy(exposure = exposure),
+                config = localProxyRuntimeConfig(config, exposure),
                 transport = DirectSocketProxyTransport(logger = logger),
                 levelLogger = logger,
             )
@@ -995,6 +995,15 @@ class TunnelVpnService : VpnService() {
                 )
             return DnsConfigSupport.sanitize(servers)
         }
+
+        internal fun localProxyRuntimeConfig(
+            config: ProxyRuntimeConfig,
+            exposure: ProxyExposureInfo,
+        ): ProxyRuntimeConfig =
+            config.copy(
+                exposure = exposure,
+                maxConcurrentClients = null,
+            )
 
         @Volatile
         private var instance: TunnelVpnService? = null

@@ -11,10 +11,27 @@ import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+
+enum class ProxyTransportFailureReason {
+    localServiceUnavailable,
+    upstreamConnectFailed,
+    upstreamTimeout,
+    dnsFailed,
+    networkUnreachable,
+    protocolError,
+    clientAborted,
+}
+
+class ProxyTransportException(
+    val failureReason: ProxyTransportFailureReason,
+    message: String,
+    cause: Throwable? = null,
+) : IOException(message, cause)
 
 data class ProxyConnectRequest(
     val host: String,
@@ -66,7 +83,7 @@ interface ProxyTransport {
 
     @Throws(IOException::class)
     fun openUdpAssociation(request: ProxyConnectRequest): ProxyUdpAssociation {
-        throw IOException("UDP forwarding is not attached yet.")
+        throw ProxyTransportException(ProxyTransportFailureReason.localServiceUnavailable, "UDP forwarding is not attached yet.")
     }
 }
 
@@ -74,7 +91,7 @@ class StubProxyTransport(
     private val reason: String = "Tunnel forwarding is not attached yet.",
 ) : ProxyTransport {
     override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
-        throw IOException(reason)
+        throw ProxyTransportException(ProxyTransportFailureReason.localServiceUnavailable, reason)
     }
 }
 
@@ -83,7 +100,6 @@ class BridgeProxyTransport(
 ) : ProxyTransport {
     override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
         val session = stack.openTcpSession(request)
-        logDebug("proxy transport open sid=${session.descriptor.sessionId} target=${request.host}:${request.port}")
         return object : ProxyTransportSession {
             override val descriptor: ProxySessionDescriptor = session.descriptor
 
@@ -96,7 +112,6 @@ class BridgeProxyTransport(
             }
 
             override fun close() {
-                logDebug("proxy transport close sid=${descriptor.sessionId}")
                 session.close()
             }
         }
@@ -229,7 +244,7 @@ private class DirectSocketProxyUdpAssociation(
         }
         val resolved =
             resolver(host).firstOrNull { it is Inet4Address }
-                ?: throw IOException("IPv6 destinations are not supported in proxy mode.")
+                ?: throw ProxyTransportException(ProxyTransportFailureReason.networkUnreachable, "IPv6 destinations are not supported in proxy mode.")
         logger(
             Log.DEBUG,
             "proxy direct udp resolve sid=${descriptor.sessionId} host=$host ip=${resolved.hostAddress}",
@@ -269,9 +284,12 @@ private class DirectSocketProxyTransportSession(
             socket.connect(InetSocketAddress(remoteAddress, descriptor.request.port), timeout)
             socket.tcpNoDelay = true
             connected.set(true)
+        } catch (e: SocketTimeoutException) {
+            closeQuietly(socket)
+            throw ProxyTransportException(ProxyTransportFailureReason.upstreamTimeout, e.message ?: "TCP connect timed out.", e)
         } catch (e: IOException) {
             closeQuietly(socket)
-            throw IOException(e.message ?: "TCP connect failed.", e)
+            throw ProxyTransportException(ProxyTransportFailureReason.upstreamConnectFailed, e.message ?: "TCP connect failed.", e)
         }
     }
 
@@ -280,6 +298,8 @@ private class DirectSocketProxyTransportSession(
             throw IOException("TCP session is not connected.")
         }
         val failure = AtomicReference<IOException?>(null)
+        val clientInputEnded = AtomicBoolean(false)
+        val remoteInputEnded = AtomicBoolean(false)
         val remoteToClient =
             threadFactory(
                 "proxy-direct-remote-${descriptor.sessionId}",
@@ -288,6 +308,8 @@ private class DirectSocketProxyTransportSession(
                         input = socket.getInputStream(),
                         output = client.output,
                         failure = failure,
+                        inputEnded = remoteInputEnded,
+                        onInputClosed = { shutdownSocketOutput(client.socket) },
                         clientSocket = client.socket,
                     )
                 },
@@ -297,6 +319,8 @@ private class DirectSocketProxyTransportSession(
             input = client.input,
             output = socket.getOutputStream(),
             failure = failure,
+            inputEnded = clientInputEnded,
+            onInputClosed = { shutdownSocketOutput(socket) },
             clientSocket = client.socket,
         )
         try {
@@ -306,6 +330,9 @@ private class DirectSocketProxyTransportSession(
             throw IOException("Interrupted while relaying proxy traffic.")
         }
         failure.get()?.let { throw it }
+        if (clientInputEnded.get() && remoteInputEnded.get()) {
+            tearDown(client.socket)
+        }
     }
 
     override fun close() {
@@ -320,7 +347,7 @@ private class DirectSocketProxyTransportSession(
         }
         val resolved =
             resolver(descriptor.request.host).firstOrNull { it is Inet4Address }
-                ?: throw IOException("IPv6 destinations are not supported in proxy mode.")
+                ?: throw ProxyTransportException(ProxyTransportFailureReason.networkUnreachable, "IPv6 destinations are not supported in proxy mode.")
         logger(
             Log.DEBUG,
             "proxy direct resolve sid=${descriptor.sessionId} host=${descriptor.request.host} ip=${resolved.hostAddress}",
@@ -332,6 +359,8 @@ private class DirectSocketProxyTransportSession(
         input: InputStream,
         output: OutputStream,
         failure: AtomicReference<IOException?>,
+        inputEnded: AtomicBoolean,
+        onInputClosed: () -> Unit,
         clientSocket: Socket,
     ) {
         val buffer = ByteArray(RELAY_BUFFER_BYTES)
@@ -343,12 +372,23 @@ private class DirectSocketProxyTransportSession(
                 output.write(buffer, 0, read)
                 output.flush()
             }
+            inputEnded.set(true)
+            onInputClosed()
         } catch (e: IOException) {
             if (!tearingDown.get()) {
                 failure.compareAndSet(null, e)
             }
         } finally {
-            tearDown(clientSocket)
+            if (failure.get() != null) {
+                tearDown(clientSocket)
+            }
+        }
+    }
+
+    private fun shutdownSocketOutput(socket: Socket) {
+        try {
+            socket.shutdownOutput()
+        } catch (_: IOException) {
         }
     }
 
