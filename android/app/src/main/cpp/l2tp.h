@@ -36,6 +36,8 @@ typedef struct {
   uint16_t tcp_mss;
   /** LCP option 8 (ACFC) accepted via peer Configure-Request: if set, omit FF 03 on outbound PPP frames. */
   int lcp_acfc;
+  /** LCP option 7 (PFC) accepted via peer Configure-Request: if set, compress low-byte PPP protocol fields. */
+  int lcp_pfc;
   int tcp_mss_clamp_logged;
 } ppp_session_t;
 

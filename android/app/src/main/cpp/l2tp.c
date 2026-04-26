@@ -663,8 +663,6 @@ int l2tp_send_ppp(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, sock
   util_write_be16(pkt + 4, s->tunnel_id);
   util_write_be16(pkt + 6, s->session_id);
   memcpy(pkt + 8, ppp, ppp_len);
-  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "l2tp_send_ppp: L=1 tid=%u sid=%u inner_ppp_len=%zu tot=%zu",
-                    (unsigned)s->tunnel_id, (unsigned)s->session_id, ppp_len, tot);
   return esp_encrypt_send(esp_fd, esp, peer, peer_len, pkt, tot);
 }
 

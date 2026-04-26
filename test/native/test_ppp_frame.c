@@ -5,18 +5,32 @@
 #define PROTO_LCP 0xc021u
 
 /** Mirrors ppp_encapsulate_and_send layout (no Android). */
-static size_t ppp_ip_frame_len(size_t ip_len, int lcp_acfc) {
-  if (lcp_acfc) return 2u + ip_len;
-  return 4u + ip_len;
+static size_t ppp_ip_frame_len(size_t ip_len, int lcp_acfc, int lcp_pfc) {
+  if (lcp_acfc) return (lcp_pfc ? 1u : 2u) + ip_len;
+  return (lcp_pfc ? 3u : 4u) + ip_len;
 }
 
-static int build_ppp_ip_frame(uint8_t *out, size_t cap, const uint8_t *ip, size_t ip_len, int lcp_acfc) {
+static int build_ppp_ip_frame(uint8_t *out, size_t cap, const uint8_t *ip, size_t ip_len, int lcp_acfc, int lcp_pfc) {
   if (lcp_acfc) {
+    if (lcp_pfc) {
+      if (ip_len + 1u > cap) return -1;
+      out[0] = 0x21;
+      memcpy(out + 1, ip, ip_len);
+      return (int)(1u + ip_len);
+    }
     if (ip_len + 2u > cap) return -1;
     out[0] = 0x00;
     out[1] = 0x21;
     memcpy(out + 2, ip, ip_len);
     return (int)(2u + ip_len);
+  }
+  if (lcp_pfc) {
+    if (ip_len + 3u > cap) return -1;
+    out[0] = 0xff;
+    out[1] = 0x03;
+    out[2] = 0x21;
+    memcpy(out + 3, ip, ip_len);
+    return (int)(3u + ip_len);
   }
   if (ip_len + 4u > cap) return -1;
   out[0] = 0xff;
@@ -168,22 +182,44 @@ static void build_ipv4_tcp_syn_with_mss(uint8_t *pkt, uint16_t mss, uint8_t flag
 static int test_acfc_off_has_ff03_0021(void) {
   uint8_t ip[4] = {0x45, 0x00, 0x00, 0x14};
   uint8_t frame[32];
-  int n = build_ppp_ip_frame(frame, sizeof(frame), ip, sizeof(ip), 0);
+  int n = build_ppp_ip_frame(frame, sizeof(frame), ip, sizeof(ip), 0, 0);
   if (n != 8) return 1;
   if (frame[0] != 0xff || frame[1] != 0x03 || frame[2] != 0x00 || frame[3] != 0x21) return 2;
   if (memcmp(frame + 4, ip, 4) != 0) return 3;
-  if (ppp_ip_frame_len(sizeof(ip), 0) != 8u) return 4;
+  if (ppp_ip_frame_len(sizeof(ip), 0, 0) != 8u) return 4;
   return 0;
 }
 
 static int test_acfc_on_is_0021_only(void) {
   uint8_t ip[2] = {0x45, 0x00};
   uint8_t frame[16];
-  int n = build_ppp_ip_frame(frame, sizeof(frame), ip, sizeof(ip), 1);
+  int n = build_ppp_ip_frame(frame, sizeof(frame), ip, sizeof(ip), 1, 0);
   if (n != 4) return 1;
   if (frame[0] != 0x00 || frame[1] != 0x21) return 2;
   if (memcmp(frame + 2, ip, 2) != 0) return 3;
-  if (ppp_ip_frame_len(sizeof(ip), 1) != 4u) return 4;
+  if (ppp_ip_frame_len(sizeof(ip), 1, 0) != 4u) return 4;
+  return 0;
+}
+
+static int test_pfc_without_acfc_keeps_ff03_and_compresses_protocol(void) {
+  uint8_t ip[3] = {0x45, 0x00, 0x00};
+  uint8_t frame[16];
+  int n = build_ppp_ip_frame(frame, sizeof(frame), ip, sizeof(ip), 0, 1);
+  if (n != 6) return 1;
+  if (frame[0] != 0xff || frame[1] != 0x03 || frame[2] != 0x21) return 2;
+  if (memcmp(frame + 3, ip, 3) != 0) return 3;
+  if (ppp_ip_frame_len(sizeof(ip), 0, 1) != 6u) return 4;
+  return 0;
+}
+
+static int test_pfc_with_acfc_is_single_protocol_octet(void) {
+  uint8_t ip[2] = {0x45, 0x00};
+  uint8_t frame[16];
+  int n = build_ppp_ip_frame(frame, sizeof(frame), ip, sizeof(ip), 1, 1);
+  if (n != 3) return 1;
+  if (frame[0] != 0x21) return 2;
+  if (memcmp(frame + 1, ip, 2) != 0) return 3;
+  if (ppp_ip_frame_len(sizeof(ip), 1, 1) != 3u) return 4;
   return 0;
 }
 
@@ -261,6 +297,16 @@ int main(void) {
   rc = test_acfc_on_is_0021_only();
   if (rc != 0) {
     fprintf(stderr, "test_acfc_on_is_0021_only failed: %d\n", rc);
+    return 1;
+  }
+  rc = test_pfc_without_acfc_keeps_ff03_and_compresses_protocol();
+  if (rc != 0) {
+    fprintf(stderr, "test_pfc_without_acfc_keeps_ff03_and_compresses_protocol failed: %d\n", rc);
+    return 1;
+  }
+  rc = test_pfc_with_acfc_is_single_protocol_octet();
+  if (rc != 0) {
+    fprintf(stderr, "test_pfc_with_acfc_is_single_protocol_octet failed: %d\n", rc);
     return 1;
   }
   rc = test_tcp_syn_mss_clamp_updates_option_and_checksum();

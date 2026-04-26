@@ -318,7 +318,12 @@ static uint64_t g_dp_encap_fail;
 static uint64_t g_dp_esp_rx;
 static uint64_t g_dp_esp_plain_ok;
 static uint64_t g_dp_esp_plain_fail;
+static uint64_t g_dp_tun_ipv4_tcp_syn_out;
 static uint64_t g_dp_tun_ipv4_wr;
+static uint64_t g_dp_tun_ipv4_tcp_wr;
+static uint64_t g_dp_tun_ipv4_udp_wr;
+static uint64_t g_dp_tun_ipv4_icmp_wr;
+static uint64_t g_dp_tun_ipv4_other_wr;
 
 void engine_dp_note_tun_rx(void) { g_dp_tun_rx++; }
 
@@ -332,9 +337,34 @@ void engine_dp_note_esp_plain_ok(void) { g_dp_esp_plain_ok++; }
 
 void engine_dp_note_esp_plain_fail(void) { g_dp_esp_plain_fail++; }
 
+void engine_dp_note_tun_ipv4_outbound(const uint8_t *packet, size_t nbytes) {
+  if (packet == NULL || nbytes < 40u) return;
+  const uint8_t version = packet[0] >> 4;
+  const size_t ihl = (size_t)(packet[0] & 0x0fu) * 4u;
+  if (version != 4u || ihl < 20u || nbytes < ihl + 20u) return;
+  if (packet[9] != 6u) return;
+  const uint8_t flags = packet[ihl + 13u];
+  const int syn = (flags & 0x02u) != 0u;
+  const int ack = (flags & 0x10u) != 0u;
+  if (!syn || ack) return;
+  g_dp_tun_ipv4_tcp_syn_out++;
+}
+
 void engine_dp_note_tun_ipv4_written(size_t nbytes) {
   (void)nbytes;
   g_dp_tun_ipv4_wr++;
+}
+
+void engine_dp_note_tun_ipv4_protocol(uint8_t proto) {
+  if (proto == 6u) {
+    g_dp_tun_ipv4_tcp_wr++;
+  } else if (proto == 17u) {
+    g_dp_tun_ipv4_udp_wr++;
+  } else if (proto == 1u) {
+    g_dp_tun_ipv4_icmp_wr++;
+  } else {
+    g_dp_tun_ipv4_other_wr++;
+  }
 }
 
 void engine_dp_maybe_log_summary(time_t now) {
@@ -344,8 +374,11 @@ void engine_dp_maybe_log_summary(time_t now) {
   s_last = now;
   tunnel_engine_log(
       ANDROID_LOG_DEBUG, LOG_TAG,
-      "dataplane 30s tun_rx=%llu encap_ok=%llu encap_fail=%llu esp_rx=%llu esp_plain_ok=%llu esp_plain_fail=%llu tun_ipv4_wr=%llu",
+      "dataplane 30s tun_rx=%llu encap_ok=%llu encap_fail=%llu esp_rx=%llu esp_plain_ok=%llu esp_plain_fail=%llu tun_tcp_syn_out=%llu tun_ipv4_wr=%llu tun_ipv4_tcp=%llu tun_ipv4_udp=%llu tun_ipv4_icmp=%llu tun_ipv4_other=%llu",
       (unsigned long long)g_dp_tun_rx, (unsigned long long)g_dp_encap_ok, (unsigned long long)g_dp_encap_fail,
       (unsigned long long)g_dp_esp_rx, (unsigned long long)g_dp_esp_plain_ok,
-      (unsigned long long)g_dp_esp_plain_fail, (unsigned long long)g_dp_tun_ipv4_wr);
+      (unsigned long long)g_dp_esp_plain_fail, (unsigned long long)g_dp_tun_ipv4_tcp_syn_out,
+      (unsigned long long)g_dp_tun_ipv4_wr,
+      (unsigned long long)g_dp_tun_ipv4_tcp_wr, (unsigned long long)g_dp_tun_ipv4_udp_wr,
+      (unsigned long long)g_dp_tun_ipv4_icmp_wr, (unsigned long long)g_dp_tun_ipv4_other_wr);
 }

@@ -71,7 +71,9 @@ void engine_dp_note_encap_fail(void);
 void engine_dp_note_esp_rx(void);
 void engine_dp_note_esp_plain_ok(void);
 void engine_dp_note_esp_plain_fail(void);
+void engine_dp_note_tun_ipv4_outbound(const uint8_t *packet, size_t nbytes);
 void engine_dp_note_tun_ipv4_written(size_t nbytes);
+void engine_dp_note_tun_ipv4_protocol(uint8_t proto);
 void engine_dp_maybe_log_summary(time_t now);
 
 #endif

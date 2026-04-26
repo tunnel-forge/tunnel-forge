@@ -8,14 +8,6 @@
 #include <time.h>
 #include <unistd.h>
 
-/*
- * Proxy-only mode can see short packet bursts when apps open many CONNECT streams at once.
- * Keep both packet-count and byte-count caps so bursts are absorbed without unbounded memory use.
- */
-#define PROXY_OUTBOUND_PACKET_QUEUE_CAPACITY 1024u
-#define PROXY_INBOUND_PACKET_QUEUE_CAPACITY 4096u
-#define PROXY_OUTBOUND_PACKET_QUEUE_BYTES (2u * 1024u * 1024u)
-#define PROXY_INBOUND_PACKET_QUEUE_BYTES (8u * 1024u * 1024u)
 #define PROXY_PACKET_MAX_LEN 65535
 
 typedef struct packet_node {
@@ -54,13 +46,6 @@ static packet_node_t *packet_queue_pop(packet_node_t **head, packet_node_t **tai
   if (*head == NULL) *tail = NULL;
   node->next = NULL;
   return node;
-}
-
-static int queue_would_exceed(size_t count, size_t bytes, size_t packet_len, size_t max_count, size_t max_bytes) {
-  if (count >= max_count) return 1;
-  if (packet_len > max_bytes) return 1;
-  if (bytes > max_bytes - packet_len) return 1;
-  return 0;
 }
 
 static void add_ms_to_timespec(struct timespec *ts, int timeout_ms) {
@@ -178,14 +163,6 @@ static int proxy_queue_write(void *ctx, const uint8_t *buf, size_t len) {
     pthread_mutex_unlock(&queue->mutex);
     free(node);
     errno = ECANCELED;
-    return -1;
-  }
-  if (queue_would_exceed(queue->inbound_count, queue->inbound_bytes, len, PROXY_INBOUND_PACKET_QUEUE_CAPACITY,
-                         PROXY_INBOUND_PACKET_QUEUE_BYTES)) {
-    queue->inbound_drops++;
-    pthread_mutex_unlock(&queue->mutex);
-    free(node);
-    errno = ENOBUFS;
     return -1;
   }
   packet_queue_push((packet_node_t **)&queue->inbound_head, (packet_node_t **)&queue->inbound_tail, node);
@@ -331,14 +308,6 @@ int packet_endpoint_proxy_enqueue_outbound(proxy_packet_queue_ctx_t *ctx, const 
     pthread_mutex_unlock(&ctx->mutex);
     free(node);
     errno = ECANCELED;
-    return -1;
-  }
-  if (queue_would_exceed(ctx->outbound_count, ctx->outbound_bytes, len, PROXY_OUTBOUND_PACKET_QUEUE_CAPACITY,
-                         PROXY_OUTBOUND_PACKET_QUEUE_BYTES)) {
-    ctx->outbound_drops++;
-    pthread_mutex_unlock(&ctx->mutex);
-    free(node);
-    errno = ENOBUFS;
     return -1;
   }
   packet_queue_push((packet_node_t **)&ctx->outbound_head, (packet_node_t **)&ctx->outbound_tail, node);
