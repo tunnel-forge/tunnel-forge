@@ -9,6 +9,8 @@
 #include <unistd.h>
 
 #define PROXY_PACKET_MAX_LEN 65535
+#define PROXY_OUTBOUND_PACKET_CAPACITY 1024u
+#define PROXY_OUTBOUND_BYTE_CAPACITY (2u * 1024u * 1024u)
 
 typedef struct packet_node {
   struct packet_node *next;
@@ -308,6 +310,14 @@ int packet_endpoint_proxy_enqueue_outbound(proxy_packet_queue_ctx_t *ctx, const 
     pthread_mutex_unlock(&ctx->mutex);
     free(node);
     errno = ECANCELED;
+    return -1;
+  }
+  if (ctx->outbound_count >= PROXY_OUTBOUND_PACKET_CAPACITY ||
+      ctx->outbound_bytes + len > PROXY_OUTBOUND_BYTE_CAPACITY) {
+    ctx->outbound_drops++;
+    pthread_mutex_unlock(&ctx->mutex);
+    free(node);
+    errno = ENOBUFS;
     return -1;
   }
   packet_queue_push((packet_node_t **)&ctx->outbound_head, (packet_node_t **)&ctx->outbound_tail, node);

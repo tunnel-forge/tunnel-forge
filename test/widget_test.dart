@@ -397,11 +397,11 @@ void main() {
     ]);
     expect(statusText(tester), contains('Connecting'));
 
-    // Mock never delivers TUN; UI clears "Connecting..." after the 60s await timeout.
+    // Mock never delivers TUN; the await timeout logs a reminder and keeps waiting.
     await tester.pump(const Duration(seconds: 60));
     await tester.pump();
 
-    expect(statusText(tester), 'Ready');
+    expect(statusText(tester), contains('Connecting'));
   });
 
   testWidgets('connecting state lets the user cancel before TUN comes up', (
