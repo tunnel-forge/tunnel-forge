@@ -460,6 +460,17 @@ internal class BridgeUserspaceTunnelStack(
             return
         }
 
+        if ((tcp.flags and TcpPacketBuilder.TCP_FLAG_ACK) != 0) {
+            val acknowledged = runtime.acknowledgeOutbound(tcp.acknowledgementNumber)
+            if (acknowledged > 0) {
+                updateSessionState(
+                    runtime.sessionId,
+                    UserspaceSessionState.established,
+                    "Acknowledged outbound TCP segments count=$acknowledged ack=${tcp.acknowledgementNumber}",
+                )
+            }
+        }
+
         if ((tcp.flags and TcpPacketBuilder.TCP_FLAG_SYN) != 0 &&
             (tcp.flags and TcpPacketBuilder.TCP_FLAG_ACK) != 0 &&
             runtime.isConnectPending()
@@ -918,9 +929,20 @@ internal class BridgeUserspaceTunnelStack(
                 failTcpRuntime(runtime, reason = "payload-queue-failed bytes=$read", message = message, closeClient = true)
                 throw IOException(message)
             }
+            val startSequence =
+                runtime.withLock {
+                    nextSendSequenceNumber
+                }
             runtime.withLock {
                 nextSendSequenceNumber += read
             }
+            trackOutboundTcpSegment(
+                runtime = runtime,
+                packet = packet,
+                startSequence = startSequence,
+                endSequence = startSequence + read,
+                label = "payload bytes=$read",
+            )
             updateSessionState(sessionId, UserspaceSessionState.established, "Queued outbound TCP payload len=$read")
         }
 
@@ -944,9 +966,20 @@ internal class BridgeUserspaceTunnelStack(
             failTcpRuntime(runtime, reason = "fin-queue-failed", message = message, closeClient = true)
             throw IOException(message)
         }
+        val finSequence =
+            runtime.withLock {
+                nextSendSequenceNumber
+            }
         runtime.withLock {
             nextSendSequenceNumber += 1
         }
+        trackOutboundTcpSegment(
+            runtime = runtime,
+            packet = finPacket,
+            startSequence = finSequence,
+            endSequence = finSequence + 1,
+            label = "fin",
+        )
         logger(Log.DEBUG, "proxy tcp close sid=$sessionId reason=fin-out")
         updateSessionState(sessionId, UserspaceSessionState.established, "Queued outbound TCP FIN; awaiting remote close")
 
@@ -972,6 +1005,52 @@ internal class BridgeUserspaceTunnelStack(
                 throw IOException(message)
             }
         }
+    }
+
+    private fun trackOutboundTcpSegment(
+        runtime: TcpSessionRuntime,
+        packet: ByteArray,
+        startSequence: Long,
+        endSequence: Long,
+        label: String,
+    ) {
+        runtime.recordOutstandingSegment(
+            OutstandingTcpSegment(
+                startSequence = startSequence,
+                endSequence = endSequence,
+                packet = packet,
+                label = label,
+            ),
+        )
+        scheduleOutboundTcpRetransmit(runtime, startSequence, delayIndex = 0)
+    }
+
+    private fun scheduleOutboundTcpRetransmit(
+        runtime: TcpSessionRuntime,
+        startSequence: Long,
+        delayIndex: Int,
+    ) {
+        if (delayIndex !in DATA_RETRANSMIT_DELAYS_MS.indices) return
+        val task =
+            tcpScheduler.schedule(
+                {
+                    val segment = runtime.outstandingSegmentForRetransmit(startSequence) ?: return@schedule
+                    if (!running || !bridge.isRunning()) return@schedule
+                    if (bridge.queueOutboundPacket(segment.packet)) {
+                        logger(
+                            Log.DEBUG,
+                            "proxy tcp retransmit sid=${runtime.sessionId} seq=${segment.startSequence} end=${segment.endSequence} attempt=${delayIndex + 1} ${segment.label}",
+                        )
+                        scheduleOutboundTcpRetransmit(runtime, startSequence, delayIndex + 1)
+                    } else {
+                        val message = "Failed to queue outbound TCP retransmit."
+                        failTcpRuntime(runtime, reason = "payload-retransmit-queue-failed", message = message, closeClient = true)
+                    }
+                },
+                DATA_RETRANSMIT_DELAYS_MS[delayIndex],
+                TimeUnit.MILLISECONDS,
+            )
+        runtime.attachOutstandingRetransmit(startSequence, task)
     }
 
     private fun awaitSessionEstablished(sessionId: Int, timeoutMs: Long) {
@@ -1156,6 +1235,7 @@ internal class BridgeUserspaceTunnelStack(
         private const val DEFAULT_TCP_FIN_DRAIN_TIMEOUT_MS = 5_000L
         private const val DEFAULT_NO_REPLY_FAILURE_CACHE_TTL_MS = 60_000L
         private const val SYN_QUEUE_RETRY_DELAY_MS = 50L
+        private val DATA_RETRANSMIT_DELAYS_MS = listOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L)
         private const val LOCALHOST_IPV4 = "127.0.0.1"
         private const val UDP_HEADER_LEN = 8
         private const val TCP_LOCAL_PORT_MIN = 30000
@@ -1191,6 +1271,14 @@ private data class CachedNoReplyFailure(
     val synAttempts: Int,
 )
 
+private data class OutstandingTcpSegment(
+    val startSequence: Long,
+    val endSequence: Long,
+    val packet: ByteArray,
+    val label: String,
+    var retransmitTask: ScheduledFuture<*>? = null,
+)
+
 private class TcpSessionRuntime(
     val sessionId: Int,
     val targetHost: String,
@@ -1223,6 +1311,8 @@ private class TcpSessionRuntime(
     private val connectLatch = CountDownLatch(1)
     private val sessionWaitLatch = CountDownLatch(1)
     private val scheduledTasks = ArrayList<ScheduledFuture<*>>()
+    private val outstandingSegments = LinkedHashMap<Long, OutstandingTcpSegment>()
+    private var highestOutboundAcknowledgement: Long = initialSequenceNumber + 1
 
     @Synchronized
     fun <T> withLock(block: TcpSessionRuntime.() -> T): T = block()
@@ -1318,6 +1408,42 @@ private class TcpSessionRuntime(
     }
 
     @Synchronized
+    fun recordOutstandingSegment(segment: OutstandingTcpSegment) {
+        if (connectState != ConnectWaitState.established) return
+        if (segment.endSequence <= highestOutboundAcknowledgement) return
+        outstandingSegments[segment.startSequence] = segment
+    }
+
+    @Synchronized
+    fun attachOutstandingRetransmit(startSequence: Long, task: ScheduledFuture<*>) {
+        val segment = outstandingSegments[startSequence]
+        if (segment == null || connectState != ConnectWaitState.established) {
+            task.cancel(true)
+            return
+        }
+        segment.retransmitTask = task
+    }
+
+    @Synchronized
+    fun outstandingSegmentForRetransmit(startSequence: Long): OutstandingTcpSegment? {
+        if (connectState != ConnectWaitState.established) return null
+        return outstandingSegments[startSequence]
+    }
+
+    @Synchronized
+    fun acknowledgeOutbound(acknowledgementNumber: Long): Int {
+        highestOutboundAcknowledgement = maxOf(highestOutboundAcknowledgement, acknowledgementNumber)
+        if (outstandingSegments.isEmpty()) return 0
+        val acknowledged = outstandingSegments.values.filter { it.endSequence <= acknowledgementNumber }
+        if (acknowledged.isEmpty()) return 0
+        for (segment in acknowledged) {
+            segment.retransmitTask?.cancel(true)
+            outstandingSegments.remove(segment.startSequence)
+        }
+        return acknowledged.size
+    }
+
+    @Synchronized
     fun signalConnectFailure(message: String) {
         if (connectState != ConnectWaitState.pending) return
         connectFailureMessage = message
@@ -1381,6 +1507,7 @@ private class TcpSessionRuntime(
             connectLatch.countDown()
         }
         if (sessionWaitState != SessionWaitState.pending) return
+        cancelOutstandingSegments()
         terminalFailureMessage = message
         sessionWaitState = SessionWaitState.failed
         sessionWaitLatch.countDown()
@@ -1408,6 +1535,15 @@ private class TcpSessionRuntime(
             task.cancel(true)
         }
         scheduledTasks.clear()
+        cancelOutstandingSegments()
+    }
+
+    @Synchronized
+    private fun cancelOutstandingSegments() {
+        for (segment in outstandingSegments.values) {
+            segment.retransmitTask?.cancel(true)
+        }
+        outstandingSegments.clear()
     }
 }
 

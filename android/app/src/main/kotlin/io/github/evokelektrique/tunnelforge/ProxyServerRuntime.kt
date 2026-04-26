@@ -37,6 +37,7 @@ data class ProxyRuntimeConfig(
     val socksPort: Int,
     val allowLanConnections: Boolean = false,
     val maxConcurrentClients: Int? = ProxyServerRuntime.DEFAULT_MAX_CONCURRENT_CLIENTS,
+    val suppressUpstreamHttpErrors: Boolean = false,
     val exposure: ProxyExposureInfo =
         ProxyExposureInfo.loopback(
             httpPort = httpPort,
@@ -57,6 +58,7 @@ class ProxyServerRuntime(
     private val transport: ProxyTransport = StubProxyTransport(),
     private val connectTimeoutMs: Long = DEFAULT_CONNECT_TIMEOUT_MS,
     private val connectResponseTimeoutMs: Long = connectTimeoutMs,
+    private val upstreamConnectTimeoutMs: Long = connectTimeoutMs,
     private val levelLogger: ((Int, String) -> Unit)? = null,
     private val secureSocketFactory: ProxySecureSocketFactory = SystemProxySecureSocketFactory,
 ) {
@@ -349,24 +351,29 @@ class ProxyServerRuntime(
             val failure = categorizeTransportFailure(e)
             val response = httpTransportFailureFor(failure)
             warn(
-                "proxy fail proto=http-connect phase=${if (tunnelEstablished) "post-success" else "pre-success"} sid=${sessionId?.toString() ?: "pending"} target=${connectRequest.host}:${connectRequest.port} reason=${failure.reason} status=${if (tunnelEstablished) "none" else response.code.toString()} error=${failure.message} ${runtimeDiagnostics()}",
+                "proxy fail proto=http-connect phase=${if (tunnelEstablished) "post-success" else "pre-success"} sid=${sessionId?.toString() ?: "pending"} target=${connectRequest.host}:${connectRequest.port} reason=${failure.reason} status=${if (tunnelEstablished || shouldSuppressUpstreamHttpError(failure.reason)) "none" else response.code.toString()} error=${failure.message} ${runtimeDiagnostics()}",
             )
             if (!tunnelEstablished) {
+                val context =
+                    HttpErrorLogContext(
+                        protocol = "http-connect",
+                        phase = "pre-success",
+                        reason = failure.reason.name,
+                        target = "${connectRequest.host}:${connectRequest.port}",
+                        sessionId = sessionId,
+                        closeClient = true,
+                        detail = failure.message,
+                    )
+                if (shouldSuppressUpstreamHttpError(failure.reason)) {
+                    logSuppressedHttpError(context)
+                    return
+                }
                 writeHttpErrorOrLogClientAbort(
                     output = output,
                     code = response.code,
                     status = response.status,
                     message = response.message,
-                    context =
-                        HttpErrorLogContext(
-                            protocol = "http-connect",
-                            phase = "pre-success",
-                            reason = failure.reason.name,
-                            target = "${connectRequest.host}:${connectRequest.port}",
-                            sessionId = sessionId,
-                            closeClient = true,
-                            detail = failure.message,
-                        ),
+                    context = context,
                 )
             }
         }
@@ -425,18 +432,26 @@ class ProxyServerRuntime(
                 "proxy fail proto=${connectRequest.protocol} sid=${sessionId?.toString() ?: "pending"} target=${connectRequest.host}:${connectRequest.port} error=${e.message ?: DEFAULT_TRANSPORT_FAILURE}",
             )
             if (e !is HttpProxyResponseStartedException) {
-                writeHttpTransportFailure(
-                    output,
-                    e,
+                val endpointFailure = categorizeTransportFailure(e)
+                val context =
                     HttpErrorLogContext(
                         protocol = connectRequest.protocol,
                         phase = "pre-response",
-                        reason = "transport-failure",
+                        reason = endpointFailure.reason.name,
                         target = "${connectRequest.host}:${connectRequest.port}",
                         sessionId = sessionId,
                         closeClient = true,
                         detail = e.message,
-                    ),
+                    )
+                if (shouldSuppressUpstreamHttpError(endpointFailure.reason)) {
+                    logSuppressedHttpError(context)
+                    upstream?.close()
+                    return PlainHttpForwardResult(upstream = null, keepClientOpen = false)
+                }
+                writeHttpTransportFailure(
+                    output,
+                    e,
+                    context,
                 )
             }
             upstream?.close()
@@ -548,18 +563,25 @@ class ProxyServerRuntime(
             warn(
                 "proxy fail proto=https-proxy sid=${sessionId?.toString() ?: "pending"} target=${request.host}:${request.port} error=${e.message ?: DEFAULT_TRANSPORT_FAILURE}",
             )
-            writeHttpTransportFailure(
-                output,
-                e,
+            val endpointFailure = categorizeTransportFailure(e)
+            val context =
                 HttpErrorLogContext(
                     protocol = "https-proxy",
                     phase = "pre-response",
-                    reason = "transport-failure",
+                    reason = endpointFailure.reason.name,
                     target = "${request.host}:${request.port}",
                     sessionId = sessionId,
                     closeClient = true,
                     detail = e.message,
-                ),
+                )
+            if (shouldSuppressUpstreamHttpError(endpointFailure.reason)) {
+                logSuppressedHttpError(context)
+                return
+            }
+            writeHttpTransportFailure(
+                output,
+                e,
+                context,
             )
         }
     }
@@ -903,6 +925,38 @@ class ProxyServerRuntime(
                 runtimeDiagnostics(),
             )
         warn(fields.joinToString(" "))
+    }
+
+    private fun logSuppressedHttpError(context: HttpErrorLogContext) {
+        val fields =
+            listOfNotNull(
+                "proxy suppress-error",
+                "proto=${context.protocol}",
+                "phase=${context.phase}",
+                "reason=${context.reason}",
+                context.sessionId?.let { "sid=$it" } ?: "sid=pending",
+                context.target?.let { "target=$it" },
+                "status=none",
+                "close=${context.closeClient}",
+                context.detail?.let { "detail=${it.sanitizeForLog()}" },
+                runtimeDiagnostics(),
+            )
+        warn(fields.joinToString(" "))
+    }
+
+    private fun shouldSuppressUpstreamHttpError(reason: ProxyFailureReason): Boolean {
+        if (!config.suppressUpstreamHttpErrors) return false
+        return when (reason) {
+            ProxyFailureReason.upstreamConnectFailed,
+            ProxyFailureReason.upstreamTimeout,
+            ProxyFailureReason.dnsFailed,
+            ProxyFailureReason.networkUnreachable,
+            -> true
+            ProxyFailureReason.localServiceUnavailable,
+            ProxyFailureReason.protocolError,
+            ProxyFailureReason.clientAborted,
+            -> false
+        }
     }
 
     private fun httpTransportFailureFor(failure: ProxyEndpointFailure): HttpFailureResponse {
@@ -1514,7 +1568,7 @@ class ProxyServerRuntime(
     private fun openConnectedTransportSocket(request: ProxyConnectRequest): ConnectedProxySocket {
         val session = transport.openTcpSession(request)
         try {
-            session.awaitConnected(connectTimeoutMs)
+            session.awaitConnected(upstreamConnectTimeoutMs.coerceAtLeast(1L))
             val listener = ServerSocket(0, 1, InetAddress.getByName(LOOPBACK_HOST))
             try {
                 val clientSocket = Socket(LOOPBACK_HOST, listener.localPort)

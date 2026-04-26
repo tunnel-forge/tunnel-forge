@@ -292,6 +292,7 @@ class ProxyTunnelService : Service() {
                     proxyConfig.copy(
                         exposure = exposure,
                         maxConcurrentClients = PROXY_ONLY_MAX_CONCURRENT_CLIENTS,
+                        suppressUpstreamHttpErrors = true,
                     ),
                 levelLogger = { level, message ->
                     VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
@@ -299,6 +300,7 @@ class ProxyTunnelService : Service() {
                 transport = transport,
                 connectTimeoutMs = PROXY_ONLY_CONNECT_TIMEOUT_MS,
                 connectResponseTimeoutMs = PROXY_ONLY_CONNECT_RESPONSE_TIMEOUT_MS,
+                upstreamConnectTimeoutMs = PROXY_ONLY_UPSTREAM_CONNECT_TIMEOUT_MS,
             )
             localRuntime = runtime
             var workerReplaced = false
@@ -581,8 +583,9 @@ class ProxyTunnelService : Service() {
         internal val PROXY_ONLY_MAX_TCP_SESSIONS: Int? = null
         internal val PROXY_ONLY_MAX_PENDING_TCP_CONNECTS: Int? = null
         internal const val PROXY_ONLY_CONNECT_TIMEOUT_MS = 60_000L
-        internal const val PROXY_ONLY_CONNECT_RESPONSE_TIMEOUT_MS = 25_000L
-        internal val PROXY_ONLY_SYN_RETRANSMIT_DELAYS_MS = listOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L, 32_000L)
+        internal const val PROXY_ONLY_CONNECT_RESPONSE_TIMEOUT_MS = 10_000L
+        internal const val PROXY_ONLY_UPSTREAM_CONNECT_TIMEOUT_MS = 10_000L
+        internal val PROXY_ONLY_SYN_RETRANSMIT_DELAYS_MS = listOf(1_000L, 2_000L, 4_000L, 8_000L)
         internal const val PROXY_ONLY_SYN_PACING_INTERVAL_MS = 20L
         internal const val PROXY_ONLY_TCP_FIN_DRAIN_TIMEOUT_MS = 5_000L
 

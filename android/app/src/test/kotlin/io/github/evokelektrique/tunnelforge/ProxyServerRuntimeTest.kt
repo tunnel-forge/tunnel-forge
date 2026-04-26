@@ -949,6 +949,66 @@ class ProxyServerRuntimeTest {
     }
 
     @Test
+    fun httpProxySuppressesUpstreamFailureStatusWhenConfigured() {
+        val logs = CopyOnWriteArrayList<String>()
+        val observedTimeouts = CopyOnWriteArrayList<Long>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession =
+                    object : ProxyTransportSession {
+                        override val descriptor = ProxySessionDescriptor(9, request, 0)
+
+                        override fun awaitConnected(timeoutMs: Long) {
+                            observedTimeouts.add(timeoutMs)
+                            throw ProxyTransportException(ProxyTransportFailureReason.upstreamTimeout, "TCP connect timed out")
+                        }
+
+                        override fun pumpBidirectional(client: ProxyClientConnection) {
+                            throw AssertionError("pumpBidirectional should not run after connect timeout")
+                        }
+
+                        override fun close() = Unit
+                    }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config =
+                    ProxyRuntimeConfig(
+                        httpEnabled = true,
+                        httpPort = port,
+                        socksEnabled = false,
+                        socksPort = 1080,
+                        suppressUpstreamHttpErrors = true,
+                    ),
+                logger = {},
+                levelLogger = { _, message -> logs.add(message) },
+                transport = transport,
+                connectTimeoutMs = 60_000,
+                upstreamConnectTimeoutMs = 200,
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            Socket("127.0.0.1", port).use { socket ->
+                socket.soTimeout = 1_000
+                val output = BufferedOutputStream(socket.getOutputStream())
+                val input = BufferedInputStream(socket.getInputStream())
+                output.write(
+                    "GET http://93.184.216.34/status HTTP/1.1\r\nHost: 93.184.216.34\r\n\r\n".toByteArray(StandardCharsets.US_ASCII),
+                )
+                output.flush()
+                val response = readResponse(input)
+                assertEquals("", response)
+            }
+            assertEquals(listOf(200L), observedTimeouts)
+            assertTrue(logs.any { it.contains("proxy suppress-error") && it.contains("proto=http-proxy") && it.contains("reason=upstreamTimeout") })
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
     fun httpConnectWaitsForTransportConnectBeforeSuccessResponse() {
         val allowConnect = CountDownLatch(1)
         val transport =
@@ -1114,6 +1174,97 @@ class ProxyServerRuntimeTest {
                 output.flush()
                 val response = readResponse(input)
                 assertTrue(response.startsWith("HTTP/1.1 504 Gateway Timeout"))
+            }
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun httpConnectSuppressesUpstreamFailureStatusWhenConfigured() {
+        val logs = CopyOnWriteArrayList<String>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession =
+                    object : ProxyTransportSession {
+                        override val descriptor = ProxySessionDescriptor(1, request, 0)
+
+                        override fun awaitConnected(timeoutMs: Long) {
+                            throw ProxyTransportException(ProxyTransportFailureReason.upstreamTimeout, "TCP connect timed out")
+                        }
+
+                        override fun pumpBidirectional(client: ProxyClientConnection) {
+                            throw AssertionError("pumpBidirectional should not run after connect timeout")
+                        }
+
+                        override fun close() = Unit
+                    }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config =
+                    ProxyRuntimeConfig(
+                        httpEnabled = true,
+                        httpPort = port,
+                        socksEnabled = false,
+                        socksPort = 1080,
+                        suppressUpstreamHttpErrors = true,
+                    ),
+                logger = {},
+                levelLogger = { _, message -> logs.add(message) },
+                transport = transport,
+                connectTimeoutMs = 200,
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            Socket("127.0.0.1", port).use { socket ->
+                socket.soTimeout = 1_000
+                val output = BufferedOutputStream(socket.getOutputStream())
+                val input = BufferedInputStream(socket.getInputStream())
+                output.write("CONNECT 93.184.216.34:443 HTTP/1.1\r\nHost: 93.184.216.34:443\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
+                output.flush()
+                val response = readResponse(input)
+                assertEquals("", response)
+            }
+            assertTrue(logs.any { it.contains("proxy suppress-error") && it.contains("proto=http-connect") && it.contains("reason=upstreamTimeout") })
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
+    fun httpConnectStillReturnsClientErrorsWhenUpstreamFailuresAreSuppressed() {
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config =
+                    ProxyRuntimeConfig(
+                        httpEnabled = true,
+                        httpPort = port,
+                        socksEnabled = false,
+                        socksPort = 1080,
+                        suppressUpstreamHttpErrors = true,
+                    ),
+                logger = {},
+                transport =
+                    object : ProxyTransport {
+                        override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession {
+                            throw AssertionError("Transport should not be called for invalid CONNECT targets")
+                        }
+                    },
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            Socket("127.0.0.1", port).use { socket ->
+                val output = BufferedOutputStream(socket.getOutputStream())
+                val input = BufferedInputStream(socket.getInputStream())
+                output.write("CONNECT [2001:db8::1]:443 HTTP/1.1\r\nHost: [2001:db8::1]:443\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
+                output.flush()
+                val response = readResponse(input)
+                assertTrue(response.startsWith("HTTP/1.1 501 Not Implemented"))
             }
         } finally {
             runtime.stop()
