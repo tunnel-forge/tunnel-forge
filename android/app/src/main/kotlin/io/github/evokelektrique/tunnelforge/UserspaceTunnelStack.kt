@@ -6,10 +6,12 @@ import java.io.OutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.TreeMap
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.Semaphore
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
@@ -78,12 +80,15 @@ internal class BridgeUserspaceTunnelStack(
     private val synPacingIntervalMs: Long = DEFAULT_SYN_PACING_INTERVAL_MS,
     private val tcpFinDrainTimeoutMs: Long = DEFAULT_TCP_FIN_DRAIN_TIMEOUT_MS,
     private val noReplyFailureCacheTtlMs: Long = DEFAULT_NO_REPLY_FAILURE_CACHE_TTL_MS,
+    private val tcpPersistProbeDelaysMs: List<Long> = DEFAULT_TCP_PERSIST_PROBE_DELAYS_MS,
 ) : UserspaceTunnelStack {
     init {
         require(maxTcpSessions == null || maxTcpSessions >= 1) { "TCP session limit must be at least 1" }
         require(maxPendingTcpConnects == null || maxPendingTcpConnects >= 1) { "Pending TCP connect limit must be at least 1" }
         require(synPacingIntervalMs >= 0) { "SYN pacing interval must not be negative" }
         require(tcpFinDrainTimeoutMs >= 1) { "TCP FIN drain timeout must be at least 1ms" }
+        require(tcpPersistProbeDelaysMs.isNotEmpty()) { "TCP persist probe delays must not be empty" }
+        require(tcpPersistProbeDelaysMs.all { it >= 1 }) { "TCP persist probe delays must be positive" }
     }
 
     private val nextSessionId = AtomicInteger(1)
@@ -115,6 +120,7 @@ internal class BridgeUserspaceTunnelStack(
     private val maxTcpPayloadBytes = (linkMtu - IPV4_HEADER_LEN - TCP_HEADER_LEN).coerceAtLeast(1)
     private val maxUdpPayloadBytes = (linkMtu - IPV4_HEADER_LEN - UDP_HEADER_LEN).coerceAtLeast(1)
     private val advertisedMss = maxTcpPayloadBytes.coerceAtMost(MAX_TCP_OPTION_VALUE)
+    private val receiveWindowBytes = DEFAULT_TCP_RECEIVE_WINDOW_BYTES.coerceAtMost(MAX_TCP_OPTION_VALUE)
 
     @Volatile
     private var inboundPump: Thread? = null
@@ -461,13 +467,16 @@ internal class BridgeUserspaceTunnelStack(
         }
 
         if ((tcp.flags and TcpPacketBuilder.TCP_FLAG_ACK) != 0) {
-            val acknowledged = runtime.acknowledgeOutbound(tcp.acknowledgementNumber)
-            if (acknowledged > 0) {
+            val ackUpdate = runtime.acknowledgeOutbound(tcp.acknowledgementNumber, tcp.windowSize)
+            if (ackUpdate.acknowledgedSegments > 0 || ackUpdate.windowChanged || ackUpdate.sendResumed) {
                 updateSessionState(
                     runtime.sessionId,
                     UserspaceSessionState.established,
-                    "Acknowledged outbound TCP segments count=$acknowledged ack=${tcp.acknowledgementNumber}",
+                    "TCP ACK ack=${tcp.acknowledgementNumber} acknowledged=${ackUpdate.acknowledgedSegments} peerWindow=${tcp.windowSize} outstanding=${ackUpdate.outstandingBytes} sendResumed=${ackUpdate.sendResumed}",
                 )
+            }
+            ackUpdate.fastRetransmitStartSequence?.let { startSequence ->
+                retransmitOutstandingTcpSegment(runtime, startSequence, reason = "fast-duplicate-ack")
             }
         }
 
@@ -486,11 +495,12 @@ internal class BridgeUserspaceTunnelStack(
                         sequenceNumber = initialSequenceNumber + 1,
                         acknowledgementNumber = tcp.sequenceNumber + 1,
                         flags = TcpPacketBuilder.TCP_FLAG_ACK,
+                        windowSize = advertisedReceiveWindow(runtime),
                     )
                 }
             if (bridge.queueOutboundPacket(ackPacket)) {
                 clearNoReplyFailure(runtime)
-                if (runtime.markEstablished(ipv4.sourceIp, tcp.sequenceNumber + 1)) {
+                if (runtime.markEstablished(ipv4.sourceIp, tcp.sequenceNumber + 1, tcp.windowSize)) {
                     releasePendingConnectPermit(runtime)
                 }
                 logger(Log.DEBUG, "proxy tcp established sid=${runtime.sessionId}")
@@ -507,6 +517,7 @@ internal class BridgeUserspaceTunnelStack(
         }
 
         val finConsumesByte = if ((tcp.flags and TcpPacketBuilder.TCP_FLAG_FIN) != 0) 1 else 0
+        var deliveredFin = false
         if (tcp.payloadLength > 0 || finConsumesByte != 0) {
             val expectedSequence = runtime.withLock { remoteSequenceNumber }
             if (tcp.sequenceNumber < expectedSequence) {
@@ -519,42 +530,43 @@ internal class BridgeUserspaceTunnelStack(
                 return
             }
             if (tcp.sequenceNumber > expectedSequence) {
+                val payload =
+                    if (tcp.payloadLength > 0) {
+                        packet.copyOfRange(tcp.payloadOffset, tcp.payloadOffset + tcp.payloadLength)
+                    } else {
+                        byteArrayOf()
+                    }
+                val buffered = runtime.bufferOutOfOrderInbound(tcp.sequenceNumber, payload, finConsumesByte != 0)
                 queuePureAck(runtime, expectedSequence)
                 updateSessionState(
                     runtime.sessionId,
                     UserspaceSessionState.established,
-                    "Ignored out-of-order inbound TCP payload seq=${tcp.sequenceNumber} expected=$expectedSequence",
+                    if (buffered) {
+                        "Buffered out-of-order inbound TCP seq=${tcp.sequenceNumber} expected=$expectedSequence buffered=${runtime.bufferedInboundBytes()}"
+                    } else {
+                        "Dropped out-of-order inbound TCP seq=${tcp.sequenceNumber} expected=$expectedSequence buffered=${runtime.bufferedInboundBytes()}"
+                    },
                 )
                 return
             }
-            if (tcp.payloadLength > 0) {
-                val payload = packet.copyOfRange(tcp.payloadOffset, tcp.payloadOffset + tcp.payloadLength)
-                val attachment = clientAttachments[runtime.sessionId]
-                if (attachment == null) {
-                    val message = "Inbound TCP payload arrived without attached client socket"
-                    failTcpRuntime(runtime, reason = "no-client-attachment", message = message, closeClient = true)
-                    return
+            val payload =
+                if (tcp.payloadLength > 0) {
+                    packet.copyOfRange(tcp.payloadOffset, tcp.payloadOffset + tcp.payloadLength)
+                } else {
+                    byteArrayOf()
                 }
-                try {
-                    attachment.write(payload)
-                } catch (e: IOException) {
-                    val message = e.message ?: "Failed writing inbound payload to client"
-                    failTcpRuntime(runtime, reason = "client-write", message = message, closeClient = true)
-                    return
-                }
-                updateSessionState(
-                    runtime.sessionId,
-                    UserspaceSessionState.established,
-                    "Delivered inbound TCP payload len=${tcp.payloadLength} to local client",
+            val delivery =
+                deliverInboundTcpSegments(
+                    runtime = runtime,
+                    firstSegment = InboundTcpSegment(tcp.sequenceNumber, payload, finConsumesByte != 0),
                 )
+            if (delivery.failed) return
+            if (delivery.blocked) {
+                queuePureAck(runtime, expectedSequence)
+                return
             }
-            val nextExpected =
-                runtime.withLock {
-                    val consumedSequence = tcp.sequenceNumber + tcp.payloadLength + finConsumesByte
-                    remoteSequenceNumber = maxOf(remoteSequenceNumber, consumedSequence)
-                    remoteSequenceNumber
-                }
-            queuePureAck(runtime, nextExpected)
+            deliveredFin = delivery.deliveredFin
+            queuePureAck(runtime, runtime.withLock { remoteSequenceNumber })
         } else {
             updateSessionState(
                 runtime.sessionId,
@@ -563,7 +575,7 @@ internal class BridgeUserspaceTunnelStack(
             )
         }
 
-        if (finConsumesByte != 0) {
+        if (deliveredFin) {
             clientAttachments[runtime.sessionId]?.shutdownOutput()
             runtime.markRemoteClosed()
             logger(Log.DEBUG, "proxy tcp close sid=${runtime.sessionId} reason=fin-in")
@@ -573,6 +585,55 @@ internal class BridgeUserspaceTunnelStack(
                 "Observed TCP FIN from ${ipv4.sourceIp}:${tcp.sourcePort}; awaiting local close",
             )
         }
+    }
+
+    private fun deliverInboundTcpSegments(runtime: TcpSessionRuntime, firstSegment: InboundTcpSegment): InboundDeliveryResult {
+        val attachment = clientAttachments[runtime.sessionId]
+        if (attachment == null && firstSegment.payload.isNotEmpty()) {
+            val message = "Inbound TCP payload arrived without attached client socket"
+            failTcpRuntime(runtime, reason = "no-client-attachment", message = message, closeClient = true)
+            return InboundDeliveryResult(deliveredFin = false, blocked = false, failed = true)
+        }
+
+        var current: InboundTcpSegment? = firstSegment
+        var deliveredFin = false
+        while (current != null) {
+            val segment = current
+            val expected = runtime.withLock { remoteSequenceNumber }
+            if (segment.sequenceNumber != expected) break
+            if (segment.payload.isNotEmpty()) {
+                val target = attachment ?: clientAttachments[runtime.sessionId]
+                if (target == null) {
+                    val message = "Inbound TCP payload arrived without attached client socket"
+                    failTcpRuntime(runtime, reason = "no-client-attachment", message = message, closeClient = true)
+                    return InboundDeliveryResult(deliveredFin = deliveredFin, blocked = false, failed = true)
+                }
+                if (!target.enqueue(segment.payload)) {
+                    updateSessionState(
+                        runtime.sessionId,
+                        UserspaceSessionState.established,
+                        "Paused inbound TCP delivery len=${segment.payload.size} queued=${target.queuedBytes()} window=${target.advertisedWindow()}",
+                    )
+                    return InboundDeliveryResult(deliveredFin = deliveredFin, blocked = true, failed = false)
+                }
+                updateSessionState(
+                    runtime.sessionId,
+                    UserspaceSessionState.established,
+                    "Queued inbound TCP payload len=${segment.payload.size} deliveryQueued=${target.queuedBytes()} window=${target.advertisedWindow()}",
+                )
+            }
+            runtime.withLock {
+                remoteSequenceNumber += segment.payload.size + if (segment.fin) 1 else 0
+            }
+            deliveredFin = deliveredFin || segment.fin
+            if (current === firstSegment) {
+                current = runtime.peekContiguousBufferedInbound()
+            } else {
+                runtime.removeBufferedInbound(segment.sequenceNumber)
+                current = runtime.peekContiguousBufferedInbound()
+            }
+        }
+        return InboundDeliveryResult(deliveredFin = deliveredFin, blocked = false, failed = false)
     }
 
     private fun resolveRemoteIpv4(descriptor: ProxySessionDescriptor): String {
@@ -646,6 +707,8 @@ internal class BridgeUserspaceTunnelStack(
                     initialSequenceNumber = sequenceNumber,
                     connectTimeoutMs = effectiveConnectTimeoutMs,
                     pendingConnectLease = pendingConnectLease,
+                    inboundReorderLimitBytes = receiveWindowBytes,
+                    persistProbeDelaysMs = tcpPersistProbeDelaysMs,
                 )
             if (tcpRuntimeByLocalPort.putIfAbsent(candidate, runtime) == null) {
                 return runtime
@@ -729,6 +792,7 @@ internal class BridgeUserspaceTunnelStack(
                     sequenceNumber = initialSequenceNumber,
                     flags = TcpPacketBuilder.TCP_FLAG_SYN,
                     mss = advertisedMss,
+                    windowSize = receiveWindowBytes,
                 )
             }
         if (!bridge.queueOutboundPacket(synPacket)) {
@@ -851,7 +915,7 @@ internal class BridgeUserspaceTunnelStack(
             limit = null,
             label = label,
             connectTimeoutMs = connectTimeoutMs,
-            waitTimeoutMs = connectTimeoutMs,
+            waitTimeoutMs = (connectTimeoutMs / 2).coerceAtLeast(1L),
         )
     }
 
@@ -899,8 +963,19 @@ internal class BridgeUserspaceTunnelStack(
     }
 
     private fun pumpSessionTraffic(sessionId: Int, client: ProxyClientConnection) {
-        clientAttachments[sessionId] = ClientAttachment(client)
         val runtime = tcpRuntimeBySessionId[sessionId] ?: throw IOException("TCP session runtime closed before activation.")
+        val attachment =
+            ClientAttachment(
+                client = client,
+                receiveWindowBytes = receiveWindowBytes,
+                onWriteFailure = { message ->
+                    failTcpRuntime(runtime, reason = "client-write", message = message, closeClient = true)
+                },
+                onWindowDrained = {
+                    queuePureAck(runtime, runtime.withLock { remoteSequenceNumber })
+                },
+            )
+        clientAttachments[sessionId] = attachment
         awaitSessionEstablished(sessionId, connectTimeoutMs)
         logger(Log.DEBUG, "proxy session active sid=$sessionId localPort=${runtime.localPort} remote=${runtime.remoteIp}:${runtime.remotePort}")
 
@@ -910,40 +985,67 @@ internal class BridgeUserspaceTunnelStack(
             val read = input.read(buffer)
             if (read < 0) break
             if (read == 0) continue
-            val payload = buffer.copyOf(read)
-            val packet =
+            var offset = 0
+            while (offset < read) {
+                if (runtime.currentSendCredit() <= 0) {
+                    schedulePersistProbe(runtime, buffer[offset])
+                }
+                var credit = runtime.awaitSendCredit(DATA_SEND_WINDOW_WAIT_MS)
+                if (credit <= 0) {
+                    val message =
+                        "Timed out waiting for remote TCP receive window sid=$sessionId outstanding=${runtime.outstandingBytes()} peerWindow=${runtime.peerWindowSize()}."
+                    failTcpRuntime(runtime, reason = "send-window-timeout", message = message, closeClient = true)
+                    throw IOException(message)
+                }
+                val alreadyAcknowledged = runtime.consumeAlreadyAcknowledgedPending(read - offset)
+                if (alreadyAcknowledged > 0) {
+                    offset += alreadyAcknowledged
+                    credit = runtime.currentSendCredit()
+                    if (offset >= read) continue
+                    if (credit <= 0) continue
+                }
+                val chunkSize = minOf(read - offset, maxTcpPayloadBytes, credit)
+                val payload = buffer.copyOfRange(offset, offset + chunkSize)
+                val packet =
+                    runtime.withLock {
+                        TcpPacketBuilder.buildIpv4TcpPacket(
+                            sourceIp = clientIpv4,
+                            destinationIp = remoteIp,
+                            sourcePort = localPort,
+                            destinationPort = remotePort,
+                            sequenceNumber = nextSendSequenceNumber,
+                            acknowledgementNumber = remoteSequenceNumber,
+                            flags = TcpPacketBuilder.TCP_FLAG_ACK or TcpPacketBuilder.TCP_FLAG_PSH,
+                            windowSize = advertisedReceiveWindow(runtime),
+                            payload = payload,
+                        )
+                    }
+                if (!bridge.queueOutboundPacket(packet)) {
+                    val message = "Failed to queue outbound TCP payload."
+                    failTcpRuntime(runtime, reason = "payload-queue-failed bytes=$chunkSize", message = message, closeClient = true)
+                    throw IOException(message)
+                }
+                val startSequence =
+                    runtime.withLock {
+                        nextSendSequenceNumber
+                    }
                 runtime.withLock {
-                    TcpPacketBuilder.buildIpv4TcpPacket(
-                        sourceIp = clientIpv4,
-                        destinationIp = remoteIp,
-                        sourcePort = localPort,
-                        destinationPort = remotePort,
-                        sequenceNumber = nextSendSequenceNumber,
-                        acknowledgementNumber = remoteSequenceNumber,
-                        flags = TcpPacketBuilder.TCP_FLAG_ACK or TcpPacketBuilder.TCP_FLAG_PSH,
-                        payload = payload,
+                    nextSendSequenceNumber += chunkSize
+                }
+                trackOutboundTcpSegment(
+                    runtime = runtime,
+                    packet = packet,
+                    startSequence = startSequence,
+                    endSequence = startSequence + chunkSize,
+                    label = "payload bytes=$chunkSize",
+                )
+                offset += chunkSize
+                updateSessionState(
+                    sessionId,
+                    UserspaceSessionState.established,
+                    "Queued outbound TCP payload len=$chunkSize outstanding=${runtime.outstandingBytes()} peerWindow=${runtime.peerWindowSize()}",
                 )
             }
-            if (!bridge.queueOutboundPacket(packet)) {
-                val message = "Failed to queue outbound TCP payload."
-                failTcpRuntime(runtime, reason = "payload-queue-failed bytes=$read", message = message, closeClient = true)
-                throw IOException(message)
-            }
-            val startSequence =
-                runtime.withLock {
-                    nextSendSequenceNumber
-                }
-            runtime.withLock {
-                nextSendSequenceNumber += read
-            }
-            trackOutboundTcpSegment(
-                runtime = runtime,
-                packet = packet,
-                startSequence = startSequence,
-                endSequence = startSequence + read,
-                label = "payload bytes=$read",
-            )
-            updateSessionState(sessionId, UserspaceSessionState.established, "Queued outbound TCP payload len=$read")
         }
 
         if (!runtime.markLocalFinQueued()) {
@@ -959,6 +1061,7 @@ internal class BridgeUserspaceTunnelStack(
                     sequenceNumber = nextSendSequenceNumber,
                     acknowledgementNumber = remoteSequenceNumber,
                     flags = TcpPacketBuilder.TCP_FLAG_ACK or TcpPacketBuilder.TCP_FLAG_FIN,
+                    windowSize = advertisedReceiveWindow(runtime),
                 )
             }
         if (!bridge.queueOutboundPacket(finPacket)) {
@@ -1020,41 +1123,96 @@ internal class BridgeUserspaceTunnelStack(
                 endSequence = endSequence,
                 packet = packet,
                 label = label,
+                firstSentAtMs = System.currentTimeMillis(),
+                lastSentAtMs = System.currentTimeMillis(),
             ),
         )
-        scheduleOutboundTcpRetransmit(runtime, startSequence, delayIndex = 0)
+        scheduleOutboundTcpRetransmit(runtime, startSequence)
     }
 
     private fun scheduleOutboundTcpRetransmit(
         runtime: TcpSessionRuntime,
         startSequence: Long,
-        delayIndex: Int,
     ) {
-        if (delayIndex !in DATA_RETRANSMIT_DELAYS_MS.indices) return
+        val delayMs = runtime.currentRtoMs()
         val task =
             tcpScheduler.schedule(
                 {
                     val segment = runtime.outstandingSegmentForRetransmit(startSequence) ?: return@schedule
                     if (!running || !bridge.isRunning()) return@schedule
-                    if (bridge.queueOutboundPacket(segment.packet)) {
-                        logger(
-                            Log.DEBUG,
-                            "proxy tcp retransmit sid=${runtime.sessionId} seq=${segment.startSequence} end=${segment.endSequence} attempt=${delayIndex + 1} ${segment.label}",
-                        )
-                        scheduleOutboundTcpRetransmit(runtime, startSequence, delayIndex + 1)
-                    } else {
-                        val message = "Failed to queue outbound TCP retransmit."
-                        failTcpRuntime(runtime, reason = "payload-retransmit-queue-failed", message = message, closeClient = true)
-                    }
+                    retransmitOutstandingTcpSegment(runtime, startSequence, reason = "rto")
                 },
-                DATA_RETRANSMIT_DELAYS_MS[delayIndex],
+                delayMs,
                 TimeUnit.MILLISECONDS,
             )
         runtime.attachOutstandingRetransmit(startSequence, task)
     }
 
+    private fun retransmitOutstandingTcpSegment(runtime: TcpSessionRuntime, startSequence: Long, reason: String) {
+        val segment = runtime.outstandingSegmentForRetransmit(startSequence) ?: return
+        if (!running || !bridge.isRunning()) return
+        if (bridge.queueOutboundPacket(segment.packet)) {
+            val attempt = runtime.markOutstandingRetransmitted(startSequence)
+            logger(
+                Log.DEBUG,
+                "proxy tcp retransmit sid=${runtime.sessionId} seq=${segment.startSequence} end=${segment.endSequence} attempt=$attempt reason=$reason ${segment.label}",
+            )
+            scheduleOutboundTcpRetransmit(runtime, startSequence)
+        } else {
+            val message = "Failed to queue outbound TCP retransmit."
+            failTcpRuntime(runtime, reason = "payload-retransmit-queue-failed", message = message, closeClient = true)
+        }
+    }
+
+    private fun schedulePersistProbe(runtime: TcpSessionRuntime, payloadByte: Byte) {
+        val delayMs = runtime.preparePersistProbeDelay() ?: return
+        val task =
+            tcpScheduler.schedule(
+                {
+                    if (!running || !bridge.isRunning()) return@schedule
+                    if (runtime.currentSendCredit() > 0) {
+                        runtime.cancelPersistProbe()
+                        return@schedule
+                    }
+                    val packet =
+                        runtime.withLock {
+                            TcpPacketBuilder.buildIpv4TcpPacket(
+                                sourceIp = clientIpv4,
+                                destinationIp = remoteIp,
+                                sourcePort = localPort,
+                                destinationPort = remotePort,
+                                sequenceNumber = nextSendSequenceNumber,
+                                acknowledgementNumber = remoteSequenceNumber,
+                                flags = TcpPacketBuilder.TCP_FLAG_ACK or TcpPacketBuilder.TCP_FLAG_PSH,
+                                windowSize = advertisedReceiveWindow(runtime),
+                                payload = byteArrayOf(payloadByte),
+                            )
+                        }
+                    if (bridge.queueOutboundPacket(packet)) {
+                        logger(
+                            Log.DEBUG,
+                            "proxy tcp persist-probe sid=${runtime.sessionId} seq=${runtime.withLock { nextSendSequenceNumber }} peerWindow=${runtime.peerWindowSize()}",
+                        )
+                        runtime.markPersistProbeSent()
+                        schedulePersistProbe(runtime, payloadByte)
+                    } else {
+                        val message = "Failed to queue TCP persist probe."
+                        failTcpRuntime(runtime, reason = "persist-probe-queue-failed", message = message, closeClient = true)
+                    }
+                },
+                delayMs,
+                TimeUnit.MILLISECONDS,
+            )
+        runtime.attachPersistProbe(task)
+    }
+
     private fun awaitSessionEstablished(sessionId: Int, timeoutMs: Long) {
-        val runtime = tcpRuntimeBySessionId[sessionId] ?: throw IOException("TCP session runtime closed before activation.")
+        val runtime =
+            tcpRuntimeBySessionId[sessionId]
+                ?: sessions[sessionId]
+                    ?.takeIf { it.state == UserspaceSessionState.failed }
+                    ?.let { throw tcpFailureFromSessionSnapshot(it) }
+                ?: throw IOException("TCP session runtime closed before activation.")
         when (runtime.awaitConnect(timeoutMs)) {
             ConnectWaitState.established -> Unit
             ConnectWaitState.failed -> {
@@ -1070,6 +1228,18 @@ internal class BridgeUserspaceTunnelStack(
                 throw ProxyTransportException(ProxyTransportFailureReason.upstreamTimeout, message)
             }
         }
+    }
+
+    private fun tcpFailureFromSessionSnapshot(snapshot: UserspaceSessionSnapshot): IOException {
+        val message = snapshot.lastEvent
+        val normalized = message.lowercase()
+        val reason =
+            when {
+                normalized.contains("timed out") -> ProxyTransportFailureReason.upstreamTimeout
+                normalized.contains("bridge") || normalized.contains("queue") -> ProxyTransportFailureReason.localServiceUnavailable
+                else -> ProxyTransportFailureReason.upstreamConnectFailed
+            }
+        return ProxyTransportException(reason, message)
     }
 
     private fun buildConnectTimeoutMessage(runtime: TcpSessionRuntime): String =
@@ -1111,6 +1281,9 @@ internal class BridgeUserspaceTunnelStack(
         noReplyFailureCache.remove(NoReplyTargetKey(runtime.remoteIp, runtime.remotePort))
     }
 
+    private fun advertisedReceiveWindow(runtime: TcpSessionRuntime): Int =
+        clientAttachments[runtime.sessionId]?.advertisedWindow() ?: receiveWindowBytes
+
     private fun queuePureAck(runtime: TcpSessionRuntime, acknowledgementNumber: Long) {
         val ackPacket =
             runtime.withLock {
@@ -1122,6 +1295,7 @@ internal class BridgeUserspaceTunnelStack(
                     sequenceNumber = nextSendSequenceNumber,
                     acknowledgementNumber = acknowledgementNumber,
                     flags = TcpPacketBuilder.TCP_FLAG_ACK,
+                    windowSize = advertisedReceiveWindow(runtime),
                 )
             }
         if (bridge.queueOutboundPacket(ackPacket)) {
@@ -1235,7 +1409,9 @@ internal class BridgeUserspaceTunnelStack(
         private const val DEFAULT_TCP_FIN_DRAIN_TIMEOUT_MS = 5_000L
         private const val DEFAULT_NO_REPLY_FAILURE_CACHE_TTL_MS = 60_000L
         private const val SYN_QUEUE_RETRY_DELAY_MS = 50L
-        private val DATA_RETRANSMIT_DELAYS_MS = listOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L)
+        private const val DEFAULT_TCP_RECEIVE_WINDOW_BYTES = 64 * 1024 - 1
+        private const val DATA_SEND_WINDOW_WAIT_MS = 30_000L
+        private val DEFAULT_TCP_PERSIST_PROBE_DELAYS_MS = listOf(1_000L, 2_000L, 4_000L, 8_000L, 15_000L)
         private const val LOCALHOST_IPV4 = "127.0.0.1"
         private const val UDP_HEADER_LEN = 8
         private const val TCP_LOCAL_PORT_MIN = 30000
@@ -1276,8 +1452,40 @@ private data class OutstandingTcpSegment(
     val endSequence: Long,
     val packet: ByteArray,
     val label: String,
+    val firstSentAtMs: Long,
+    var lastSentAtMs: Long,
+    var retransmitted: Boolean = false,
+    var retransmitAttempts: Int = 0,
     var retransmitTask: ScheduledFuture<*>? = null,
 )
+
+private data class InboundTcpSegment(
+    val sequenceNumber: Long,
+    val payload: ByteArray,
+    val fin: Boolean,
+) {
+    val sequenceEnd: Long = sequenceNumber + payload.size + if (fin) 1 else 0
+    val bufferedSize: Int = payload.size + if (fin) 1 else 0
+}
+
+private data class InboundDeliveryResult(
+    val deliveredFin: Boolean,
+    val blocked: Boolean,
+    val failed: Boolean,
+)
+
+private data class TcpAckUpdate(
+    val acknowledgedSegments: Int,
+    val outstandingBytes: Long,
+    val windowChanged: Boolean,
+    val sendResumed: Boolean,
+    val fastRetransmitStartSequence: Long? = null,
+)
+
+private const val INITIAL_TCP_RTO_MS = 1_000L
+private const val MIN_TCP_RTO_MS = 500L
+private const val MAX_TCP_RTO_MS = 8_000L
+private const val DUPLICATE_ACKS_FOR_FAST_RETRANSMIT = 3
 
 private class TcpSessionRuntime(
     val sessionId: Int,
@@ -1288,6 +1496,8 @@ private class TcpSessionRuntime(
     val initialSequenceNumber: Long,
     val connectTimeoutMs: Long,
     private var pendingConnectLease: PendingConnectLease?,
+    private val inboundReorderLimitBytes: Int,
+    private val persistProbeDelaysMs: List<Long>,
 ) {
     var remoteSequenceNumber: Long = 0
     var handshakeAckQueued: Boolean = false
@@ -1312,7 +1522,17 @@ private class TcpSessionRuntime(
     private val sessionWaitLatch = CountDownLatch(1)
     private val scheduledTasks = ArrayList<ScheduledFuture<*>>()
     private val outstandingSegments = LinkedHashMap<Long, OutstandingTcpSegment>()
+    private val outOfOrderInboundSegments = TreeMap<Long, InboundTcpSegment>()
     private var highestOutboundAcknowledgement: Long = initialSequenceNumber + 1
+    private var peerWindowSize: Int = 65535
+    private var duplicateAckNumber: Long = initialSequenceNumber + 1
+    private var duplicateAckCount: Int = 0
+    private var bufferedInboundBytes: Int = 0
+    private var persistProbeTask: ScheduledFuture<*>? = null
+    private var persistProbeDelayIndex: Int = 0
+    private var srttMs: Long? = null
+    private var rttvarMs: Long = INITIAL_TCP_RTO_MS / 2
+    private var rtoMs: Long = INITIAL_TCP_RTO_MS
 
     @Synchronized
     fun <T> withLock(block: TcpSessionRuntime.() -> T): T = block()
@@ -1396,14 +1616,16 @@ private class TcpSessionRuntime(
         }
 
     @Synchronized
-    fun markEstablished(establishedRemoteIp: String, establishedRemoteSequence: Long): Boolean {
+    fun markEstablished(establishedRemoteIp: String, establishedRemoteSequence: Long, establishedPeerWindow: Int): Boolean {
         if (connectState != ConnectWaitState.pending) return false
         handshakeAckQueued = true
         remoteIp = establishedRemoteIp
         remoteSequenceNumber = establishedRemoteSequence
+        peerWindowSize = establishedPeerWindow
         connectState = ConnectWaitState.established
         cancelScheduledTasks()
         connectLatch.countDown()
+        monitorNotifyAll()
         return true
     }
 
@@ -1431,16 +1653,186 @@ private class TcpSessionRuntime(
     }
 
     @Synchronized
-    fun acknowledgeOutbound(acknowledgementNumber: Long): Int {
+    fun acknowledgeOutbound(acknowledgementNumber: Long, advertisedWindowSize: Int): TcpAckUpdate {
+        val previousAvailable = sendCreditLocked()
+        val previousWindow = peerWindowSize
+        val previousHighestAck = highestOutboundAcknowledgement
+        peerWindowSize = advertisedWindowSize
+        if (peerWindowSize > 0) cancelPersistProbeLocked()
         highestOutboundAcknowledgement = maxOf(highestOutboundAcknowledgement, acknowledgementNumber)
-        if (outstandingSegments.isEmpty()) return 0
+        var fastRetransmitStartSequence: Long? = null
+        if (outstandingSegments.isEmpty()) {
+            val available = sendCreditLocked()
+            if (available > previousAvailable) monitorNotifyAll()
+            return TcpAckUpdate(
+                acknowledgedSegments = 0,
+                outstandingBytes = outstandingBytesLocked(),
+                windowChanged = previousWindow != peerWindowSize,
+                sendResumed = previousAvailable <= 0 && available > 0,
+                fastRetransmitStartSequence = null,
+            )
+        }
         val acknowledged = outstandingSegments.values.filter { it.endSequence <= acknowledgementNumber }
-        if (acknowledged.isEmpty()) return 0
+        val now = System.currentTimeMillis()
         for (segment in acknowledged) {
             segment.retransmitTask?.cancel(true)
+            if (!segment.retransmitted) {
+                updateRtoLocked((now - segment.firstSentAtMs).coerceAtLeast(1L))
+            }
             outstandingSegments.remove(segment.startSequence)
         }
-        return acknowledged.size
+        if (acknowledgementNumber > previousHighestAck) {
+            duplicateAckNumber = acknowledgementNumber
+            duplicateAckCount = 0
+        } else if (acknowledgementNumber == previousHighestAck && acknowledged.isEmpty()) {
+            if (duplicateAckNumber == acknowledgementNumber) {
+                duplicateAckCount += 1
+            } else {
+                duplicateAckNumber = acknowledgementNumber
+                duplicateAckCount = 1
+            }
+            if (duplicateAckCount == DUPLICATE_ACKS_FOR_FAST_RETRANSMIT) {
+                fastRetransmitStartSequence = outstandingSegments.keys.firstOrNull()
+            }
+        }
+        val available = sendCreditLocked()
+        if (acknowledged.isNotEmpty() || available > previousAvailable) monitorNotifyAll()
+        return TcpAckUpdate(
+            acknowledgedSegments = acknowledged.size,
+            outstandingBytes = outstandingBytesLocked(),
+            windowChanged = previousWindow != peerWindowSize,
+            sendResumed = previousAvailable <= 0 && available > 0,
+            fastRetransmitStartSequence = fastRetransmitStartSequence,
+        )
+    }
+
+    @Synchronized
+    fun awaitSendCredit(timeoutMs: Long): Int {
+        val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(1L)
+        while (connectState == ConnectWaitState.established && sessionWaitState == SessionWaitState.pending) {
+            val credit = sendCreditLocked()
+            if (credit > 0) return credit.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            val remaining = deadline - System.currentTimeMillis()
+            if (remaining <= 0L) return 0
+            try {
+                monitorWait(remaining)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                signalRuntimeFailure("Proxy session interrupted while waiting for TCP send window.")
+                return 0
+            }
+        }
+        return 0
+    }
+
+    @Synchronized
+    fun currentSendCredit(): Int = sendCreditLocked().coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+
+    @Synchronized
+    fun consumeAlreadyAcknowledgedPending(maxBytes: Int): Int {
+        val acknowledged = (highestOutboundAcknowledgement - nextSendSequenceNumber).coerceAtLeast(0L)
+        val consumed = acknowledged.coerceAtMost(maxBytes.toLong()).toInt()
+        if (consumed > 0) {
+            nextSendSequenceNumber += consumed
+        }
+        return consumed
+    }
+
+    @Synchronized
+    fun outstandingBytes(): Long = outstandingBytesLocked()
+
+    @Synchronized
+    fun peerWindowSize(): Int = peerWindowSize
+
+    @Synchronized
+    fun currentRtoMs(): Long = rtoMs
+
+    @Synchronized
+    fun markOutstandingRetransmitted(startSequence: Long): Int {
+        val segment = outstandingSegments[startSequence] ?: return 0
+        segment.retransmitTask?.cancel(true)
+        segment.retransmitted = true
+        segment.retransmitAttempts += 1
+        segment.lastSentAtMs = System.currentTimeMillis()
+        return segment.retransmitAttempts
+    }
+
+    @Synchronized
+    fun preparePersistProbeDelay(): Long? {
+        if (connectState != ConnectWaitState.established || sessionWaitState != SessionWaitState.pending) return null
+        if (peerWindowSize > 0 || persistProbeTask != null) return null
+        return persistProbeDelaysMs[persistProbeDelayIndex.coerceAtMost(persistProbeDelaysMs.lastIndex)]
+    }
+
+    @Synchronized
+    fun attachPersistProbe(task: ScheduledFuture<*>) {
+        if (peerWindowSize > 0 || connectState != ConnectWaitState.established || sessionWaitState != SessionWaitState.pending) {
+            task.cancel(true)
+            return
+        }
+        persistProbeTask = task
+    }
+
+    @Synchronized
+    fun markPersistProbeSent() {
+        persistProbeTask = null
+        if (persistProbeDelayIndex < persistProbeDelaysMs.lastIndex) {
+            persistProbeDelayIndex += 1
+        }
+    }
+
+    @Synchronized
+    fun cancelPersistProbe() {
+        cancelPersistProbeLocked()
+    }
+
+    @Synchronized
+    fun bufferOutOfOrderInbound(sequenceNumber: Long, payload: ByteArray, fin: Boolean): Boolean {
+        val segment = InboundTcpSegment(sequenceNumber, payload, fin)
+        if (segment.sequenceEnd <= remoteSequenceNumber) return true
+        if (outOfOrderInboundSegments.containsKey(sequenceNumber)) return true
+        if (bufferedInboundBytes + segment.bufferedSize > inboundReorderLimitBytes) return false
+        outOfOrderInboundSegments[sequenceNumber] = segment
+        bufferedInboundBytes += segment.bufferedSize
+        return true
+    }
+
+    @Synchronized
+    fun peekContiguousBufferedInbound(): InboundTcpSegment? =
+        outOfOrderInboundSegments[remoteSequenceNumber]
+
+    @Synchronized
+    fun removeBufferedInbound(sequenceNumber: Long) {
+        val removed = outOfOrderInboundSegments.remove(sequenceNumber) ?: return
+        bufferedInboundBytes = (bufferedInboundBytes - removed.bufferedSize).coerceAtLeast(0)
+    }
+
+    @Synchronized
+    fun bufferedInboundBytes(): Int = bufferedInboundBytes
+
+    private fun sendCreditLocked(): Long =
+        (peerWindowSize.toLong() - outstandingBytesLocked()).coerceAtLeast(0L)
+
+    private fun outstandingBytesLocked(): Long =
+        outstandingSegments.values.sumOf { it.endSequence - it.startSequence }
+
+    private fun updateRtoLocked(sampleMs: Long) {
+        val currentSrtt = srttMs
+        if (currentSrtt == null) {
+            srttMs = sampleMs
+            rttvarMs = (sampleMs / 2).coerceAtLeast(1L)
+        } else {
+            val delta = kotlin.math.abs(currentSrtt - sampleMs)
+            rttvarMs = ((3 * rttvarMs + delta) / 4).coerceAtLeast(1L)
+            srttMs = ((7 * currentSrtt + sampleMs) / 8).coerceAtLeast(1L)
+        }
+        rtoMs = (srttMs!! + 4 * rttvarMs).coerceIn(MIN_TCP_RTO_MS, MAX_TCP_RTO_MS)
+    }
+
+    private fun cancelPersistProbeLocked() {
+        persistProbeTask?.cancel(true)
+        persistProbeTask = null
+        persistProbeDelayIndex = 0
     }
 
     @Synchronized
@@ -1450,6 +1842,7 @@ private class TcpSessionRuntime(
         connectState = ConnectWaitState.failed
         cancelScheduledTasks()
         connectLatch.countDown()
+        monitorNotifyAll()
     }
 
     @Synchronized
@@ -1506,6 +1899,7 @@ private class TcpSessionRuntime(
             cancelScheduledTasks()
             connectLatch.countDown()
         }
+        monitorNotifyAll()
         if (sessionWaitState != SessionWaitState.pending) return
         cancelOutstandingSegments()
         terminalFailureMessage = message
@@ -1535,7 +1929,10 @@ private class TcpSessionRuntime(
             task.cancel(true)
         }
         scheduledTasks.clear()
+        cancelPersistProbeLocked()
         cancelOutstandingSegments()
+        outOfOrderInboundSegments.clear()
+        bufferedInboundBytes = 0
     }
 
     @Synchronized
@@ -1544,6 +1941,17 @@ private class TcpSessionRuntime(
             segment.retransmitTask?.cancel(true)
         }
         outstandingSegments.clear()
+        monitorNotifyAll()
+    }
+
+    private fun monitorWait(timeoutMs: Long) {
+        @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
+        (this as java.lang.Object).wait(timeoutMs)
+    }
+
+    private fun monitorNotifyAll() {
+        @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
+        (this as java.lang.Object).notifyAll()
     }
 }
 
@@ -1621,14 +2029,67 @@ private class UdpAssociationRuntime(
 
 private class ClientAttachment(
     client: ProxyClientConnection,
+    private val receiveWindowBytes: Int,
+    private val onWriteFailure: (String) -> Unit,
+    private val onWindowDrained: () -> Unit,
 ) {
     private val socket = client.socket
     private val output: OutputStream = client.output
+    private val closed = AtomicBoolean(false)
+    private val queue = LinkedBlockingQueue<ByteArray>()
+    private val queuedBytes = AtomicInteger(0)
+    private val writer =
+        Thread(
+            {
+                runWriter()
+            },
+            "proxy-client-writer",
+        ).apply {
+            isDaemon = true
+            start()
+        }
 
-    @Synchronized
-    fun write(bytes: ByteArray) {
-        output.write(bytes)
-        output.flush()
+    fun enqueue(bytes: ByteArray): Boolean {
+        if (closed.get()) return false
+        while (true) {
+            val current = queuedBytes.get()
+            if (current + bytes.size > receiveWindowBytes) return false
+            if (queuedBytes.compareAndSet(current, current + bytes.size)) break
+        }
+        if (!queue.offer(bytes)) {
+            queuedBytes.addAndGet(-bytes.size)
+            return false
+        }
+        return true
+    }
+
+    fun advertisedWindow(): Int = (receiveWindowBytes - queuedBytes.get()).coerceIn(0, receiveWindowBytes)
+
+    fun queuedBytes(): Int = queuedBytes.get()
+
+    private fun runWriter() {
+        try {
+            while (!closed.get()) {
+                val bytes =
+                    try {
+                        queue.take()
+                    } catch (_: InterruptedException) {
+                        if (closed.get()) return
+                        continue
+                    }
+                val before = queuedBytes.get()
+                output.write(bytes)
+                output.flush()
+                val after = queuedBytes.addAndGet(-bytes.size).coerceAtLeast(0)
+                if (before == receiveWindowBytes || (before > receiveWindowBytes / 2 && after <= receiveWindowBytes / 2)) {
+                    onWindowDrained()
+                }
+            }
+        } catch (e: IOException) {
+            if (!closed.get()) {
+                onWriteFailure(e.message ?: "Failed writing inbound payload to client")
+            }
+        }
     }
 
     fun shutdownOutput() {
@@ -1639,6 +2100,10 @@ private class ClientAttachment(
     }
 
     fun close() {
+        closed.set(true)
+        writer.interrupt()
+        queue.clear()
+        queuedBytes.set(0)
         try {
             socket.close()
         } catch (_: IOException) {

@@ -363,6 +363,28 @@ class UserspaceTunnelStackTest {
     }
 
     @Test
+    fun tcpPacketBuilderAndParserPreserveAdvertisedWindow() {
+        val packet =
+            TcpPacketBuilder.buildIpv4TcpPacket(
+                sourceIp = "10.0.0.2",
+                destinationIp = "93.184.216.34",
+                sourcePort = 40000,
+                destinationPort = 443,
+                sequenceNumber = 10,
+                acknowledgementNumber = 20,
+                flags = TcpPacketBuilder.TCP_FLAG_ACK,
+                windowSize = 1234,
+                payload = "x".toByteArray(),
+            )
+
+        val ipv4 = IpPacketParser.parseIpv4(packet)!!
+        val tcp = IpPacketParser.parseTcp(packet, ipv4)!!
+
+        assertEquals(1234, tcp.windowSize)
+        assertEquals(1, tcp.payloadLength)
+    }
+
+    @Test
     fun tcpSourcePortAllocationWrapsAndReusesOnlyAfterClose() {
         val backend = CapturingBackend()
         val stack = BridgeUserspaceTunnelStack(bridge = ProxyPacketBridge(backend = backend), clientIpv4 = "10.0.0.2", logger = { _, _ -> })
@@ -736,7 +758,7 @@ class UserspaceTunnelStackTest {
             pumpThread.join(1000)
         }
 
-        assertEquals(4, backend.outboundPackets.size)
+        waitForOutboundCount(backend, 3)
         val dataPacket = backend.outboundPackets[2]
         val dataIpv4 = IpPacketParser.parseIpv4(dataPacket)!!
         val dataTcp = IpPacketParser.parseTcp(dataPacket, dataIpv4)!!
@@ -744,11 +766,236 @@ class UserspaceTunnelStackTest {
         assertEquals(101, dataTcp.acknowledgementNumber)
         assertEquals(5, dataTcp.payloadLength)
         assertEquals("hello", dataPacket.copyOfRange(dataTcp.payloadOffset, dataTcp.payloadOffset + dataTcp.payloadLength).toString(Charsets.UTF_8))
-        val finPacket = backend.outboundPackets.last()
+        val finPacket =
+            waitForOutboundTcpPacket(backend) { tcp ->
+                tcp.flags == (TcpPacketBuilder.TCP_FLAG_ACK or TcpPacketBuilder.TCP_FLAG_FIN)
+            }
         val finIpv4 = IpPacketParser.parseIpv4(finPacket)!!
         val finTcp = IpPacketParser.parseTcp(finPacket, finIpv4)!!
         assertEquals(TcpPacketBuilder.TCP_FLAG_ACK or TcpPacketBuilder.TCP_FLAG_FIN, finTcp.flags)
         assertEquals(101, finTcp.acknowledgementNumber)
+
+        session.close()
+        stack.stop()
+    }
+
+    @Test
+    fun activeSessionRespectsPeerReceiveWindowAndResumesAfterAck() {
+        val backend = CapturingBackend()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, _ -> },
+                tcpFinDrainTimeoutMs = 50,
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val session = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        establishSession(stack, backend, windowSize = 3)
+
+        ServerSocket(0).use { server ->
+            val pumpDone = CountDownLatch(1)
+            val pumpThread =
+                Thread {
+                    try {
+                        server.accept().use { accepted ->
+                            session.pumpBidirectional(accepted.asProxyClientConnection())
+                        }
+                    } finally {
+                        pumpDone.countDown()
+                    }
+                }
+            pumpThread.start()
+            Socket("127.0.0.1", server.localPort).use { peer ->
+                peer.getOutputStream().write("hello".toByteArray())
+                peer.getOutputStream().flush()
+
+                waitForOutboundCount(backend, 3)
+                val firstDataPacket = backend.outboundPackets[2]
+                val firstDataIpv4 = IpPacketParser.parseIpv4(firstDataPacket)!!
+                val firstDataTcp = IpPacketParser.parseTcp(firstDataPacket, firstDataIpv4)!!
+                assertEquals(TcpPacketBuilder.TCP_FLAG_ACK or TcpPacketBuilder.TCP_FLAG_PSH, firstDataTcp.flags)
+                assertEquals(3, firstDataTcp.payloadLength)
+                assertEquals(
+                    "hel",
+                    firstDataPacket.copyOfRange(firstDataTcp.payloadOffset, firstDataTcp.payloadOffset + firstDataTcp.payloadLength)
+                        .toString(Charsets.UTF_8),
+                )
+                Thread.sleep(75)
+                assertEquals(3, backend.outboundPackets.size)
+
+                stack.processInboundPacketForTesting(
+                    TcpPacketBuilder.buildIpv4TcpPacket(
+                        sourceIp = "93.184.216.34",
+                        destinationIp = "10.0.0.2",
+                        sourcePort = 443,
+                        destinationPort = sessionLocalPort(backend),
+                        sequenceNumber = 101,
+                        acknowledgementNumber = firstDataTcp.sequenceNumber + firstDataTcp.payloadLength,
+                        flags = TcpPacketBuilder.TCP_FLAG_ACK,
+                        windowSize = 2,
+                    ),
+                )
+
+                waitForOutboundCount(backend, 4)
+                val secondDataPacket = backend.outboundPackets[3]
+                val secondDataIpv4 = IpPacketParser.parseIpv4(secondDataPacket)!!
+                val secondDataTcp = IpPacketParser.parseTcp(secondDataPacket, secondDataIpv4)!!
+                assertEquals(TcpPacketBuilder.TCP_FLAG_ACK or TcpPacketBuilder.TCP_FLAG_PSH, secondDataTcp.flags)
+                assertEquals(2, secondDataTcp.payloadLength)
+                assertEquals(
+                    "lo",
+                    secondDataPacket.copyOfRange(secondDataTcp.payloadOffset, secondDataTcp.payloadOffset + secondDataTcp.payloadLength)
+                        .toString(Charsets.UTF_8),
+                )
+
+                peer.shutdownOutput()
+                waitForOutboundCount(backend, 5)
+            }
+            assertTrue(pumpDone.await(1, TimeUnit.SECONDS))
+        }
+
+        session.close()
+        stack.stop()
+    }
+
+    @Test
+    fun zeroWindowSessionSendsPersistProbeAndResumesWhenWindowOpens() {
+        val backend = CapturingBackend()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, _ -> },
+                tcpPersistProbeDelaysMs = listOf(20L),
+                tcpFinDrainTimeoutMs = 50,
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val session = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        establishSession(stack, backend, windowSize = 0)
+
+        ServerSocket(0).use { server ->
+            val pumpDone = CountDownLatch(1)
+            val pumpThread =
+                Thread {
+                    try {
+                        server.accept().use { accepted ->
+                            session.pumpBidirectional(accepted.asProxyClientConnection())
+                        }
+                    } finally {
+                        pumpDone.countDown()
+                    }
+                }
+            pumpThread.start()
+            Socket("127.0.0.1", server.localPort).use { peer ->
+                peer.getOutputStream().write("hi".toByteArray())
+                peer.getOutputStream().flush()
+
+                waitForOutboundCount(backend, 3)
+                val probePacket = backend.outboundPackets[2]
+                val probeIpv4 = IpPacketParser.parseIpv4(probePacket)!!
+                val probeTcp = IpPacketParser.parseTcp(probePacket, probeIpv4)!!
+                assertEquals(TcpPacketBuilder.TCP_FLAG_ACK or TcpPacketBuilder.TCP_FLAG_PSH, probeTcp.flags)
+                assertEquals(1, probeTcp.payloadLength)
+                assertEquals("h", probePacket.copyOfRange(probeTcp.payloadOffset, probeTcp.payloadOffset + probeTcp.payloadLength).toString(Charsets.UTF_8))
+
+                stack.processInboundPacketForTesting(
+                    TcpPacketBuilder.buildIpv4TcpPacket(
+                        sourceIp = "93.184.216.34",
+                        destinationIp = "10.0.0.2",
+                        sourcePort = 443,
+                        destinationPort = sessionLocalPort(backend),
+                        sequenceNumber = 101,
+                        acknowledgementNumber = probeTcp.sequenceNumber,
+                        flags = TcpPacketBuilder.TCP_FLAG_ACK,
+                        windowSize = 2,
+                    ),
+                )
+
+                waitForOutboundCount(backend, 4)
+                val dataPacket = backend.outboundPackets[3]
+                val dataIpv4 = IpPacketParser.parseIpv4(dataPacket)!!
+                val dataTcp = IpPacketParser.parseTcp(dataPacket, dataIpv4)!!
+                assertEquals(2, dataTcp.payloadLength)
+                assertEquals("hi", dataPacket.copyOfRange(dataTcp.payloadOffset, dataTcp.payloadOffset + dataTcp.payloadLength).toString(Charsets.UTF_8))
+                Thread.sleep(50)
+                assertEquals(4, backend.outboundPackets.size)
+
+                peer.shutdownOutput()
+                waitForOutboundCount(backend, 5)
+            }
+            assertTrue(pumpDone.await(1, TimeUnit.SECONDS))
+        }
+
+        session.close()
+        stack.stop()
+    }
+
+    @Test
+    fun duplicateAcksTriggerFastRetransmitBeforeRto() {
+        val backend = CapturingBackend()
+        val stack =
+            BridgeUserspaceTunnelStack(
+                bridge = ProxyPacketBridge(backend = backend),
+                clientIpv4 = "10.0.0.2",
+                logger = { _, _ -> },
+                tcpFinDrainTimeoutMs = 50,
+            )
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val session = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        establishSession(stack, backend, windowSize = 10)
+
+        ServerSocket(0).use { server ->
+            val pumpDone = CountDownLatch(1)
+            val pumpThread =
+                Thread {
+                    try {
+                        server.accept().use { accepted ->
+                            session.pumpBidirectional(accepted.asProxyClientConnection())
+                        }
+                    } finally {
+                        pumpDone.countDown()
+                    }
+                }
+            pumpThread.start()
+            Socket("127.0.0.1", server.localPort).use { peer ->
+                peer.getOutputStream().write("hello".toByteArray())
+                peer.getOutputStream().flush()
+
+                waitForOutboundCount(backend, 3)
+                val dataPacket = backend.outboundPackets[2]
+                val dataIpv4 = IpPacketParser.parseIpv4(dataPacket)!!
+                val dataTcp = IpPacketParser.parseTcp(dataPacket, dataIpv4)!!
+                repeat(3) {
+                    stack.processInboundPacketForTesting(
+                        TcpPacketBuilder.buildIpv4TcpPacket(
+                            sourceIp = "93.184.216.34",
+                            destinationIp = "10.0.0.2",
+                            sourcePort = 443,
+                            destinationPort = sessionLocalPort(backend),
+                            sequenceNumber = 101,
+                            acknowledgementNumber = dataTcp.sequenceNumber,
+                            flags = TcpPacketBuilder.TCP_FLAG_ACK,
+                            windowSize = 10,
+                        ),
+                    )
+                }
+
+                waitForOutboundCount(backend, 4)
+                val retransmitPacket = backend.outboundPackets[3]
+                val retransmitIpv4 = IpPacketParser.parseIpv4(retransmitPacket)!!
+                val retransmitTcp = IpPacketParser.parseTcp(retransmitPacket, retransmitIpv4)!!
+                assertEquals(dataTcp.sequenceNumber, retransmitTcp.sequenceNumber)
+                assertEquals(5, retransmitTcp.payloadLength)
+
+                peer.shutdownOutput()
+                waitForOutboundCount(backend, 5)
+            }
+            assertTrue(pumpDone.await(1, TimeUnit.SECONDS))
+        }
 
         session.close()
         stack.stop()
@@ -973,7 +1220,7 @@ class UserspaceTunnelStackTest {
     }
 
     @Test
-    fun outOfOrderInboundPayloadIsIgnoredAndReAcked() {
+    fun outOfOrderInboundPayloadIsBufferedAndDeliveredAfterGap() {
         val backend = CapturingBackend()
         val stack = BridgeUserspaceTunnelStack(bridge = ProxyPacketBridge(backend = backend), clientIpv4 = "10.0.0.2", logger = { _, _ -> })
         assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
@@ -993,16 +1240,48 @@ class UserspaceTunnelStackTest {
                 payload = "later".toByteArray(),
             )
 
-        val before = backend.outboundPackets.size
-        stack.processInboundPacketForTesting(outOfOrderPacket)
+        ServerSocket(0).use { server ->
+            val thread =
+                Thread {
+                    server.accept().use { accepted ->
+                        session.pumpBidirectional(accepted.asProxyClientConnection())
+                    }
+                }
+            thread.start()
+            Socket("127.0.0.1", server.localPort).use { peer ->
+                peer.soTimeout = 500
+                val before = backend.outboundPackets.size
+                stack.processInboundPacketForTesting(outOfOrderPacket)
 
-        assertEquals(before + 1, backend.outboundPackets.size)
-        assertTrue(stack.sessionSnapshots().single().lastEvent.contains("Ignored out-of-order inbound TCP payload"))
-        val reAckPacket = backend.outboundPackets.last()
-        val reAckIpv4 = IpPacketParser.parseIpv4(reAckPacket)!!
-        val reAckTcp = IpPacketParser.parseTcp(reAckPacket, reAckIpv4)!!
-        assertEquals(TcpPacketBuilder.TCP_FLAG_ACK, reAckTcp.flags)
-        assertEquals(101, reAckTcp.acknowledgementNumber)
+                assertEquals(before + 1, backend.outboundPackets.size)
+                assertTrue(stack.sessionSnapshots().single().lastEvent.contains("Buffered out-of-order inbound TCP"))
+                val reAckPacket = backend.outboundPackets.last()
+                val reAckIpv4 = IpPacketParser.parseIpv4(reAckPacket)!!
+                val reAckTcp = IpPacketParser.parseTcp(reAckPacket, reAckIpv4)!!
+                assertEquals(TcpPacketBuilder.TCP_FLAG_ACK, reAckTcp.flags)
+                assertEquals(101, reAckTcp.acknowledgementNumber)
+
+                stack.processInboundPacketForTesting(
+                    TcpPacketBuilder.buildIpv4TcpPacket(
+                        sourceIp = "93.184.216.34",
+                        destinationIp = "10.0.0.2",
+                        sourcePort = 443,
+                        destinationPort = sessionLocalPort(backend),
+                        sequenceNumber = 101,
+                        acknowledgementNumber = sessionInitialAck(backend),
+                        flags = TcpPacketBuilder.TCP_FLAG_ACK,
+                        payload = "hello".toByteArray(),
+                    ),
+                )
+                assertEquals("hellolater", String(peer.getInputStream().readNBytes(10), Charsets.UTF_8))
+                val finalAckPacket = backend.outboundPackets.last()
+                val finalAckIpv4 = IpPacketParser.parseIpv4(finalAckPacket)!!
+                val finalAckTcp = IpPacketParser.parseTcp(finalAckPacket, finalAckIpv4)!!
+                assertEquals(111, finalAckTcp.acknowledgementNumber)
+                peer.shutdownOutput()
+            }
+            thread.join(1000)
+        }
         session.close()
         stack.stop()
     }
@@ -1848,7 +2127,7 @@ class UserspaceTunnelStackTest {
         stack.stop()
     }
 
-    private fun establishSession(stack: BridgeUserspaceTunnelStack, backend: CapturingBackend) {
+    private fun establishSession(stack: BridgeUserspaceTunnelStack, backend: CapturingBackend, windowSize: Int = 65535) {
         val synPacket = backend.outboundPackets.first()
         val synIpv4 = IpPacketParser.parseIpv4(synPacket)!!
         val synTcp = IpPacketParser.parseTcp(synPacket, synIpv4)!!
@@ -1861,6 +2140,7 @@ class UserspaceTunnelStackTest {
                 sequenceNumber = 100,
                 acknowledgementNumber = synTcp.sequenceNumber + 1,
                 flags = TcpPacketBuilder.TCP_FLAG_SYN or TcpPacketBuilder.TCP_FLAG_ACK,
+                windowSize = windowSize,
             ),
         )
     }
@@ -1881,6 +2161,18 @@ class UserspaceTunnelStackTest {
             Thread.sleep(25)
         }
         throw AssertionError("Timed out waiting for $count outbound packets; saw ${backend.outboundPackets.size}")
+    }
+
+    private fun waitForOutboundTcpPacket(backend: CapturingBackend, predicate: (ParsedTcpSegment) -> Boolean): ByteArray {
+        repeat(40) {
+            backend.outboundPackets.firstOrNull { packet ->
+                val ipv4 = IpPacketParser.parseIpv4(packet) ?: return@firstOrNull false
+                val tcp = IpPacketParser.parseTcp(packet, ipv4) ?: return@firstOrNull false
+                predicate(tcp)
+            }?.let { return it }
+            Thread.sleep(25)
+        }
+        throw AssertionError("Timed out waiting for matching outbound TCP packet; saw ${backend.outboundPackets.size}")
     }
 
     private fun buildDnsResponsePacket(

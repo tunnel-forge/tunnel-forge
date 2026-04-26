@@ -16,6 +16,7 @@ data class ParsedTcpSegment(
     val sequenceNumber: Long,
     val acknowledgementNumber: Long,
     val flags: Int,
+    val windowSize: Int,
     val headerLength: Int,
     val payloadOffset: Int,
     val payloadLength: Int,
@@ -76,6 +77,7 @@ object IpPacketParser {
         val headerLength = ((packet[base + 12].toInt() ushr 4) and 0x0f) * 4
         if (headerLength < 20 || packet.size < base + headerLength) return null
         val flags = packet[base + 13].toInt() and 0xff
+        val windowSize = ((packet[base + 14].toInt() and 0xff) shl 8) or (packet[base + 15].toInt() and 0xff)
         val payloadOffset = base + headerLength
         val payloadLength = ipv4.totalLength - ipv4.payloadOffset - headerLength
         return ParsedTcpSegment(
@@ -84,6 +86,7 @@ object IpPacketParser {
             sequenceNumber = sequenceNumber,
             acknowledgementNumber = acknowledgementNumber,
             flags = flags,
+            windowSize = windowSize,
             headerLength = headerLength,
             payloadOffset = payloadOffset,
             payloadLength = if (payloadLength >= 0) payloadLength else 0,

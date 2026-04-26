@@ -18,6 +18,7 @@ object TcpPacketBuilder {
         acknowledgementNumber: Long = 0,
         flags: Int,
         mss: Int? = null,
+        windowSize: Int = DEFAULT_WINDOW_SIZE,
         payload: ByteArray = byteArrayOf(),
     ): ByteArray {
         val source = InetAddress.getByName(sourceIp).address
@@ -25,6 +26,7 @@ object TcpPacketBuilder {
         require(source.size == 4 && destination.size == 4) { "Only IPv4 is supported" }
         require(sourcePort in 1..65535 && destinationPort in 1..65535) { "Invalid TCP port" }
         require(mss == null || mss in 1..0xffff) { "Invalid TCP MSS" }
+        require(windowSize in 0..0xffff) { "Invalid TCP window size" }
 
         val ipHeaderLen = 20
         val tcpOptions = if (mss != null) byteArrayOf(0x02, 0x04, ((mss ushr 8) and 0xff).toByte(), (mss and 0xff).toByte()) else byteArrayOf()
@@ -50,7 +52,7 @@ object TcpPacketBuilder {
         writeUint32(packet, tcpOffset + 8, acknowledgementNumber)
         packet[tcpOffset + 12] = ((tcpHeaderLen / 4) shl 4).toByte()
         packet[tcpOffset + 13] = flags.toByte()
-        writeUint16(packet, tcpOffset + 14, 65535)
+        writeUint16(packet, tcpOffset + 14, windowSize)
         writeUint16(packet, tcpOffset + 16, 0)
         writeUint16(packet, tcpOffset + 18, 0)
         if (tcpOptions.isNotEmpty()) {
@@ -102,4 +104,6 @@ object TcpPacketBuilder {
         buf[offset + 2] = ((value ushr 8) and 0xff).toByte()
         buf[offset + 3] = (value and 0xff).toByte()
     }
+
+    private const val DEFAULT_WINDOW_SIZE = 65535
 }
