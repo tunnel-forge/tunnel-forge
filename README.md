@@ -45,6 +45,14 @@
 Tunnel Forge is an Android-focused Flutter project for L2TP/IPsec connections. The UI is written
 in Flutter, while the tunnel and proxy pieces live in the Android layer.
 
+## Why
+
+Android no longer includes built-in support for L2TP/IPsec with IKEv1. That left some existing VPN setups without a simple way to connect from newer devices.
+
+Tunnel Forge was made for those cases: older networks, routers, labs, and systems that still depend on L2TP/IPsec and cannot be replaced right away.
+
+It keeps those connections usable without changing the whole VPN setup.
+
 ## Highlights
 
 - L2TP/IPsec (IKEv1) client flow
