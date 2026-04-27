@@ -46,5 +46,14 @@ object VpnBridge {
     external fun nativeReadProxyInboundPacket(maxLen: Int): ByteArray?
 
     @JvmStatic
+    external fun nativeSetVpnDnsInterceptIpv4(ipv4: String?): Int
+
+    @JvmStatic
+    external fun nativeReadVpnDnsQuery(maxLen: Int): ByteArray?
+
+    @JvmStatic
+    external fun nativeQueueVpnDnsResponse(packet: ByteArray): Int
+
+    @JvmStatic
     external fun nativeStopTunnel()
 }

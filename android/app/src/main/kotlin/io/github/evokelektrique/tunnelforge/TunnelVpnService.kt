@@ -17,8 +17,11 @@ import android.os.ParcelFileDescriptor
 import android.system.OsConstants
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import java.io.IOException
+import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.InetAddress
+import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Foreground [VpnService]: TUN, notification, native tunnel thread. */
@@ -41,7 +44,7 @@ class TunnelVpnService : VpnService() {
     private var tunInterface: ParcelFileDescriptor? = null
     private var setupThread: Thread? = null
     private var engineThread: Thread? = null
-    private var localDnsServer: LocalDnsServer? = null
+    private var vpnDnsPacketBridge: VpnDnsPacketBridge? = null
     private var localProxyRuntime: ProxyServerRuntime? = null
     private var activeAttemptId: String = ""
     private var activeProxyConfig: ProxyRuntimeConfig? = null
@@ -179,7 +182,7 @@ class TunnelVpnService : VpnService() {
                         hasSetupThread = setupThread != null,
                         hasEngineThread = engineThread != null,
                         hasTunInterface = tunInterface != null,
-                        hasDnsServer = localDnsServer != null,
+                        hasDnsServer = vpnDnsPacketBridge != null,
                         hasLocalProxyRuntime = localProxyRuntime != null,
                     )
                 ) {
@@ -245,7 +248,7 @@ class TunnelVpnService : VpnService() {
             hasSetupThread = setupThread != null,
             hasEngineThread = engineThread != null,
             hasTunInterface = tunInterface != null,
-            hasDnsServer = localDnsServer != null,
+            hasDnsServer = vpnDnsPacketBridge != null,
             hasLocalProxyRuntime = localProxyRuntime != null,
         )
 
@@ -444,31 +447,53 @@ class TunnelVpnService : VpnService() {
                 return
             }
             if (!dnsAutomatic) {
-                localDnsServer =
-                    LocalDnsServer(
+                val dnsLogger = { level: Int, message: String ->
+                    VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
+                }
+                vpnDnsPacketBridge =
+                    VpnDnsPacketBridge(
+                        virtualDnsIpv4 = MANUAL_DNS_VIRTUAL_IPV4,
                         exchangeClient =
                             DirectDnsExchangeClient(
                                 servers = manualDnsServers,
-                                logger = { level, message ->
-                                    VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
-                                },
+                                logger = dnsLogger,
+                                socketProtector = serviceDnsSocketProtector(),
                             ),
-                        logger = { level, message ->
-                            VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
-                        },
+                        logger = dnsLogger,
                     ).also { it.start() }
+                val interceptRc = VpnBridge.nativeSetVpnDnsInterceptIpv4(MANUAL_DNS_VIRTUAL_IPV4)
+                if (interceptRc != 0) {
+                    try {
+                        vpnDnsPacketBridge?.close()
+                    } catch (_: Exception) {
+                    }
+                    vpnDnsPacketBridge = null
+                    val message = "Manual DNS intercept setup failed."
+                    emitAttemptState(attemptId, VpnContract.TUNNEL_FAILED, message)
+                    VpnTunnelEvents.emitEngineLog(
+                        Log.ERROR,
+                        TAG,
+                        "${prefixAttempt(attemptId)}manual DNS intercept setup failed rc=$interceptRc",
+                    )
+                    running.set(false)
+                    stopServiceForAttempt(attemptId)
+                    return
+                }
+                VpnTunnelEvents.emitEngineLog(
+                    Log.INFO,
+                    TAG,
+                    "${prefixAttempt(attemptId)}Manual DNS upstream sockets are protected and routed outside the VPN to avoid DNS routing loops.",
+                )
+            } else {
+                VpnBridge.nativeSetVpnDnsInterceptIpv4(null)
             }
             val builder = Builder()
                 .setSession(getString(R.string.vpn_session_name))
                 .setMtu(tunMtu)
                 .addAddress(addressForTun, 32)
                 .addRoute("0.0.0.0", 0)
-            if (dnsAutomatic) {
-                for (dnsServer in automaticDnsServers.map { it.resolvedIpv4 }) {
-                    builder.addDnsServer(dnsServer)
-                }
-            } else {
-                builder.addDnsServer(LocalDnsServer.LOCALHOST_IPV4)
+            for (dnsServer in tunDnsServersForBuilder(dnsAutomatic, automaticDnsServers)) {
+                builder.addDnsServer(dnsServer)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 builder.allowFamily(OsConstants.AF_INET)
@@ -582,10 +607,11 @@ class TunnelVpnService : VpnService() {
                 emitAttemptState(attemptId, VpnContract.TUNNEL_FAILED, e.message ?: "startTunnel failed")
                 running.set(false)
                 try {
-                    localDnsServer?.close()
+                    vpnDnsPacketBridge?.close()
                 } catch (_: Exception) {
                 }
-                localDnsServer = null
+                vpnDnsPacketBridge = null
+                VpnBridge.nativeSetVpnDnsInterceptIpv4(null)
                 try {
                     tunInterface?.close()
                 } catch (_: Exception) {
@@ -644,10 +670,11 @@ class TunnelVpnService : VpnService() {
         }
         tunInterface = null
         try {
-            localDnsServer?.close()
+            vpnDnsPacketBridge?.close()
         } catch (_: Exception) {
         }
-        localDnsServer = null
+        vpnDnsPacketBridge = null
+        VpnBridge.nativeSetVpnDnsInterceptIpv4(null)
         stopLocalProxyRuntime()
         synchronized(sessionLock) {
             activeAttemptId = ""
@@ -673,10 +700,11 @@ class TunnelVpnService : VpnService() {
         }
         tunInterface = null
         try {
-            localDnsServer?.close()
+            vpnDnsPacketBridge?.close()
         } catch (_: Exception) {
         }
-        localDnsServer = null
+        vpnDnsPacketBridge = null
+        VpnBridge.nativeSetVpnDnsInterceptIpv4(null)
         stopLocalProxyRuntime()
         try {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -771,6 +799,15 @@ class TunnelVpnService : VpnService() {
             )
         }
     }
+
+    private fun serviceDnsSocketProtector(): DnsSocketProtector =
+        object : DnsSocketProtector {
+            override fun protect(socket: Socket): Boolean =
+                this@TunnelVpnService.protect(socket)
+
+            override fun protect(socket: DatagramSocket): Boolean =
+                this@TunnelVpnService.protect(socket)
+        }
 
     private fun stopLocalProxyRuntime() {
         val config = activeProxyConfig
@@ -908,6 +945,7 @@ class TunnelVpnService : VpnService() {
         private const val MAX_TUN_MTU = 1500
 
         private const val TUN_LOCAL_IPV4 = "10.0.0.2"
+        internal const val MANUAL_DNS_VIRTUAL_IPV4 = "198.18.0.1"
         internal const val DEFAULT_NATIVE_EXIT_STOPPED = 12
 
         fun sanitizeMtu(value: Int): Int = value.coerceIn(MIN_TUN_MTU, MAX_TUN_MTU)
@@ -979,6 +1017,16 @@ class TunnelVpnService : VpnService() {
                 )
             } else {
                 emptyList()
+            }
+
+        internal fun tunDnsServersForBuilder(
+            dnsAutomatic: Boolean,
+            automaticDnsServers: List<ResolvedDnsServerConfig>,
+        ): List<String> =
+            if (dnsAutomatic) {
+                automaticDnsServers.map { it.resolvedIpv4 }
+            } else {
+                listOf(MANUAL_DNS_VIRTUAL_IPV4)
             }
 
         internal fun manualDnsServersFromIntent(intent: Intent): List<DnsServerConfig> {

@@ -88,7 +88,10 @@ static ssize_t tun_packet_read(void *ctx, uint8_t *buf, size_t len) {
 static int tun_packet_write(void *ctx, const uint8_t *buf, size_t len) {
   tun_packet_endpoint_ctx_t *tun = (tun_packet_endpoint_ctx_t *)ctx;
   if (tun == NULL || tun->fd < 0 || buf == NULL || len == 0) return -1;
-  return write(tun->fd, buf, len) == (ssize_t)len ? 0 : -1;
+  ssize_t n = write(tun->fd, buf, len);
+  if (n == (ssize_t)len) return 0;
+  if (n >= 0) errno = EIO;
+  return -1;
 }
 
 static int tun_packet_poll_fd(void *ctx) {
@@ -328,6 +331,10 @@ int packet_endpoint_proxy_enqueue_outbound(proxy_packet_queue_ctx_t *ctx, const 
   pthread_mutex_unlock(&ctx->mutex);
   if (rc != 0) return -1;
   return 0;
+}
+
+int packet_endpoint_proxy_enqueue_inbound(proxy_packet_queue_ctx_t *ctx, const uint8_t *buf, size_t len) {
+  return proxy_queue_write(ctx, buf, len);
 }
 
 ssize_t packet_endpoint_proxy_dequeue_inbound(proxy_packet_queue_ctx_t *ctx, uint8_t *buf, size_t len) {

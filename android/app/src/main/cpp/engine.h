@@ -50,6 +50,9 @@ int tunnel_proxy_is_bridge_active(void);
 int tunnel_proxy_enqueue_outbound_packet(const uint8_t *packet, size_t len);
 ssize_t tunnel_proxy_dequeue_inbound_packet(uint8_t *packet, size_t len);
 ssize_t tunnel_proxy_dequeue_inbound_packet_wait(uint8_t *packet, size_t len, int timeout_ms);
+int tunnel_vpn_dns_set_intercept_ipv4(const char *ipv4);
+ssize_t tunnel_vpn_dns_dequeue_query_wait(uint8_t *packet, size_t len, int timeout_ms);
+int tunnel_vpn_dns_write_response_packet(const uint8_t *packet, size_t len);
 int tunnel_should_stop(void);
 
 /* Do not pass secrets as format args. */

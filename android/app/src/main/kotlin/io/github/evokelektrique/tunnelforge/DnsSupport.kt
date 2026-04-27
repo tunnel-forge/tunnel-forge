@@ -17,6 +17,7 @@ import java.net.URI
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.SNIHostName
@@ -53,6 +54,7 @@ internal data class ResolvedDnsServerConfig(
     val host: String,
     val protocol: DnsProtocol,
     val resolvedIpv4: String,
+    val resolvedIpv4Candidates: List<String> = listOf(resolvedIpv4),
     val tlsHostname: String = host,
     val requestAuthority: String = host,
     val requestPath: String = DOH_PATH,
@@ -63,6 +65,9 @@ internal data class ResolvedDnsServerConfig(
 
     val dohPath: String
         get() = requestPath
+
+    val ipv4Candidates: List<String>
+        get() = resolvedIpv4Candidates.distinct().ifEmpty { listOf(resolvedIpv4) }
 }
 
 private data class ParsedDoHEndpoint(
@@ -106,7 +111,10 @@ internal object DnsConfigSupport {
     }
 
     @Throws(IOException::class)
-    fun resolveUpstreamServers(servers: List<DnsServerConfig>): List<ResolvedDnsServerConfig> {
+    fun resolveUpstreamServers(
+        servers: List<DnsServerConfig>,
+        hostnameResolver: (String) -> List<String> = ::resolveIpv4HostnameCandidates,
+    ): List<ResolvedDnsServerConfig> {
         val sanitized = sanitize(servers)
         val out = mutableListOf<ResolvedDnsServerConfig>()
         sanitized.forEach { server ->
@@ -117,12 +125,18 @@ internal object DnsConfigSupport {
                     null
                 }
             val resolveHost = dohEndpoint?.hostname ?: server.host
-            val resolvedIpv4 = resolveHost.toIpv4LiteralOrNull() ?: resolveIpv4Hostname(resolveHost)
+            val resolvedIpv4Candidates =
+                resolveHost.toIpv4LiteralOrNull()?.let { listOf(it) }
+                    ?: hostnameResolver(resolveHost).distinct()
+            val resolvedIpv4 =
+                resolvedIpv4Candidates.firstOrNull()
+                    ?: throw IOException("Could not resolve IPv4 address for ${resolveHost.trim()}")
             out.add(
                 ResolvedDnsServerConfig(
                     host = server.host,
                     protocol = server.protocol,
                     resolvedIpv4 = resolvedIpv4,
+                    resolvedIpv4Candidates = resolvedIpv4Candidates,
                     tlsHostname = dohEndpoint?.hostname ?: server.host,
                     requestAuthority = dohEndpoint?.authority ?: server.host,
                     requestPath = dohEndpoint?.requestTarget ?: DOH_PATH,
@@ -223,11 +237,23 @@ internal object DnsConfigSupport {
         )
     }
 
+    private fun resolveIpv4HostnameCandidates(host: String): List<String> {
+        val resolved =
+            InetAddress.getAllByName(host.trim())
+                .filterIsInstance<Inet4Address>()
+                .mapNotNull { it.hostAddress }
+                .distinct()
+        if (resolved.isEmpty()) {
+            throw IOException("Could not resolve IPv4 address for ${host.trim()}")
+        }
+        return resolved
+    }
+
     private fun resolveIpv4Hostname(host: String): String {
         val resolved =
-            InetAddress.getAllByName(host.trim()).firstOrNull { it is Inet4Address }
+            resolveIpv4HostnameCandidates(host).firstOrNull()
                 ?: throw IOException("Could not resolve IPv4 address for ${host.trim()}")
-        return resolved.hostAddress ?: throw IOException("Resolved empty IPv4 address for ${host.trim()}")
+        return resolved
     }
 
     private fun ipv4FromOctets(octets: IntArray?): String? {
@@ -266,10 +292,30 @@ internal interface DnsExchangeClient {
     fun exchange(query: ByteArray): ByteArray
 }
 
+internal interface DnsSocketProtector {
+    @Throws(IOException::class)
+    fun protect(socket: Socket): Boolean
+
+    @Throws(IOException::class)
+    fun protect(socket: DatagramSocket): Boolean
+
+    object None : DnsSocketProtector {
+        override fun protect(socket: Socket): Boolean = true
+
+        override fun protect(socket: DatagramSocket): Boolean = true
+    }
+}
+
 internal class DirectDnsExchangeClient(
     private val servers: List<ResolvedDnsServerConfig>,
     private val logger: (Int, String) -> Unit,
+    private val socketProtector: DnsSocketProtector = DnsSocketProtector.None,
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
 ) : DnsExchangeClient {
+    private val protectFallbackLogged = AtomicBoolean(false)
+    private val protectedRouteFailures = ConcurrentHashMap<DnsUpstreamKey, Long>()
+    private val preferredUpstreams = ConcurrentHashMap<DnsServerKey, DnsUpstreamPreference>()
+
     @Throws(IOException::class)
     override fun exchange(query: ByteArray): ByteArray {
         var lastError: IOException? = null
@@ -290,19 +336,67 @@ internal class DirectDnsExchangeClient(
 
     @Throws(IOException::class)
     private fun exchangeWithServer(query: ByteArray, server: ResolvedDnsServerConfig): ByteArray {
+        var lastError: IOException? = null
+        val candidateOrder = orderedCandidates(server)
+        for ((index, candidateIp) in candidateOrder.withIndex()) {
+            val routeOrder = orderedRoutes(server, candidateIp)
+            for (route in routeOrder) {
+                try {
+                    val response = exchangeWithCandidate(query, server, candidateIp, route)
+                    rememberSuccess(server, candidateIp, route)
+                    return response
+                } catch (e: IOException) {
+                    lastError = e
+                    val phase = e.failurePhase
+                    if (route == DnsUpstreamRoute.Protected && phase == DnsFailurePhase.Connect) {
+                        markProtectedRouteFailed(server, candidateIp)
+                    }
+                    if (route == DnsUpstreamRoute.Protected && shouldTryVpnFallback(server, e, routeOrder)) {
+                        logger(
+                            Log.WARN,
+                            "dns upstream route failed protocol=${server.protocol.wireValue} host=${server.host} ip=$candidateIp candidate=${index + 1}/${candidateOrder.size} route=protected phase=${phase.logValue} error=${e.message}; retrying route=vpn",
+                        )
+                        continue
+                    }
+                    logger(
+                        Log.WARN,
+                        "dns upstream route failed protocol=${server.protocol.wireValue} host=${server.host} ip=$candidateIp candidate=${index + 1}/${candidateOrder.size} route=${route.logValue} phase=${phase.logValue} error=${e.message}",
+                    )
+                    break
+                }
+            }
+        }
+        throw lastError ?: IOException("DNS upstream ${server.host} has no IPv4 candidates.")
+    }
+
+    @Throws(IOException::class)
+    private fun exchangeWithCandidate(
+        query: ByteArray,
+        server: ResolvedDnsServerConfig,
+        candidateIp: String,
+        route: DnsUpstreamRoute,
+    ): ByteArray {
         return when (server.protocol) {
-            DnsProtocol.dnsOverUdp -> exchangeUdp(query, server)
-            DnsProtocol.dnsOverTcp -> exchangeTcp(query, server)
-            DnsProtocol.dnsOverTls -> exchangeTls(query, server)
-            DnsProtocol.dnsOverHttps -> exchangeHttps(query, server)
+            DnsProtocol.dnsOverUdp -> exchangeUdp(query, server, candidateIp, route)
+            DnsProtocol.dnsOverTcp -> exchangeTcp(query, server, candidateIp, route)
+            DnsProtocol.dnsOverTls -> exchangeTls(query, server, candidateIp, route)
+            DnsProtocol.dnsOverHttps -> exchangeHttps(query, server, candidateIp, route)
         }
     }
 
     @Throws(IOException::class)
-    private fun exchangeUdp(query: ByteArray, server: ResolvedDnsServerConfig): ByteArray {
+    private fun exchangeUdp(
+        query: ByteArray,
+        server: ResolvedDnsServerConfig,
+        candidateIp: String,
+        route: DnsUpstreamRoute,
+    ): ByteArray {
         DatagramSocket().use { socket ->
+            if (route == DnsUpstreamRoute.Protected) {
+                protectDatagramSocket(socket, server, candidateIp)
+            }
             socket.soTimeout = DNS_READ_TIMEOUT_MS
-            socket.connect(InetSocketAddress(server.resolvedIpv4, server.port))
+            socket.connect(InetSocketAddress(candidateIp, server.port))
             socket.send(DatagramPacket(query, query.size))
             val buffer = ByteArray(MAX_DNS_PACKET_LEN)
             val packet = DatagramPacket(buffer, buffer.size)
@@ -312,29 +406,227 @@ internal class DirectDnsExchangeClient(
     }
 
     @Throws(IOException::class)
-    private fun exchangeTcp(query: ByteArray, server: ResolvedDnsServerConfig): ByteArray =
-        openPlainSocket(server).use { socket ->
-            exchangeDnsOverStream(socket.getInputStream(), socket.getOutputStream(), query)
+    private fun exchangeTcp(
+        query: ByteArray,
+        server: ResolvedDnsServerConfig,
+        candidateIp: String,
+        route: DnsUpstreamRoute,
+    ): ByteArray =
+        openPlainSocket(server, candidateIp, route).use { socket ->
+            try {
+                exchangeDnsOverStream(socket.getInputStream(), socket.getOutputStream(), query)
+            } catch (e: IOException) {
+                throw DnsUpstreamIOException(DnsFailurePhase.Exchange, "DNS-over-TCP exchange failed: ${e.message}", e)
+            }
         }
 
     @Throws(IOException::class)
-    private fun exchangeTls(query: ByteArray, server: ResolvedDnsServerConfig): ByteArray =
-        openTlsSocket(openPlainSocket(server), server).use { socket ->
-            exchangeDnsOverStream(socket.getInputStream(), socket.getOutputStream(), query)
+    private fun exchangeTls(
+        query: ByteArray,
+        server: ResolvedDnsServerConfig,
+        candidateIp: String,
+        route: DnsUpstreamRoute,
+    ): ByteArray =
+        openPlainSocket(server, candidateIp, route).use { plainSocket ->
+            openTlsSocketForExchange(plainSocket, server).use { socket ->
+                try {
+                    exchangeDnsOverStream(socket.getInputStream(), socket.getOutputStream(), query)
+                } catch (e: IOException) {
+                    throw DnsUpstreamIOException(DnsFailurePhase.Exchange, "DNS-over-TLS exchange failed: ${e.message}", e)
+                }
+            }
         }
 
     @Throws(IOException::class)
-    private fun exchangeHttps(query: ByteArray, server: ResolvedDnsServerConfig): ByteArray =
-        openTlsSocket(openPlainSocket(server), server).use { socket ->
-            exchangeDnsOverHttps(socket.getInputStream(), socket.getOutputStream(), query, server)
+    private fun exchangeHttps(
+        query: ByteArray,
+        server: ResolvedDnsServerConfig,
+        candidateIp: String,
+        route: DnsUpstreamRoute,
+    ): ByteArray =
+        openPlainSocket(server, candidateIp, route).use { plainSocket ->
+            openTlsSocketForExchange(plainSocket, server).use { socket ->
+                try {
+                    exchangeDnsOverHttps(socket.getInputStream(), socket.getOutputStream(), query, server)
+                } catch (e: IOException) {
+                    throw DnsUpstreamIOException(DnsFailurePhase.Exchange, "DNS-over-HTTPS exchange failed: ${e.message}", e)
+                }
+            }
         }
 
     @Throws(IOException::class)
-    private fun openPlainSocket(server: ResolvedDnsServerConfig): Socket {
+    private fun openPlainSocket(
+        server: ResolvedDnsServerConfig,
+        candidateIp: String,
+        route: DnsUpstreamRoute,
+    ): Socket {
         val socket = Socket()
-        socket.connect(InetSocketAddress(server.resolvedIpv4, server.port), DNS_CONNECT_TIMEOUT_MS)
-        socket.soTimeout = DNS_READ_TIMEOUT_MS
-        return socket
+        try {
+            socket.bind(null)
+            if (route == DnsUpstreamRoute.Protected) {
+                protectSocket(socket, server, candidateIp)
+            }
+            try {
+                socket.connect(InetSocketAddress(candidateIp, server.port), DNS_CONNECT_TIMEOUT_MS)
+            } catch (e: IOException) {
+                throw DnsUpstreamIOException(DnsFailurePhase.Connect, "connect failed: ${e.message}", e)
+            }
+            socket.soTimeout = DNS_READ_TIMEOUT_MS
+            return socket
+        } catch (e: IOException) {
+            try {
+                socket.close()
+            } catch (_: IOException) {
+            }
+            throw e
+        } catch (e: RuntimeException) {
+            try {
+                socket.close()
+            } catch (_: IOException) {
+            }
+            throw e
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun protectSocket(socket: Socket, server: ResolvedDnsServerConfig, candidateIp: String) {
+        if (!socketProtector.protect(socket)) {
+            logProtectFallback(server, candidateIp)
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun protectDatagramSocket(socket: DatagramSocket, server: ResolvedDnsServerConfig, candidateIp: String) {
+        if (!socketProtector.protect(socket)) {
+            logProtectFallback(server, candidateIp)
+        }
+    }
+
+    private fun logProtectFallback(server: ResolvedDnsServerConfig, candidateIp: String) {
+        if (protectFallbackLogged.compareAndSet(false, true)) {
+            logger(
+                Log.WARN,
+                "dns upstream protect failed protocol=${server.protocol.wireValue} host=${server.host} ip=$candidateIp route=protected phase=protect; routing upstream through VPN fallback",
+            )
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun openTlsSocketForExchange(socket: Socket, server: ResolvedDnsServerConfig): SSLSocket {
+        return try {
+            openTlsSocket(socket, server)
+        } catch (e: IOException) {
+            throw DnsUpstreamIOException(DnsFailurePhase.Tls, "TLS failed: ${e.message}", e)
+        }
+    }
+
+    private fun orderedCandidates(server: ResolvedDnsServerConfig): List<String> {
+        val candidates = server.ipv4Candidates
+        val preferred = preferredUpstreams[server.key]?.candidateIp
+        return if (preferred != null && candidates.contains(preferred)) {
+            listOf(preferred) + candidates.filterNot { it == preferred }
+        } else {
+            candidates
+        }
+    }
+
+    private fun orderedRoutes(server: ResolvedDnsServerConfig, candidateIp: String): List<DnsUpstreamRoute> {
+        if (!server.protocol.supportsRouteFallback) return listOf(DnsUpstreamRoute.Protected)
+        val preferred = preferredUpstreams[server.key]
+        if (preferred?.candidateIp == candidateIp && preferred.route == DnsUpstreamRoute.UnprotectedFallback) {
+            return listOf(DnsUpstreamRoute.UnprotectedFallback, DnsUpstreamRoute.Protected)
+        }
+        return if (isProtectedRoutePenalized(server, candidateIp)) {
+            listOf(DnsUpstreamRoute.UnprotectedFallback)
+        } else {
+            listOf(DnsUpstreamRoute.Protected, DnsUpstreamRoute.UnprotectedFallback)
+        }
+    }
+
+    private fun shouldTryVpnFallback(
+        server: ResolvedDnsServerConfig,
+        error: IOException,
+        routeOrder: List<DnsUpstreamRoute>,
+    ): Boolean =
+        server.protocol.supportsRouteFallback &&
+            error.failurePhase == DnsFailurePhase.Connect &&
+            routeOrder.contains(DnsUpstreamRoute.UnprotectedFallback)
+
+    private fun markProtectedRouteFailed(server: ResolvedDnsServerConfig, candidateIp: String) {
+        protectedRouteFailures[server.upstreamKey(candidateIp)] = nowMs() + PROTECTED_ROUTE_FAILURE_TTL_MS
+    }
+
+    private fun rememberSuccess(server: ResolvedDnsServerConfig, candidateIp: String, route: DnsUpstreamRoute) {
+        preferredUpstreams[server.key] = DnsUpstreamPreference(candidateIp, route)
+        if (route == DnsUpstreamRoute.Protected) {
+            protectedRouteFailures.remove(server.upstreamKey(candidateIp))
+        }
+    }
+
+    private fun isProtectedRoutePenalized(server: ResolvedDnsServerConfig, candidateIp: String): Boolean {
+        val key = server.upstreamKey(candidateIp)
+        val expiresAt = protectedRouteFailures[key] ?: return false
+        if (expiresAt > nowMs()) return true
+        protectedRouteFailures.remove(key)
+        return false
+    }
+
+    private val IOException.failurePhase: DnsFailurePhase
+        get() = (this as? DnsUpstreamIOException)?.phase ?: DnsFailurePhase.Exchange
+
+    private enum class DnsUpstreamRoute {
+        Protected,
+        UnprotectedFallback,
+    }
+
+    private val DnsUpstreamRoute.logValue: String
+        get() =
+            when (this) {
+                DnsUpstreamRoute.Protected -> "protected"
+                DnsUpstreamRoute.UnprotectedFallback -> "vpn"
+            }
+
+    private val DnsProtocol.supportsRouteFallback: Boolean
+        get() = this == DnsProtocol.dnsOverTcp || this == DnsProtocol.dnsOverTls || this == DnsProtocol.dnsOverHttps
+
+    private val ResolvedDnsServerConfig.key: DnsServerKey
+        get() = DnsServerKey(host = host, protocol = protocol, port = port)
+
+    private fun ResolvedDnsServerConfig.upstreamKey(candidateIp: String): DnsUpstreamKey =
+        DnsUpstreamKey(host = host, protocol = protocol, port = port, candidateIp = candidateIp)
+
+    private data class DnsServerKey(
+        val host: String,
+        val protocol: DnsProtocol,
+        val port: Int,
+    )
+
+    private data class DnsUpstreamKey(
+        val host: String,
+        val protocol: DnsProtocol,
+        val port: Int,
+        val candidateIp: String,
+    )
+
+    private data class DnsUpstreamPreference(
+        val candidateIp: String,
+        val route: DnsUpstreamRoute,
+    )
+
+    private enum class DnsFailurePhase(val logValue: String) {
+        Connect("connect"),
+        Tls("tls"),
+        Exchange("exchange"),
+    }
+
+    private class DnsUpstreamIOException(
+        val phase: DnsFailurePhase,
+        message: String,
+        cause: IOException,
+    ) : IOException(message, cause)
+
+    companion object {
+        private const val PROTECTED_ROUTE_FAILURE_TTL_MS = 60_000L
     }
 }
 

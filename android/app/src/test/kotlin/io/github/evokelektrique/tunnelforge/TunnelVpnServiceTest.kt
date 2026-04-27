@@ -105,6 +105,42 @@ class TunnelVpnServiceTest {
     }
 
     @Test
+    fun manualVpnDnsAdvertisesVirtualResolver() {
+        val dnsServers =
+            TunnelVpnService.tunDnsServersForBuilder(
+                dnsAutomatic = false,
+                automaticDnsServers =
+                    listOf(
+                        ResolvedDnsServerConfig(
+                            host = "172.20.21.22",
+                            protocol = DnsProtocol.dnsOverUdp,
+                            resolvedIpv4 = "172.20.21.22",
+                        ),
+                    ),
+            )
+
+        assertEquals(listOf(TunnelVpnService.MANUAL_DNS_VIRTUAL_IPV4), dnsServers)
+    }
+
+    @Test
+    fun automaticVpnDnsAdvertisesNegotiatedResolvers() {
+        val dnsServers =
+            TunnelVpnService.tunDnsServersForBuilder(
+                dnsAutomatic = true,
+                automaticDnsServers =
+                    listOf(
+                        ResolvedDnsServerConfig(
+                            host = "172.20.21.22",
+                            protocol = DnsProtocol.dnsOverUdp,
+                            resolvedIpv4 = "172.20.21.22",
+                        ),
+                    ),
+            )
+
+        assertEquals(listOf("172.20.21.22"), dnsServers)
+    }
+
+    @Test
     fun actionStopDoesNotEmitStoppedWhenTunnelServiceIsIdle() {
         assertFalse(
             TunnelVpnServiceStopPolicy.shouldEmitStoppedOnActionStop(

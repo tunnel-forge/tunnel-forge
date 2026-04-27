@@ -51,6 +51,7 @@ void packet_endpoint_init_proxy_placeholder(packet_endpoint_t *endpoint);
 int packet_endpoint_init_proxy_queue(packet_endpoint_t *endpoint, proxy_packet_queue_ctx_t *ctx);
 void packet_endpoint_destroy_proxy_queue(proxy_packet_queue_ctx_t *ctx);
 int packet_endpoint_proxy_enqueue_outbound(proxy_packet_queue_ctx_t *ctx, const uint8_t *buf, size_t len);
+int packet_endpoint_proxy_enqueue_inbound(proxy_packet_queue_ctx_t *ctx, const uint8_t *buf, size_t len);
 ssize_t packet_endpoint_proxy_dequeue_inbound(proxy_packet_queue_ctx_t *ctx, uint8_t *buf, size_t len);
 ssize_t packet_endpoint_proxy_dequeue_inbound_wait(proxy_packet_queue_ctx_t *ctx, uint8_t *buf, size_t len,
                                                    int timeout_ms);
