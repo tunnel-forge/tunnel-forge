@@ -942,7 +942,7 @@ void main() {
     expect(find.text('vpn.example.com'), findsWidgets);
   });
 
-testWidgets('logs default to debug level and use cumulative filtering', (
+  testWidgets('logs default to debug level and use cumulative filtering', (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
@@ -1116,10 +1116,9 @@ testWidgets('logs default to debug level and use cumulative filtering', (
       findsNothing,
     );
     expect(find.text('DEBUG'), findsOneWidget);
-    expect(
-      methods.where((method) => method == VpnContract.setLogLevel),
-      [VpnContract.setLogLevel],
-    );
+    expect(methods.where((method) => method == VpnContract.setLogLevel), [
+      VpnContract.setLogLevel,
+    ]);
   });
 
   testWidgets('copy visible only uses the current log level', (
