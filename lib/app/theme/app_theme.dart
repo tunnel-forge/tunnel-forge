@@ -8,7 +8,7 @@ abstract final class AppPalette {
   static const Color lightOnConnected = Colors.white;
   static const Color lightConnecting = Color(0xFFB87503);
   static const Color lightOnConnecting = Colors.white;
-  static const Color lightDisconnect = Color(0xFFB42318);
+  static const Color lightDisconnect = Color(0xFFFF6961);
   static const Color lightOnDisconnect = Colors.white;
   static const Color lightInfo = Color(0xFF2D6A4F);
   static const Color lightOnInfo = Colors.white;
@@ -28,7 +28,7 @@ abstract final class AppPalette {
   static const Color darkOnConnected = Color(0xFF0B2418);
   static const Color darkConnecting = Color(0xFFF0BE62);
   static const Color darkOnConnecting = Color(0xFF1B1B1F);
-  static const Color darkDisconnect = Color(0xFFFFB4A9);
+  static const Color darkDisconnect = Color(0xFFFF6961);
   static const Color darkOnDisconnect = Color(0xFF3A0A05);
   static const Color darkInfo = Color(0xFFA6D8B8);
   static const Color darkOnInfo = Color(0xFF102117);
