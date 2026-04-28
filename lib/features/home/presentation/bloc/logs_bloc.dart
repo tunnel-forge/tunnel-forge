@@ -46,7 +46,7 @@ final class LogsCleared extends LogsEvent {
 class LogsState extends Equatable {
   const LogsState({
     this.entries = const <LogEntry>[],
-    this.level = LogDisplayLevel.error,
+    this.level = LogDisplayLevel.debug,
     this.wordWrap = true,
   });
 

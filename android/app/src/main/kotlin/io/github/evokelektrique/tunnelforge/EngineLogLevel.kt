@@ -40,7 +40,7 @@ enum class EngineLogLevel(val wireValue: String) {
 
 object EngineLogPolicy {
     @Volatile
-    private var level: EngineLogLevel = EngineLogLevel.ERROR
+    private var level: EngineLogLevel = EngineLogLevel.DEBUG
 
     fun currentLevel(): EngineLogLevel = level
 

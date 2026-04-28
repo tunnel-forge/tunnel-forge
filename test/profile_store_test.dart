@@ -257,8 +257,8 @@ void main() {
       expect(saved.timeoutMs, 3200);
     });
 
-    test('defaults log display level to error and persists updates', () async {
-      expect(await store.loadLogDisplayLevel(), LogDisplayLevel.error);
+    test('defaults log display level to debug and persists updates', () async {
+      expect(await store.loadLogDisplayLevel(), LogDisplayLevel.debug);
 
       await store.saveLogDisplayLevel(LogDisplayLevel.debug);
 
