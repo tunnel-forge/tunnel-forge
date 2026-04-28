@@ -21,6 +21,9 @@ concurrency:
 
 env:
   FLUTTER_VERSION: 3.41.2
+  JAVA_VERSION: "17"
+  ANDROID_PLATFORM: android-31
+  ANDROID_ABI: arm64-v8a
 
 defaults:
   run:
@@ -69,7 +72,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: ${{ env.JAVA_VERSION }}
 
       - name: Set up Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
@@ -121,6 +124,7 @@ jobs:
         working-directory: android
         run: |
           ./gradlew --stop || true
+
           ./gradlew --no-daemon --no-build-cache --rerun-tasks --console=plain --stacktrace \
             -Dorg.gradle.vfs.watch=false \
             clean \
@@ -143,22 +147,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Set up Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: true
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c
-
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
@@ -176,34 +164,57 @@ jobs:
             web/**
             windows/**
 
-      - name: Install Flutter dependencies
-        run: flutter pub get
-
-      - name: Create Android local.properties
-        working-directory: android
+      - name: Install native build tools
         run: |
-          flutter_root="${FLUTTER_ROOT:-$(dirname "$(dirname "$(command -v flutter)")")}"
-          android_sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
 
-          if [[ -z "${android_sdk_root}" ]]; then
-            echo "ANDROID_SDK_ROOT or ANDROID_HOME must be set" >&2
+      - name: Locate Android NDK
+        run: |
+          if [[ -n "${ANDROID_NDK_HOME:-}" ]]; then
+            echo "ANDROID_NDK_PATH=${ANDROID_NDK_HOME}" >> "$GITHUB_ENV"
+          elif [[ -n "${ANDROID_NDK_ROOT:-}" ]]; then
+            echo "ANDROID_NDK_PATH=${ANDROID_NDK_ROOT}" >> "$GITHUB_ENV"
+          else
+            ndk_path="$(find "${ANDROID_HOME}/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+            if [[ -z "${ndk_path}" ]]; then
+              echo "Could not find Android NDK" >&2
+              exit 1
+            fi
+            echo "ANDROID_NDK_PATH=${ndk_path}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Print native toolchain info
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          echo "ANDROID_NDK_PATH=${ANDROID_NDK_PATH}"
+          cmake --version
+          ninja --version
+
+      - name: Configure Android native CMake target
+        run: |
+          cmake -S android/app/src/main/cpp \
+            -B build/codeql-native \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="${ANDROID_NDK_PATH}/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI="${ANDROID_ABI}" \
+            -DANDROID_PLATFORM="${ANDROID_PLATFORM}" \
+            -DANDROID_STL=c++_shared \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Show native compile commands
+        run: |
+          if [[ -f build/codeql-native/compile_commands.json ]]; then
+            cat build/codeql-native/compile_commands.json
+          else
+            echo "compile_commands.json was not generated" >&2
             exit 1
           fi
 
-          {
-            echo "flutter.sdk=${flutter_root}"
-            echo "sdk.dir=${android_sdk_root}"
-          } > local.properties
-
-      - name: Build native C/C++ targets for CodeQL
-        working-directory: android
+      - name: Build Android native C/C++ target for CodeQL
         run: |
-          ./gradlew --stop || true
-          ./gradlew --no-daemon --no-build-cache --rerun-tasks --console=plain --stacktrace \
-            -Dorg.gradle.vfs.watch=false \
-            clean \
-            :app:externalNativeBuildDebug \
-            :app:assembleDebug
+          cmake --build build/codeql-native --verbose
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
