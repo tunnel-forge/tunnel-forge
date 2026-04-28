@@ -110,7 +110,9 @@ jobs:
 
       - name: Build Android app for CodeQL
         working-directory: android
-        run: ./gradlew --no-daemon --console=plain --stacktrace -Dorg.gradle.vfs.watch=false :app:assembleDebug
+        run: |
+          ./gradlew --stop || true
+          ./gradlew --no-daemon --no-build-cache --rerun-tasks --console=plain --stacktrace -Dorg.gradle.vfs.watch=false clean :app:assembleDebug
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
