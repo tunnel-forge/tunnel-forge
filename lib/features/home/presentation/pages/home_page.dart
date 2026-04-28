@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:tunnel_forge/app/ui/app_scaffold_messenger.dart';
@@ -385,6 +388,56 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
     );
   }
 
+  Future<void> _shareDebugLogs(LogsState logsState) async {
+    // Debug display level includes all severities, so export all buffered logs.
+    final debugLevelLogs = logsState.entries;
+    if (debugLevelLogs.isEmpty) {
+      _toast(
+        AppText.pick(
+          'No debug logs to share',
+          'گزارش دیباگی برای اشتراک‌گذاری نیست',
+        ),
+      );
+      return;
+    }
+    final content = debugLevelLogs
+        .map((entry) => entry.toPlainText())
+        .join('\n');
+    final bytes = Uint8List.fromList(utf8.encode(content));
+    final now = DateTime.now();
+    final month = now.month.toString().padLeft(2, '0');
+    final day = now.day.toString().padLeft(2, '0');
+    final hour = now.hour.toString().padLeft(2, '0');
+    final minute = now.minute.toString().padLeft(2, '0');
+    final second = now.second.toString().padLeft(2, '0');
+    final fileName =
+        'tunnel_forge_debug_logs_${now.year}$month${day}_$hour$minute$second.txt';
+    try {
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile.fromData(bytes, mimeType: 'text/plain')],
+          fileNameOverrides: [fileName],
+          title: 'Share TunnelForge debug logs',
+        ),
+      );
+      final count = debugLevelLogs.length;
+      _toast(
+        AppText.pick(
+          'Prepared $count ${count == 1 ? 'debug line' : 'debug lines'} for sharing',
+          '$count خط دیباگ برای اشتراک‌گذاری آماده شد',
+        ),
+      );
+    } catch (_) {
+      _toast(
+        AppText.pick(
+          'Could not share debug logs',
+          'اشتراک‌گذاری گزارش‌های دیباگ انجام نشد',
+        ),
+        error: true,
+      );
+    }
+  }
+
   void _clearLogs() {
     context.read<LogsBloc>().add(const LogsCleared());
     setState(() => _logsStickToBottom = true);
@@ -435,6 +488,7 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
     final connectivityState = context.watch<ConnectivityBloc>().state;
     final appThemeState = context.watch<AppThemeBloc>().state;
     final t = AppLocalizations.of(context);
+    final hasDebugLogs = logsState.entries.isNotEmpty;
     final languageController = AppLanguageController.of(context);
 
     final effectiveProfileId = profilesState.hasActiveProfile
@@ -589,6 +643,13 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
                           ? null
                           : () => _copyLogs(logsState),
                       icon: const Icon(Icons.copy_all_outlined),
+                    ),
+                    IconButton(
+                      tooltip: t.shareDebugLogs,
+                      onPressed: hasDebugLogs
+                          ? () => _shareDebugLogs(logsState)
+                          : null,
+                      icon: const Icon(Icons.ios_share_rounded),
                     ),
                     IconButton(
                       tooltip: t.clear,

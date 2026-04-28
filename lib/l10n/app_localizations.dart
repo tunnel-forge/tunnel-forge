@@ -433,6 +433,8 @@ extension AppStrings on AppLocalizations {
   String get wordWrapOn =>
       AppText.pick('Turn on word wrap', 'روشن کردن شکست خط');
   String get copyVisible => AppText.pick('Copy visible', 'کپی موارد نمایان');
+  String get shareDebugLogs =>
+      AppText.pick('Share debug logs', 'اشتراک‌گذاری گزارش‌های دیباگ');
   String get clear => AppText.pick('Clear', 'پاک کردن');
   String get noLogsMatch =>
       AppText.pick('No logs match this level', 'گزارشی با این سطح نیست');
