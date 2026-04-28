@@ -25,7 +25,7 @@ enum class EngineLogLevel(val wireValue: String) {
                 "info" -> INFO
                 "warning" -> WARNING
                 "debug" -> DEBUG
-                else -> ERROR
+                else -> DEBUG
             }
 
         fun fromAndroidPriority(priority: Int): EngineLogLevel =

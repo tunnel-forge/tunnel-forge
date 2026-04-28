@@ -8,9 +8,9 @@ import org.junit.Test
 
 class EngineLogLevelTest {
     @Test
-    fun fromWireValueDefaultsToError() {
-        assertEquals(EngineLogLevel.ERROR, EngineLogLevel.fromWireValue(null))
-        assertEquals(EngineLogLevel.ERROR, EngineLogLevel.fromWireValue("unknown"))
+    fun fromWireValueDefaultsToDebug() {
+        assertEquals(EngineLogLevel.DEBUG, EngineLogLevel.fromWireValue(null))
+        assertEquals(EngineLogLevel.DEBUG, EngineLogLevel.fromWireValue("unknown"))
         assertEquals(EngineLogLevel.DEBUG, EngineLogLevel.fromWireValue("debug"))
     }
 

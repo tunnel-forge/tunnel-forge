@@ -100,7 +100,7 @@ class LogsBloc extends Bloc<LogsEvent, LogsState> {
     _entriesSub = _logsRepository.entriesStream.listen((entries) {
       add(LogsEntriesChanged(entries));
     });
-    await _tunnelRepository.setLogLevel(level);
+    await _tunnelRepository.setLogLevel(LogDisplayLevel.debug);
     emit(state.copyWith(level: level, entries: _logsRepository.entries));
   }
 
@@ -115,7 +115,6 @@ class LogsBloc extends Bloc<LogsEvent, LogsState> {
     if (state.level == event.level) return;
     emit(state.copyWith(level: event.level));
     await _settingsRepository.saveLogDisplayLevel(event.level);
-    await _tunnelRepository.setLogLevel(event.level);
   }
 
   void _onWordWrapToggled(LogsWordWrapToggled event, Emitter<LogsState> emit) {

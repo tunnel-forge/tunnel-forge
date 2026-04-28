@@ -942,7 +942,7 @@ void main() {
     expect(find.text('vpn.example.com'), findsWidgets);
   });
 
-  testWidgets('logs default to error level and use cumulative filtering', (
+testWidgets('logs default to debug level and use cumulative filtering', (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
@@ -999,11 +999,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(find.textContaining('info message'), findsNothing);
-    expect(find.textContaining('warn message'), findsNothing);
+    expect(find.textContaining('info message'), findsOneWidget);
+    expect(find.textContaining('warn message'), findsOneWidget);
     expect(find.textContaining('error message'), findsOneWidget);
-    expect(find.textContaining('debug message'), findsNothing);
-    expect(find.text('ERROR'), findsOneWidget);
+    expect(find.textContaining('debug message'), findsOneWidget);
+    expect(find.text('DEBUG'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Log level'));
     await tester.pumpAndSettle();
@@ -1102,6 +1102,11 @@ void main() {
 
     await tester.tap(find.byTooltip('Log level'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('INFO').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Log level'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('DEBUG').last);
     await tester.pumpAndSettle();
 
@@ -1111,10 +1116,10 @@ void main() {
       findsNothing,
     );
     expect(find.text('DEBUG'), findsOneWidget);
-    expect(methods.where((method) => method == VpnContract.setLogLevel), [
-      VpnContract.setLogLevel,
-      VpnContract.setLogLevel,
-    ]);
+    expect(
+      methods.where((method) => method == VpnContract.setLogLevel),
+      [VpnContract.setLogLevel],
+    );
   });
 
   testWidgets('copy visible only uses the current log level', (
