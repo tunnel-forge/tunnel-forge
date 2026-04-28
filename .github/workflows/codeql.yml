@@ -53,6 +53,11 @@ jobs:
             macos/**
             web/**
             windows/**
+            **/_deps/**
+            **/third_party/**
+            **/thirdparty/**
+            **/vendor/**
+            **/external/**
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
@@ -100,6 +105,11 @@ jobs:
             macos/**
             web/**
             windows/**
+            **/_deps/**
+            **/third_party/**
+            **/thirdparty/**
+            **/vendor/**
+            **/external/**
 
       - name: Install Flutter dependencies
         run: flutter pub get
@@ -163,6 +173,11 @@ jobs:
             macos/**
             web/**
             windows/**
+            **/_deps/**
+            **/third_party/**
+            **/thirdparty/**
+            **/vendor/**
+            **/external/**
 
       - name: Install native build tools
         run: |
@@ -188,6 +203,8 @@ jobs:
         run: |
           echo "ANDROID_HOME=${ANDROID_HOME}"
           echo "ANDROID_NDK_PATH=${ANDROID_NDK_PATH}"
+          echo "ANDROID_ABI=${ANDROID_ABI}"
+          echo "ANDROID_PLATFORM=${ANDROID_PLATFORM}"
           cmake --version
           ninja --version
 
@@ -203,18 +220,18 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
-      - name: Show native compile commands
+      - name: Show project native compile commands
         run: |
-          if [[ -f build/codeql-native/compile_commands.json ]]; then
-            cat build/codeql-native/compile_commands.json
-          else
+          if [[ ! -f build/codeql-native/compile_commands.json ]]; then
             echo "compile_commands.json was not generated" >&2
             exit 1
           fi
 
-      - name: Build Android native C/C++ target for CodeQL
+          grep -E 'android/app/src/main/cpp/.*\.(c|cc|cpp|cxx)' build/codeql-native/compile_commands.json || true
+
+      - name: Build Android app native target for CodeQL
         run: |
-          cmake --build build/codeql-native --verbose
+          cmake --build build/codeql-native --target tunnel_engine --verbose
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
