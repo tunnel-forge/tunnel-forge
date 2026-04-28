@@ -1158,7 +1158,12 @@ class UserspaceTunnelStackTest {
 
                 pumpThread.join(1000)
                 assertFalse(pumpThread.isAlive)
-                assertEquals(UserspaceSessionState.closed, stack.sessionSnapshots().single().state)
+                waitForSessionState(
+                    stack,
+                    UserspaceSessionState.closed,
+                    timeoutMs = 250,
+                    pollIntervalMs = 5,
+                )
             }
         }
 
@@ -2173,6 +2178,25 @@ class UserspaceTunnelStackTest {
             Thread.sleep(25)
         }
         throw AssertionError("Timed out waiting for matching outbound TCP packet; saw ${backend.outboundPackets.size}")
+    }
+
+    private fun waitForSessionState(
+        stack: BridgeUserspaceTunnelStack,
+        expectedState: UserspaceSessionState,
+        timeoutMs: Long = 1_000,
+        pollIntervalMs: Long = 25,
+    ) {
+        val attempts = (timeoutMs / pollIntervalMs).coerceAtLeast(1)
+        repeat(attempts.toInt()) {
+            val snapshot = stack.sessionSnapshots().singleOrNull()
+            if (snapshot != null && snapshot.state == expectedState) {
+                return
+            }
+            Thread.sleep(pollIntervalMs)
+        }
+        throw AssertionError(
+            "Timed out waiting for session state=$expectedState; snapshots=${stack.sessionSnapshots()}",
+        )
     }
 
     private fun buildDnsResponsePacket(
