@@ -27,10 +27,14 @@ static jint native_run_tunnel(JNIEnv *env, jclass clazz, jint tun_fd, jstring js
   out = (jint)tunnel_loop_run(tun_fd, server, user, password, psk, (int)tun_mtu);
 
 cleanup:
-  if (server != NULL) (*env)->ReleaseStringUTFChars(env, jserver, server);
-  if (user != NULL) (*env)->ReleaseStringUTFChars(env, juser, user);
-  if (password != NULL) (*env)->ReleaseStringUTFChars(env, jpassword, password);
-  if (psk != NULL) (*env)->ReleaseStringUTFChars(env, jpsk, psk);
+  if (server != NULL)
+    (*env)->ReleaseStringUTFChars(env, jserver, server);
+  if (user != NULL)
+    (*env)->ReleaseStringUTFChars(env, juser, user);
+  if (password != NULL)
+    (*env)->ReleaseStringUTFChars(env, jpassword, password);
+  if (psk != NULL)
+    (*env)->ReleaseStringUTFChars(env, jpsk, psk);
   return out;
 }
 
@@ -83,10 +87,14 @@ static jint native_negotiate(JNIEnv *env, jclass clazz, jstring jserver, jstring
   }
 
 cleanup:
-  if (server != NULL) (*env)->ReleaseStringUTFChars(env, jserver, server);
-  if (user != NULL) (*env)->ReleaseStringUTFChars(env, juser, user);
-  if (password != NULL) (*env)->ReleaseStringUTFChars(env, jpassword, password);
-  if (psk != NULL) (*env)->ReleaseStringUTFChars(env, jpsk, psk);
+  if (server != NULL)
+    (*env)->ReleaseStringUTFChars(env, jserver, server);
+  if (user != NULL)
+    (*env)->ReleaseStringUTFChars(env, juser, user);
+  if (password != NULL)
+    (*env)->ReleaseStringUTFChars(env, jpassword, password);
+  if (psk != NULL)
+    (*env)->ReleaseStringUTFChars(env, jpsk, psk);
   return out;
 }
 
@@ -116,11 +124,14 @@ static jboolean native_is_proxy_packet_bridge_active(JNIEnv *env, jclass clazz) 
 
 static jint native_queue_proxy_outbound_packet(JNIEnv *env, jclass clazz, jbyteArray jpacket) {
   (void)clazz;
-  if (jpacket == NULL) return (jint)TUNNEL_EXIT_BAD_ARGS;
+  if (jpacket == NULL)
+    return (jint)TUNNEL_EXIT_BAD_ARGS;
   jsize len = (*env)->GetArrayLength(env, jpacket);
-  if (len <= 0) return (jint)TUNNEL_EXIT_BAD_ARGS;
+  if (len <= 0)
+    return (jint)TUNNEL_EXIT_BAD_ARGS;
   jbyte *bytes = (*env)->GetByteArrayElements(env, jpacket, NULL);
-  if (bytes == NULL) return (jint)TUNNEL_EXIT_BAD_ARGS;
+  if (bytes == NULL)
+    return (jint)TUNNEL_EXIT_BAD_ARGS;
   int rc = tunnel_proxy_enqueue_outbound_packet((const uint8_t *)bytes, (size_t)len);
   (*env)->ReleaseByteArrayElements(env, jpacket, bytes, JNI_ABORT);
   return (jint)rc;
@@ -128,9 +139,11 @@ static jint native_queue_proxy_outbound_packet(JNIEnv *env, jclass clazz, jbyteA
 
 static jbyteArray native_read_proxy_inbound_packet(JNIEnv *env, jclass clazz, jint max_len) {
   (void)clazz;
-  if (max_len <= 0) return NULL;
+  if (max_len <= 0)
+    return NULL;
   uint8_t *buf = (uint8_t *)malloc((size_t)max_len);
-  if (buf == NULL) return NULL;
+  if (buf == NULL)
+    return NULL;
   ssize_t n = tunnel_proxy_dequeue_inbound_packet_wait(buf, (size_t)max_len, 50);
   if (n <= 0) {
     free(buf);
@@ -146,9 +159,11 @@ static jbyteArray native_read_proxy_inbound_packet(JNIEnv *env, jclass clazz, ji
 
 static jint native_set_vpn_dns_intercept_ipv4(JNIEnv *env, jclass clazz, jstring jipv4) {
   (void)clazz;
-  if (jipv4 == NULL) return (jint)tunnel_vpn_dns_set_intercept_ipv4(NULL);
+  if (jipv4 == NULL)
+    return (jint)tunnel_vpn_dns_set_intercept_ipv4(NULL);
   const char *ipv4 = (*env)->GetStringUTFChars(env, jipv4, NULL);
-  if (ipv4 == NULL) return (jint)TUNNEL_EXIT_BAD_ARGS;
+  if (ipv4 == NULL)
+    return (jint)TUNNEL_EXIT_BAD_ARGS;
   int rc = tunnel_vpn_dns_set_intercept_ipv4(ipv4);
   (*env)->ReleaseStringUTFChars(env, jipv4, ipv4);
   return (jint)rc;
@@ -156,9 +171,11 @@ static jint native_set_vpn_dns_intercept_ipv4(JNIEnv *env, jclass clazz, jstring
 
 static jbyteArray native_read_vpn_dns_query(JNIEnv *env, jclass clazz, jint max_len) {
   (void)clazz;
-  if (max_len <= 0) return NULL;
+  if (max_len <= 0)
+    return NULL;
   uint8_t *buf = (uint8_t *)malloc((size_t)max_len);
-  if (buf == NULL) return NULL;
+  if (buf == NULL)
+    return NULL;
   ssize_t n = tunnel_vpn_dns_dequeue_query_wait(buf, (size_t)max_len, 50);
   if (n <= 0) {
     free(buf);
@@ -174,11 +191,14 @@ static jbyteArray native_read_vpn_dns_query(JNIEnv *env, jclass clazz, jint max_
 
 static jint native_queue_vpn_dns_response(JNIEnv *env, jclass clazz, jbyteArray jpacket) {
   (void)clazz;
-  if (jpacket == NULL) return (jint)TUNNEL_EXIT_BAD_ARGS;
+  if (jpacket == NULL)
+    return (jint)TUNNEL_EXIT_BAD_ARGS;
   jsize len = (*env)->GetArrayLength(env, jpacket);
-  if (len <= 0) return (jint)TUNNEL_EXIT_BAD_ARGS;
+  if (len <= 0)
+    return (jint)TUNNEL_EXIT_BAD_ARGS;
   jbyte *bytes = (*env)->GetByteArrayElements(env, jpacket, NULL);
-  if (bytes == NULL) return (jint)TUNNEL_EXIT_BAD_ARGS;
+  if (bytes == NULL)
+    return (jint)TUNNEL_EXIT_BAD_ARGS;
   int rc = tunnel_vpn_dns_write_response_packet((const uint8_t *)bytes, (size_t)len);
   (*env)->ReleaseByteArrayElements(env, jpacket, bytes, JNI_ABORT);
   return (jint)rc;

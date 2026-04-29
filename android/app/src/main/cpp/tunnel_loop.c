@@ -54,11 +54,14 @@ void tunnel_loop_stop(void) { atomic_store(&g_stop, 1); }
 int tunnel_should_stop(void) { return atomic_load(&g_stop) ? 1 : 0; }
 
 static int parse_ipv4_literal(const char *ipv4, uint8_t out[4]) {
-  if (ipv4 == NULL || out == NULL) return -1;
+  if (ipv4 == NULL || out == NULL)
+    return -1;
   unsigned int a, b, c, d;
   char tail;
-  if (sscanf(ipv4, "%u.%u.%u.%u%c", &a, &b, &c, &d, &tail) != 4) return -1;
-  if (a > 255u || b > 255u || c > 255u || d > 255u) return -1;
+  if (sscanf(ipv4, "%u.%u.%u.%u%c", &a, &b, &c, &d, &tail) != 4)
+    return -1;
+  if (a > 255u || b > 255u || c > 255u || d > 255u)
+    return -1;
   out[0] = (uint8_t)a;
   out[1] = (uint8_t)b;
   out[2] = (uint8_t)c;
@@ -66,14 +69,13 @@ static int parse_ipv4_literal(const char *ipv4, uint8_t out[4]) {
   return 0;
 }
 
-static uint16_t read_be16_u8(const uint8_t *p) {
-  return (uint16_t)(((uint16_t)p[0] << 8) | (uint16_t)p[1]);
-}
+static uint16_t read_be16_u8(const uint8_t *p) { return (uint16_t)(((uint16_t)p[0] << 8) | (uint16_t)p[1]); }
 
 static uint32_t vpn_dns_csum_acc_bytes(uint32_t sum, const uint8_t *p, size_t n) {
   for (size_t i = 0; i < n; i += 2) {
     uint32_t w = (uint32_t)p[i] << 8;
-    if (i + 1 < n) w |= p[i + 1];
+    if (i + 1 < n)
+      w |= p[i + 1];
     sum += w;
   }
   return sum;
@@ -93,42 +95,54 @@ typedef enum {
 } vpn_dns_packet_kind_t;
 
 static vpn_dns_packet_kind_t vpn_dns_packet_kind(const uint8_t *packet, size_t len) {
-  if (!atomic_load(&g_vpn_dns_intercept_enabled) || packet == NULL || len < 28u) return 0;
+  if (!atomic_load(&g_vpn_dns_intercept_enabled) || packet == NULL || len < 28u)
+    return 0;
   const uint8_t version = packet[0] >> 4;
   const size_t ihl = (size_t)(packet[0] & 0x0fu) * 4u;
-  if (version != 4u || ihl < 20u || len < ihl + 8u) return 0;
+  if (version != 4u || ihl < 20u || len < ihl + 8u)
+    return 0;
   const uint16_t total_len = read_be16_u8(packet + 2);
-  if (total_len < ihl + 8u || total_len > len) return 0;
-  if (memcmp(packet + 16, g_vpn_dns_ipv4, 4u) != 0) return 0;
+  if (total_len < ihl + 8u || total_len > len)
+    return 0;
+  if (memcmp(packet + 16, g_vpn_dns_ipv4, 4u) != 0)
+    return 0;
   if (packet[9] == VPN_DNS_IPPROTO_UDP) {
     const uint8_t *udp = packet + ihl;
     const uint16_t udp_len = read_be16_u8(udp + 4);
-    if (udp_len < 8u || ihl + (size_t)udp_len > (size_t)total_len) return VPN_DNS_PACKET_NONE;
+    if (udp_len < 8u || ihl + (size_t)udp_len > (size_t)total_len)
+      return VPN_DNS_PACKET_NONE;
     return read_be16_u8(udp + 2) == VPN_DNS_PORT ? VPN_DNS_PACKET_UDP : VPN_DNS_PACKET_NONE;
   }
   if (packet[9] == VPN_DNS_IPPROTO_TCP) {
-    if ((size_t)total_len < ihl + 20u) return VPN_DNS_PACKET_NONE;
+    if ((size_t)total_len < ihl + 20u)
+      return VPN_DNS_PACKET_NONE;
     const uint8_t *tcp = packet + ihl;
     const size_t tcp_len = (size_t)total_len - ihl;
     const size_t tcp_hlen = (size_t)(tcp[12] >> 4) * 4u;
-    if (tcp_hlen < 20u || tcp_hlen > tcp_len) return VPN_DNS_PACKET_NONE;
+    if (tcp_hlen < 20u || tcp_hlen > tcp_len)
+      return VPN_DNS_PACKET_NONE;
     return read_be16_u8(tcp + 2) == VPN_DNS_PORT ? VPN_DNS_PACKET_TCP : VPN_DNS_PACKET_NONE;
   }
   return VPN_DNS_PACKET_NONE;
 }
 
 static int vpn_dns_build_tcp_rst(const uint8_t *packet, size_t len, uint8_t out[VPN_DNS_TCP_RST_LEN]) {
-  if (packet == NULL || out == NULL || len < 40u) return -1;
+  if (packet == NULL || out == NULL || len < 40u)
+    return -1;
   const size_t ihl = (size_t)(packet[0] & 0x0fu) * 4u;
   const uint16_t total_len = read_be16_u8(packet + 2);
-  if ((packet[0] >> 4) != 4u || ihl < 20u || total_len < ihl + 20u || total_len > len) return -1;
-  if (packet[9] != VPN_DNS_IPPROTO_TCP || memcmp(packet + 16, g_vpn_dns_ipv4, 4u) != 0) return -1;
+  if ((packet[0] >> 4) != 4u || ihl < 20u || total_len < ihl + 20u || total_len > len)
+    return -1;
+  if (packet[9] != VPN_DNS_IPPROTO_TCP || memcmp(packet + 16, g_vpn_dns_ipv4, 4u) != 0)
+    return -1;
   const uint8_t *tcp = packet + ihl;
   const size_t tcp_len = (size_t)total_len - ihl;
   const size_t tcp_hlen = (size_t)(tcp[12] >> 4) * 4u;
-  if (tcp_hlen < 20u || tcp_hlen > tcp_len || read_be16_u8(tcp + 2) != VPN_DNS_PORT) return -1;
+  if (tcp_hlen < 20u || tcp_hlen > tcp_len || read_be16_u8(tcp + 2) != VPN_DNS_PORT)
+    return -1;
   const uint8_t flags = tcp[13];
-  if ((flags & 0x02u) == 0u) return -1;
+  if ((flags & 0x02u) == 0u)
+    return -1;
 
   memset(out, 0, VPN_DNS_TCP_RST_LEN);
   out[0] = 0x45u;
@@ -162,7 +176,8 @@ static int vpn_dns_build_tcp_rst(const uint8_t *packet, size_t len, uint8_t out[
 
 static int vpn_dns_intercept_query(const uint8_t *packet, size_t len) {
   vpn_dns_packet_kind_t kind = vpn_dns_packet_kind(packet, len);
-  if (kind == VPN_DNS_PACKET_NONE) return 0;
+  if (kind == VPN_DNS_PACKET_NONE)
+    return 0;
   if (!atomic_load(&g_vpn_dns_bridge_active)) {
     tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "vpn dns query dropped: bridge inactive");
     return 1;
@@ -182,12 +197,14 @@ static int vpn_dns_intercept_query(const uint8_t *packet, size_t len) {
 }
 
 static void vpn_dns_try_write_pending_response(packet_endpoint_t *endpoint, uint8_t *pending, size_t *pending_len) {
-  if (endpoint == NULL || pending == NULL || pending_len == NULL || *pending_len == 0u) return;
+  if (endpoint == NULL || pending == NULL || pending_len == NULL || *pending_len == 0u)
+    return;
   if (packet_endpoint_write(endpoint, pending, *pending_len) == 0) {
     *pending_len = 0u;
     return;
   }
-  if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) return;
+  if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+    return;
   tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "vpn dns response dropped: tun write errno=%d", errno);
   *pending_len = 0u;
 }
@@ -197,7 +214,8 @@ static void vpn_dns_drain_responses(packet_endpoint_t *endpoint, packet_endpoint
   vpn_dns_try_write_pending_response(endpoint, pending, pending_len);
   while (*pending_len == 0u) {
     ssize_t n = packet_endpoint_read(dns_endpoint, scratch, scratch_len);
-    if (n <= 0) return;
+    if (n <= 0)
+      return;
     memcpy(pending, scratch, (size_t)n);
     *pending_len = (size_t)n;
     vpn_dns_try_write_pending_response(endpoint, pending, pending_len);
@@ -205,10 +223,11 @@ static void vpn_dns_drain_responses(packet_endpoint_t *endpoint, packet_endpoint
 }
 
 static void tunnel_close_active_session(const char *reason, int send_l2tp_teardown) {
-  if (g_state.ike.esp_fd < 0) return;
+  if (g_state.ike.esp_fd < 0)
+    return;
   if (send_l2tp_teardown && g_state.l2tp.tunnel_id != 0) {
-    if (l2tp_send_teardown(g_state.ike.esp_fd, &g_state.esp, (struct sockaddr *)&g_state.ike.peer,
-                           g_state.ike.peer_len, &g_state.l2tp) != 0) {
+    if (l2tp_send_teardown(g_state.ike.esp_fd, &g_state.esp, (struct sockaddr *)&g_state.ike.peer, g_state.ike.peer_len,
+                           &g_state.l2tp) != 0) {
       tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "l2tp teardown failed during close reason=%s",
                         reason != NULL ? reason : "unknown");
     }
@@ -220,13 +239,16 @@ static void tunnel_close_active_session(const char *reason, int send_l2tp_teardo
 
 static int set_nonblock(int fd) {
   int flags = fcntl(fd, F_GETFL, 0);
-  if (flags < 0) return -1;
+  if (flags < 0)
+    return -1;
   return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
 static int tunnel_sanitize_mtu(int tun_mtu) {
-  if (tun_mtu < 576) return 576;
-  if (tun_mtu > 1500) return 1500;
+  if (tun_mtu < 576)
+    return 576;
+  if (tun_mtu > 1500)
+    return 1500;
   return tun_mtu;
 }
 
@@ -249,13 +271,12 @@ int tunnel_negotiate(const char *server, const char *user, const char *password,
       return TUNNEL_EXIT_STOPPED;
     }
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG,
-                        "ikev1_connect failed (IPsec/IKE). Filter logcat: adb logcat -s tunnel_engine:V");
+                      "ikev1_connect failed (IPsec/IKE). Filter logcat: adb logcat -s tunnel_engine:V");
     return TUNNEL_EXIT_IKE_FAILED;
   }
 
   memset(&g_state.l2tp, 0, sizeof(g_state.l2tp));
-  if (l2tp_handshake(g_state.ike.esp_fd, &g_state.esp,
-                     (struct sockaddr *)&g_state.ike.peer, g_state.ike.peer_len,
+  if (l2tp_handshake(g_state.ike.esp_fd, &g_state.esp, (struct sockaddr *)&g_state.ike.peer, g_state.ike.peer_len,
                      &g_state.l2tp) != 0) {
     if (tunnel_should_stop()) {
       tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "tunnel negotiate canceled during L2TP");
@@ -268,8 +289,7 @@ int tunnel_negotiate(const char *server, const char *user, const char *password,
   }
 
   memset(&g_state.ppp, 0, sizeof(g_state.ppp));
-  if (ppp_negotiate(g_state.ike.esp_fd, &g_state.esp,
-                    (struct sockaddr *)&g_state.ike.peer, g_state.ike.peer_len,
+  if (ppp_negotiate(g_state.ike.esp_fd, &g_state.esp, (struct sockaddr *)&g_state.ike.peer, g_state.ike.peer_len,
                     &g_state.l2tp, user, password, tun_mtu, &g_state.ppp) != 0) {
     if (tunnel_should_stop()) {
       tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "tunnel negotiate canceled during PPP");
@@ -287,13 +307,16 @@ int tunnel_negotiate(const char *server, const char *user, const char *password,
 }
 
 void tunnel_negotiated_client_ipv4(uint8_t out[4]) {
-  if (out == NULL) return;
+  if (out == NULL)
+    return;
   memcpy(out, g_state.ppp.local_ip, 4);
 }
 
 void tunnel_negotiated_dns_ipv4(uint8_t primary_out[4], uint8_t secondary_out[4]) {
-  if (primary_out != NULL) memcpy(primary_out, g_state.ppp.primary_dns, 4);
-  if (secondary_out != NULL) memcpy(secondary_out, g_state.ppp.secondary_dns, 4);
+  if (primary_out != NULL)
+    memcpy(primary_out, g_state.ppp.primary_dns, 4);
+  if (secondary_out != NULL)
+    memcpy(secondary_out, g_state.ppp.secondary_dns, 4);
 }
 
 /*
@@ -377,7 +400,8 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
     fds[2].events = POLLIN;
     int pr = poll(fds, vpn_dns_enabled_for_loop ? 3u : 2u, 500);
     if (pr < 0) {
-      if (errno == EINTR) continue;
+      if (errno == EINTR)
+        continue;
       /* Poll failure is terminal: close session first, then unwind DNS bridge state. */
       tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "poll failed errno=%d, closing ESP fd", errno);
       tunnel_close_active_session("poll error", 1);
@@ -401,9 +425,8 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
             if (sent == (ssize_t)keepalive_len) {
               last_outbound_to_peer = now;
             } else {
-              tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG,
-                                "nat-t keepalive send failed sent=%zd want=%zu errno=%d", sent, keepalive_len,
-                                errno);
+              tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "nat-t keepalive send failed sent=%zd want=%zu errno=%d",
+                                sent, keepalive_len, errno);
             }
           }
         }
@@ -428,10 +451,8 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
         if (vpn_dns_enabled_for_loop && vpn_dns_intercept_query(tun_buf, (size_t)n)) {
           continue;
         }
-        if (ppp_encapsulate_and_send(g_state.ike.esp_fd, &g_state.esp,
-                                     (struct sockaddr *)&g_state.ike.peer,
-                                     g_state.ike.peer_len, &g_state.l2tp,
-                                     &g_state.ppp, tun_buf, (size_t)n) < 0) {
+        if (ppp_encapsulate_and_send(g_state.ike.esp_fd, &g_state.esp, (struct sockaddr *)&g_state.ike.peer,
+                                     g_state.ike.peer_len, &g_state.l2tp, &g_state.ppp, tun_buf, (size_t)n) < 0) {
           engine_dp_note_encap_fail();
           tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "egress failed");
         } else {
@@ -470,8 +491,7 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
             s_last_esp_plain_warn = now;
             char detail[160];
             esp_decrypt_last_fail_snprint(detail, sizeof(detail));
-            tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG,
-                              "esp recv n=%zd no plaintext: %s", n, detail);
+            tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "esp recv n=%zd no plaintext: %s", n, detail);
           }
         }
       }
@@ -509,8 +529,7 @@ int tunnel_run_proxy_loop(void) {
     return TUNNEL_EXIT_PROXY_NOT_IMPLEMENTED;
   }
   atomic_store(&g_proxy_bridge_active, 1);
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG,
-                    "proxy-only mode negotiated; native packet bridge active on endpoint=%s",
+  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "proxy-only mode negotiated; native packet bridge active on endpoint=%s",
                     endpoint.name != NULL ? endpoint.name : "unknown");
   const int rc = tunnel_run_loop_with_endpoint(-1, &endpoint);
   packet_endpoint_destroy_proxy_queue(&g_proxy_queue);
@@ -523,7 +542,8 @@ int tunnel_loop_run(int tun_fd, const char *server, const char *user, const char
   atomic_store(&g_stop, 0);
   tunnel_log("tunnel start server=%s tun_mtu=%d", server, tunnel_sanitize_mtu(tun_mtu));
   int rc = tunnel_negotiate(server, user, password, psk, tun_mtu);
-  if (rc != TUNNEL_EXIT_OK) return rc;
+  if (rc != TUNNEL_EXIT_OK)
+    return rc;
   return tunnel_run_loop(tun_fd);
 }
 
@@ -612,15 +632,19 @@ void engine_dp_note_esp_plain_ok(void) { g_dp_esp_plain_ok++; }
 void engine_dp_note_esp_plain_fail(void) { g_dp_esp_plain_fail++; }
 
 void engine_dp_note_tun_ipv4_outbound(const uint8_t *packet, size_t nbytes) {
-  if (packet == NULL || nbytes < 40u) return;
+  if (packet == NULL || nbytes < 40u)
+    return;
   const uint8_t version = packet[0] >> 4;
   const size_t ihl = (size_t)(packet[0] & 0x0fu) * 4u;
-  if (version != 4u || ihl < 20u || nbytes < ihl + 20u) return;
-  if (packet[9] != 6u) return;
+  if (version != 4u || ihl < 20u || nbytes < ihl + 20u)
+    return;
+  if (packet[9] != 6u)
+    return;
   const uint8_t flags = packet[ihl + 13u];
   const int syn = (flags & 0x02u) != 0u;
   const int ack = (flags & 0x10u) != 0u;
-  if (!syn || ack) return;
+  if (!syn || ack)
+    return;
   g_dp_tun_ipv4_tcp_syn_out++;
 }
 
@@ -643,16 +667,19 @@ void engine_dp_note_tun_ipv4_protocol(uint8_t proto) {
 
 void engine_dp_maybe_log_summary(time_t now) {
   static time_t s_last;
-  if (s_last == 0) s_last = now;
-  if (now - s_last < 30) return;
+  if (s_last == 0)
+    s_last = now;
+  if (now - s_last < 30)
+    return;
   s_last = now;
-  tunnel_engine_log(
-      ANDROID_LOG_DEBUG, LOG_TAG,
-      "dataplane 30s tun_rx=%llu encap_ok=%llu encap_fail=%llu esp_rx=%llu esp_plain_ok=%llu esp_plain_fail=%llu tun_tcp_syn_out=%llu tun_ipv4_wr=%llu tun_ipv4_tcp=%llu tun_ipv4_udp=%llu tun_ipv4_icmp=%llu tun_ipv4_other=%llu",
-      (unsigned long long)g_dp_tun_rx, (unsigned long long)g_dp_encap_ok, (unsigned long long)g_dp_encap_fail,
-      (unsigned long long)g_dp_esp_rx, (unsigned long long)g_dp_esp_plain_ok,
-      (unsigned long long)g_dp_esp_plain_fail, (unsigned long long)g_dp_tun_ipv4_tcp_syn_out,
-      (unsigned long long)g_dp_tun_ipv4_wr,
-      (unsigned long long)g_dp_tun_ipv4_tcp_wr, (unsigned long long)g_dp_tun_ipv4_udp_wr,
-      (unsigned long long)g_dp_tun_ipv4_icmp_wr, (unsigned long long)g_dp_tun_ipv4_other_wr);
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
+                    "dataplane 30s tun_rx=%llu encap_ok=%llu encap_fail=%llu esp_rx=%llu esp_plain_ok=%llu "
+                    "esp_plain_fail=%llu tun_tcp_syn_out=%llu tun_ipv4_wr=%llu tun_ipv4_tcp=%llu tun_ipv4_udp=%llu "
+                    "tun_ipv4_icmp=%llu tun_ipv4_other=%llu",
+                    (unsigned long long)g_dp_tun_rx, (unsigned long long)g_dp_encap_ok,
+                    (unsigned long long)g_dp_encap_fail, (unsigned long long)g_dp_esp_rx,
+                    (unsigned long long)g_dp_esp_plain_ok, (unsigned long long)g_dp_esp_plain_fail,
+                    (unsigned long long)g_dp_tun_ipv4_tcp_syn_out, (unsigned long long)g_dp_tun_ipv4_wr,
+                    (unsigned long long)g_dp_tun_ipv4_tcp_wr, (unsigned long long)g_dp_tun_ipv4_udp_wr,
+                    (unsigned long long)g_dp_tun_ipv4_icmp_wr, (unsigned long long)g_dp_tun_ipv4_other_wr);
 }

@@ -1,0 +1,9 @@
+# Android native code uses the NDK/Clang toolchain; LLVM style keeps the
+# formatting predictable without inventing a local dialect.
+BasedOnStyle: LLVM
+Language: Cpp
+ColumnLimit: 120
+IndentWidth: 2
+ContinuationIndentWidth: 4
+PointerAlignment: Right
+SortIncludes: Never

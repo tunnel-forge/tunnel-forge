@@ -3,6 +3,17 @@ project(tunnel_engine C)
 
 set(CMAKE_C_STANDARD 99)
 
+# Keep clang-tidy opt-in because it is slower than a normal native build and can
+# surface analyzer findings unrelated to the code a developer is currently touching.
+option(TUNNEL_FORGE_CLANG_TIDY "Run clang-tidy for tunnel_engine C sources" OFF)
+if(TUNNEL_FORGE_CLANG_TIDY)
+  if(NOT CLANG_TIDY_COMMAND)
+    find_program(CLANG_TIDY_COMMAND NAMES clang-tidy REQUIRED)
+  endif()
+  set(TUNNEL_FORGE_CLANG_TIDY_COMMAND
+      "${CLANG_TIDY_COMMAND};--config-file=${CMAKE_CURRENT_LIST_DIR}/../../../../../.clang-tidy")
+endif()
+
 include(FetchContent)
 set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
 set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
@@ -34,6 +45,10 @@ add_library(
   ppp_mschap.c
   ppp.c
 )
+
+if(TUNNEL_FORGE_CLANG_TIDY)
+  set_property(TARGET tunnel_engine PROPERTY C_CLANG_TIDY "${TUNNEL_FORGE_CLANG_TIDY_COMMAND}")
+endif()
 
 target_include_directories(tunnel_engine PRIVATE ${mbedtls_SOURCE_DIR}/include)
 

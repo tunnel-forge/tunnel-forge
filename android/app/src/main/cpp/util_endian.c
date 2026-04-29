@@ -13,9 +13,7 @@ void util_write_be32(uint8_t *p, uint32_t v) {
   p[3] = (uint8_t)(v & 0xff);
 }
 
-uint16_t util_read_be16(const uint8_t *p) {
-  return (uint16_t)((p[0] << 8) | p[1]);
-}
+uint16_t util_read_be16(const uint8_t *p) { return (uint16_t)((p[0] << 8) | p[1]); }
 
 uint32_t util_read_be32(const uint8_t *p) {
   return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];

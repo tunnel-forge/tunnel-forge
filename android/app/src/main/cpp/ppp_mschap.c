@@ -40,9 +40,12 @@ static int challenge_response(const uint8_t challenge[8], const uint8_t password
   uint8_t z[21];
   memset(z, 0, sizeof(z));
   memcpy(z, password_hash, 16);
-  if (mschap_des_encrypt_block(challenge, z + 0, response + 0) != 0) return -1;
-  if (mschap_des_encrypt_block(challenge, z + 7, response + 8) != 0) return -1;
-  if (mschap_des_encrypt_block(challenge, z + 14, response + 16) != 0) return -1;
+  if (mschap_des_encrypt_block(challenge, z + 0, response + 0) != 0)
+    return -1;
+  if (mschap_des_encrypt_block(challenge, z + 7, response + 8) != 0)
+    return -1;
+  if (mschap_des_encrypt_block(challenge, z + 14, response + 16) != 0)
+    return -1;
   return 0;
 }
 
@@ -59,7 +62,8 @@ static int nt_password_hash(const char *password, uint8_t hash[16]) {
   uint8_t unicode[512];
   size_t ulen = 0;
   password_to_unicode_le(password, unicode, &ulen, sizeof(unicode));
-  if (ulen == 0) return -1;
+  if (ulen == 0)
+    return -1;
   mbedtls_md4_context ctx;
   mbedtls_md4_init(&ctx);
   if (mbedtls_md4_starts_ret(&ctx) != 0) {
@@ -82,16 +86,22 @@ static int challenge_hash(const uint8_t peer_chal[16], const uint8_t auth_chal[1
                           uint8_t chal8[8]) {
   const char *user = username;
   const char *bs = strrchr(username, '\\');
-  if (bs != NULL) user = bs + 1;
+  if (bs != NULL)
+    user = bs + 1;
 
   mbedtls_sha1_context sha;
   mbedtls_sha1_init(&sha);
-  if (mbedtls_sha1_starts_ret(&sha) != 0) goto fail;
-  if (mbedtls_sha1_update_ret(&sha, peer_chal, 16) != 0) goto fail;
-  if (mbedtls_sha1_update_ret(&sha, auth_chal, 16) != 0) goto fail;
-  if (mbedtls_sha1_update_ret(&sha, (const uint8_t *)user, strlen(user)) != 0) goto fail;
+  if (mbedtls_sha1_starts_ret(&sha) != 0)
+    goto fail;
+  if (mbedtls_sha1_update_ret(&sha, peer_chal, 16) != 0)
+    goto fail;
+  if (mbedtls_sha1_update_ret(&sha, auth_chal, 16) != 0)
+    goto fail;
+  if (mbedtls_sha1_update_ret(&sha, (const uint8_t *)user, strlen(user)) != 0)
+    goto fail;
   uint8_t d[20];
-  if (mbedtls_sha1_finish_ret(&sha, d) != 0) goto fail;
+  if (mbedtls_sha1_finish_ret(&sha, d) != 0)
+    goto fail;
   mbedtls_sha1_free(&sha);
   memcpy(chal8, d, 8);
   return 0;
@@ -104,15 +114,18 @@ static int generate_nt_response(const uint8_t auth_chal[16], const uint8_t peer_
                                 const char *password, uint8_t nt_resp[24]) {
   uint8_t chal8[8];
   uint8_t phash[16];
-  if (challenge_hash(peer_chal, auth_chal, username, chal8) != 0) return -1;
-  if (nt_password_hash(password, phash) != 0) return -1;
+  if (challenge_hash(peer_chal, auth_chal, username, chal8) != 0)
+    return -1;
+  if (nt_password_hash(password, phash) != 0)
+    return -1;
   return challenge_response(chal8, phash, nt_resp);
 }
 
 int ppp_mschapv2_response_value(const char *username, const char *password, const uint8_t auth_challenge[16],
                                 uint8_t peer_challenge[16], uint8_t value49_out[49]) {
   uint8_t nt[24];
-  if (generate_nt_response(auth_challenge, peer_challenge, username, password, nt) != 0) return -1;
+  if (generate_nt_response(auth_challenge, peer_challenge, username, password, nt) != 0)
+    return -1;
   memcpy(value49_out, peer_challenge, 16);
   memset(value49_out + 16, 0, 8);
   memcpy(value49_out + 24, nt, 24);

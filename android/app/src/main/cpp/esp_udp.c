@@ -58,8 +58,8 @@ static struct {
   uint8_t head[8];
 } s_last_fail;
 
-static void esp_fail_capture(esp_fail_kind_t kind, size_t in_len, const uint8_t *head_src, size_t head_avail, uint32_t a,
-                             uint32_t b, size_t sa, size_t sb, uint8_t nh) {
+static void esp_fail_capture(esp_fail_kind_t kind, size_t in_len, const uint8_t *head_src, size_t head_avail,
+                             uint32_t a, uint32_t b, size_t sa, size_t sb, uint8_t nh) {
   s_last_fail.kind = kind;
   s_last_fail.in_len = in_len;
   s_last_fail.a = a;
@@ -75,7 +75,8 @@ static void esp_fail_capture(esp_fail_kind_t kind, size_t in_len, const uint8_t 
 }
 
 void esp_decrypt_last_fail_snprint(char *buf, size_t buflen) {
-  if (buf == NULL || buflen == 0) return;
+  if (buf == NULL || buflen == 0)
+    return;
   char hex[32];
   hex[0] = '\0';
   if (s_last_fail.kind != ESP_FAIL_NONE) {
@@ -194,26 +195,24 @@ static esp_drop_stats_t s_esp_drop_stats;
 void esp_reset_drop_counters(void) { memset(&s_esp_drop_stats, 0, sizeof(s_esp_drop_stats)); }
 
 void esp_log_drop_counters(const char *ctx, int reset_after_log) {
-  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
-                    "esp drop counters [%s]: spi=%llu seq0=%llu replay_old=%llu replay_dup=%llu hmac=%llu "
-                    "aes=%llu short=%llu nh=%llu pad_len=%llu pad_byte=%llu udp_len=%llu l2tp_len=%llu",
-                    ctx ? ctx : "n/a", (unsigned long long)s_esp_drop_stats.spi_mismatch,
-                    (unsigned long long)s_esp_drop_stats.replay_seq_zero,
-                    (unsigned long long)s_esp_drop_stats.replay_old,
-                    (unsigned long long)s_esp_drop_stats.replay_dup,
-                    (unsigned long long)s_esp_drop_stats.hmac_mismatch,
-                    (unsigned long long)s_esp_drop_stats.aes_decrypt_failed,
-                    (unsigned long long)s_esp_drop_stats.plain_too_short,
-                    (unsigned long long)s_esp_drop_stats.next_header_bad,
-                    (unsigned long long)s_esp_drop_stats.pad_len_bad,
-                    (unsigned long long)s_esp_drop_stats.pad_byte_bad,
-                    (unsigned long long)s_esp_drop_stats.udp_len_bad,
-                    (unsigned long long)s_esp_drop_stats.l2tp_len_bad);
-  if (reset_after_log) esp_reset_drop_counters();
+  tunnel_engine_log(
+      ANDROID_LOG_DEBUG, LOG_TAG,
+      "esp drop counters [%s]: spi=%llu seq0=%llu replay_old=%llu replay_dup=%llu hmac=%llu "
+      "aes=%llu short=%llu nh=%llu pad_len=%llu pad_byte=%llu udp_len=%llu l2tp_len=%llu",
+      ctx ? ctx : "n/a", (unsigned long long)s_esp_drop_stats.spi_mismatch,
+      (unsigned long long)s_esp_drop_stats.replay_seq_zero, (unsigned long long)s_esp_drop_stats.replay_old,
+      (unsigned long long)s_esp_drop_stats.replay_dup, (unsigned long long)s_esp_drop_stats.hmac_mismatch,
+      (unsigned long long)s_esp_drop_stats.aes_decrypt_failed, (unsigned long long)s_esp_drop_stats.plain_too_short,
+      (unsigned long long)s_esp_drop_stats.next_header_bad, (unsigned long long)s_esp_drop_stats.pad_len_bad,
+      (unsigned long long)s_esp_drop_stats.pad_byte_bad, (unsigned long long)s_esp_drop_stats.udp_len_bad,
+      (unsigned long long)s_esp_drop_stats.l2tp_len_bad);
+  if (reset_after_log)
+    esp_reset_drop_counters();
 }
 
 static void esp_ensure_drbg(void) {
-  if (s_esp_drbg_inited) return;
+  if (s_esp_drbg_inited)
+    return;
   mbedtls_entropy_init(&s_esp_entropy);
   mbedtls_ctr_drbg_init(&s_esp_drbg);
   const char *p = "tunnel_forge_esp";
@@ -240,17 +239,21 @@ static void esp_ensure_drbg(void) {
  * Replay state is intentionally committed only after every authentication, decrypt, and inner-payload
  * validation step succeeds; malformed or unauthenticated packets must not advance the replay window.
  *
- * @param k       Active inbound ESP keys and replay-window state. When enc_key_len is 0, this is a cleartext pass-through.
+ * @param k       Active inbound ESP keys and replay-window state. When enc_key_len is 0, this is a cleartext
+ * pass-through.
  * @param in      Received datagram bytes from the shared IKE/ESP UDP socket.
  * @param in_len  Number of bytes available at @p in.
- * @param out     Caller-owned output buffer. On success it contains only the L2TP payload, without the inner UDP header.
+ * @param out     Caller-owned output buffer. On success it contains only the L2TP payload, without the inner UDP
+ * header.
  * @param out_len In: capacity of @p out. Out: number of L2TP payload bytes written.
  *
- * @return 0 on successful pass-through/decrypt, -1 on framing, SPI, replay, authentication, decrypt, padding, or capacity failure.
+ * @return 0 on successful pass-through/decrypt, -1 on framing, SPI, replay, authentication, decrypt, padding, or
+ * capacity failure.
  */
 int esp_try_decrypt(esp_keys_t *k, const uint8_t *in, size_t in_len, uint8_t *out, size_t *out_len) {
   if (k->enc_key_len == 0) {
-    if (in_len > *out_len) return -1;
+    if (in_len > *out_len)
+      return -1;
     memcpy(out, in, in_len);
     *out_len = in_len;
     s_last_fail.kind = ESP_FAIL_NONE;
@@ -294,8 +297,8 @@ int esp_try_decrypt(esp_keys_t *k, const uint8_t *in, size_t in_len, uint8_t *ou
   if (spi != k->spi_r) {
     s_esp_drop_stats.spi_mismatch++;
     esp_fail_capture(ESP_FAIL_SPI, in_len, esp_head, 8, spi, k->spi_r, 0, 0, 0);
-    tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "esp decrypt spi mismatch got=%08x want=%08x",
-                      (unsigned)spi, (unsigned)k->spi_r);
+    tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "esp decrypt spi mismatch got=%08x want=%08x", (unsigned)spi,
+                      (unsigned)k->spi_r);
     return -1;
   }
 
@@ -398,8 +401,8 @@ int esp_try_decrypt(esp_keys_t *k, const uint8_t *in, size_t in_len, uint8_t *ou
    */
   mbedtls_cipher_context_t ciph;
   mbedtls_cipher_init(&ciph);
-  const mbedtls_cipher_info_t *info = mbedtls_cipher_info_from_values(MBEDTLS_CIPHER_ID_AES, (int)k->enc_key_len * 8,
-                                                                      MBEDTLS_MODE_CBC);
+  const mbedtls_cipher_info_t *info =
+      mbedtls_cipher_info_from_values(MBEDTLS_CIPHER_ID_AES, (int)k->enc_key_len * 8, MBEDTLS_MODE_CBC);
   if (info == NULL) {
     mbedtls_cipher_free(&ciph);
     esp_fail_capture(ESP_FAIL_CIPHER_SETUP, in_len, esp_head, 8, 0, 0, 0, 0, 0);
@@ -539,12 +542,15 @@ static uint16_t ipv4_udp_checksum(const uint8_t ip_src[4], const uint8_t ip_dst[
   sum += (uint32_t)udp_len;
   for (size_t i = 0; i < udp_len; i += 2) {
     uint32_t w = (uint32_t)udp[i] << 8;
-    if (i + 1 < udp_len) w |= udp[i + 1];
+    if (i + 1 < udp_len)
+      w |= udp[i + 1];
     sum += w;
   }
-  while (sum >> 16) sum = (sum & 0xffffu) + (sum >> 16);
+  while (sum >> 16)
+    sum = (sum & 0xffffu) + (sum >> 16);
   uint16_t csum = (uint16_t)~sum;
-  if (csum == 0) csum = 0xffffu;
+  if (csum == 0)
+    csum = 0xffffu;
   return csum;
 }
 #endif
@@ -567,8 +573,10 @@ int esp_encrypt_send(int fd, esp_keys_t *k, const struct sockaddr *peer, socklen
 
   /* Transport mode: wrap plaintext as UDP(src=encap socket, dst=1701) + L2TP payload. */
   uint8_t inner_buf[4096];
-  if (plain_len > UINT16_MAX - 8) return -1;
-  if (plain_len + 8 > sizeof(inner_buf)) return -1;
+  if (plain_len > UINT16_MAX - 8)
+    return -1;
+  if (plain_len + 8 > sizeof(inner_buf))
+    return -1;
   memcpy(inner_buf + 8, plain, plain_len);
   build_inner_udp(inner_buf, L2TP_PORT, L2TP_PORT, (uint16_t)plain_len);
   /* CMake TUNNEL_FORGE_ESP_INNER_UDP_NO_CHECKSUM (default ON): inner csum 0 often improves server interop. */
@@ -598,33 +606,38 @@ int esp_encrypt_send(int fd, esp_keys_t *k, const struct sockaddr *peer, socklen
   uint8_t iv[16];
   esp_ensure_drbg();
   if (s_esp_drbg_inited) {
-    if (mbedtls_ctr_drbg_random(&s_esp_drbg, iv, sizeof(iv)) != 0) return -1;
+    if (mbedtls_ctr_drbg_random(&s_esp_drbg, iv, sizeof(iv)) != 0)
+      return -1;
   } else {
-    for (size_t i = 0; i < 16; i++) iv[i] = (uint8_t)(k->seq_i + (uint32_t)i + esp_plain[0]);
+    for (size_t i = 0; i < 16; i++)
+      iv[i] = (uint8_t)(k->seq_i + (uint32_t)i + esp_plain[0]);
   }
   memcpy(buf + off, iv, 16);
   off += 16;
   /* ESP trailer: PKCS#7-style incremental pad bytes + pad length + next header(UDP). */
   size_t pad_len = (16 - ((esp_plain_len + 2) % 16)) % 16;
   size_t ct_len = esp_plain_len + pad_len + 2;
-  if (off + ct_len + 12 > sizeof(buf)) return -1;
+  if (off + ct_len + 12 > sizeof(buf))
+    return -1;
   uint8_t tmp[4096];
-  if (esp_plain_len > sizeof(tmp)) return -1;
+  if (esp_plain_len > sizeof(tmp))
+    return -1;
   memcpy(tmp, esp_plain, esp_plain_len);
-  for (size_t i = 0; i < pad_len; i++) tmp[esp_plain_len + i] = (uint8_t)(i + 1);
+  for (size_t i = 0; i < pad_len; i++)
+    tmp[esp_plain_len + i] = (uint8_t)(i + 1);
   tmp[esp_plain_len + pad_len] = (uint8_t)pad_len;
   tmp[esp_plain_len + pad_len + 1] = 17; /* Next Header: UDP */
 
   mbedtls_cipher_context_t ciph;
   mbedtls_cipher_init(&ciph);
-  const mbedtls_cipher_info_t *info = mbedtls_cipher_info_from_values(MBEDTLS_CIPHER_ID_AES, (int)k->enc_key_len * 8,
-                                                                        MBEDTLS_MODE_CBC);
+  const mbedtls_cipher_info_t *info =
+      mbedtls_cipher_info_from_values(MBEDTLS_CIPHER_ID_AES, (int)k->enc_key_len * 8, MBEDTLS_MODE_CBC);
   if (info == NULL) {
     mbedtls_cipher_free(&ciph);
     return -1;
   }
-  if (mbedtls_cipher_setup(&ciph, info) != 0 || mbedtls_cipher_setkey(&ciph, k->enc_key, (int)k->enc_key_len * 8,
-                                                                       MBEDTLS_ENCRYPT) != 0) {
+  if (mbedtls_cipher_setup(&ciph, info) != 0 ||
+      mbedtls_cipher_setkey(&ciph, k->enc_key, (int)k->enc_key_len * 8, MBEDTLS_ENCRYPT) != 0) {
     mbedtls_cipher_free(&ciph);
     return -1;
   }
@@ -661,12 +674,12 @@ int esp_encrypt_send(int fd, esp_keys_t *k, const struct sockaddr *peer, socklen
   if (s_esp_keymap_profile_once == 0) {
     s_esp_keymap_profile_once = 1;
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
-                      "esp key profile one-shot: out_spi=%08x in_spi=%08x out_enc=%02x%02x%02x%02x out_auth=%02x%02x%02x%02x in_enc=%02x%02x%02x%02x in_auth=%02x%02x%02x%02x",
-                      (unsigned)k->spi_i, (unsigned)k->spi_r,
-                      k->enc_key[0], k->enc_key[1], k->enc_key[2], k->enc_key[3],
-                      k->auth_key[0], k->auth_key[1], k->auth_key[2], k->auth_key[3],
-                      k->enc_key[16], k->enc_key[17], k->enc_key[18], k->enc_key[19],
-                      k->auth_key[20], k->auth_key[21], k->auth_key[22], k->auth_key[23]);
+                      "esp key profile one-shot: out_spi=%08x in_spi=%08x out_enc=%02x%02x%02x%02x "
+                      "out_auth=%02x%02x%02x%02x in_enc=%02x%02x%02x%02x in_auth=%02x%02x%02x%02x",
+                      (unsigned)k->spi_i, (unsigned)k->spi_r, k->enc_key[0], k->enc_key[1], k->enc_key[2],
+                      k->enc_key[3], k->auth_key[0], k->auth_key[1], k->auth_key[2], k->auth_key[3], k->enc_key[16],
+                      k->enc_key[17], k->enc_key[18], k->enc_key[19], k->auth_key[20], k->auth_key[21], k->auth_key[22],
+                      k->auth_key[23]);
   }
   if (s_esp_send_profile_logs < 8) {
     s_esp_send_profile_logs++;
@@ -679,12 +692,12 @@ int esp_encrypt_send(int fd, esp_keys_t *k, const struct sockaddr *peer, socklen
   if (!s_esp_logged_inner_ports) {
     s_esp_logged_inner_ports = 1;
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "esp send inner udp src=%u dst=%u plain_len=%zu pkt_len=%zu",
-                        (unsigned)L2TP_PORT, (unsigned)L2TP_PORT, plain_len, off);
+                      (unsigned)L2TP_PORT, (unsigned)L2TP_PORT, plain_len, off);
   }
   if (sent < 0) {
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG,
-                        "esp_encrypt_send: sendto failed errno=%d plain_len=%zu pkt_len=%zu udp_encap=%d",
-                        errno, plain_len, off, k->udp_encap);
+                      "esp_encrypt_send: sendto failed errno=%d plain_len=%zu pkt_len=%zu udp_encap=%d", errno,
+                      plain_len, off, k->udp_encap);
   }
   return (int)sent;
 }

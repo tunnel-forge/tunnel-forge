@@ -47,12 +47,14 @@ static void ike_hex_dump(const char *prefix, const uint8_t *data, size_t len, si
     char *p = line;
     size_t rem = sizeof(line);
     int w = snprintf(p, rem, "%s +%04zu: ", prefix, i);
-    if (w < 0 || (size_t)w >= rem) break;
+    if (w < 0 || (size_t)w >= rem)
+      break;
     p += (size_t)w;
     rem -= (size_t)w;
     for (size_t j = 0; j < 16 && i + j < n; j++) {
       w = snprintf(p, rem, "%02x ", data[i + j]);
-      if (w < 0 || (size_t)w >= rem) break;
+      if (w < 0 || (size_t)w >= rem)
+        break;
       p += (size_t)w;
       rem -= (size_t)w;
     }
@@ -70,9 +72,10 @@ static void ike_log_isakmp_summary(const char *ctx, const uint8_t *in, int inlen
   }
   uint32_t isakmp_len = util_read_be32(in + 24);
   uint32_t mid = util_read_be32(in + 20);
-  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
- "%s: inlen=%d isakmp_len=%u first_np=%u exch=%u flags=0x%02x msgid=%u icookie=%02x%02x... rcookie=%02x%02x...",
-                      ctx, inlen, isakmp_len, in[16], in[18], in[19], mid, in[0], in[1], in[8], in[9]);
+  tunnel_engine_log(
+      ANDROID_LOG_DEBUG, LOG_TAG,
+      "%s: inlen=%d isakmp_len=%u first_np=%u exch=%u flags=0x%02x msgid=%u icookie=%02x%02x... rcookie=%02x%02x...",
+      ctx, inlen, isakmp_len, in[16], in[18], in[19], mid, in[0], in[1], in[8], in[9]);
 
   /* Cleartext payload walk is meaningless when the body is ciphertext (false "invalid payload len"). */
   if (in[19] & IKE_FLAG_ENC) {
@@ -87,7 +90,7 @@ static void ike_log_isakmp_summary(const char *ctx, const uint8_t *in, int inlen
     uint16_t plen = util_read_be16(p + 2);
     if (plen < 4 || plen > (size_t)left) {
       tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "%s: invalid payload len=%u left=%d at depth=%d", ctx,
- (unsigned)plen, left, depth);
+                        (unsigned)plen, left, depth);
       break;
     }
     const uint8_t *body = p + 4;
@@ -98,11 +101,11 @@ static void ike_log_isakmp_summary(const char *ctx, const uint8_t *in, int inlen
       uint8_t spi_sz = body[5];
       uint16_t ntype = util_read_be16(body + 6);
       tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG,
-                          "%s: NOTIFY doi=%u proto=%u spi_len=%u type=%u (0x%04x) - server may reject proposal/PSK",
-                          ctx, doi, proto, spi_sz, ntype, ntype);
+                        "%s: NOTIFY doi=%u proto=%u spi_len=%u type=%u (0x%04x) - server may reject proposal/PSK", ctx,
+                        doi, proto, spi_sz, ntype, ntype);
     } else {
-      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "%s: payload[%d] type=%u total_len=%u body_len=%zu", ctx, depth,
-                          np, (unsigned)plen, blen);
+      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "%s: payload[%d] type=%u total_len=%u body_len=%zu", ctx, depth, np,
+                        (unsigned)plen, blen);
     }
     np = p[0];
     p += plen;
@@ -142,7 +145,7 @@ static int resolve_udp(const char *host, uint16_t port, struct sockaddr_storage 
   int r = getaddrinfo(host, portbuf, &hints, &res);
   if (r != 0 || res == NULL) {
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "resolve_udp host=%s port=%s: %s", host, portbuf,
-                        r ? gai_strerror(r) : "getaddrinfo returned null");
+                      r ? gai_strerror(r) : "getaddrinfo returned null");
     return -1;
   }
   memcpy(out, res->ai_addr, res->ai_addrlen);
@@ -176,8 +179,7 @@ static int cleartext_l2tp(const char *server, ike_session_t *ike, esp_keys_t *es
   }
   ike->esp_fd = fd;
   esp->udp_encap = 0;
-  tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG,
-                      "L2TP without IPsec: plaintext UDP to server (IPsec skipped)");
+  tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "L2TP without IPsec: plaintext UDP to server (IPsec skipped)");
   return 0;
 }
 
@@ -230,8 +232,7 @@ static int ike_send_recv(int fd, const struct sockaddr *peer, socklen_t peer_len
   }
 
   static const int retry_ms[] = {2000, 4000, 5000, 5000};
-  int attempts =
-      (timeout_ms >= 16000) ? 4 : (timeout_ms >= 10000) ? 3 : (timeout_ms >= 4000) ? 2 : 1;
+  int attempts = (timeout_ms >= 16000) ? 4 : (timeout_ms >= 10000) ? 3 : (timeout_ms >= 4000) ? 2 : 1;
   int remaining = timeout_ms;
 
   /* Retry loop: re-send request each attempt until reply or timeout budget is exhausted. */
@@ -242,15 +243,15 @@ static int ike_send_recv(int fd, const struct sockaddr *peer, socklen_t peer_len
     }
     ssize_t ns = sendto(fd, sendptr, sendlen, 0, peer, peer_len);
     if (ns != (ssize_t)sendlen) {
-      tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG,
-                          "ike_send_recv: sendto ret=%zd want=%zu errno=%d nat_t=%d", ns, sendlen, errno, prefix4500);
+      tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "ike_send_recv: sendto ret=%zd want=%zu errno=%d nat_t=%d", ns,
+                        sendlen, errno, prefix4500);
       return -1;
     }
     int wait = (attempt < 4) ? retry_ms[attempt] : 5000;
-    if (wait > remaining) wait = remaining;
-    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
-                        "ike_send_recv: attempt %d/%d wait=%d ms remaining=%d ms", attempt + 1, attempts, wait,
-                        remaining);
+    if (wait > remaining)
+      wait = remaining;
+    tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ike_send_recv: attempt %d/%d wait=%d ms remaining=%d ms",
+                      attempt + 1, attempts, wait, remaining);
     /* Poll in small slices so stop requests are honored promptly. */
     int waited = 0;
     int pr = 0;
@@ -261,10 +262,12 @@ static int ike_send_recv(int fd, const struct sockaddr *peer, socklen_t peer_len
         return -1;
       }
       int slice = wait - waited;
-      if (slice > 200) slice = 200;
+      if (slice > 200)
+        slice = 200;
       pr = poll(&pfd, 1, slice);
       waited += slice;
-      if (pr != 0) break;
+      if (pr != 0)
+        break;
     }
     remaining -= waited;
     if (pr < 0) {
@@ -281,7 +284,7 @@ static int ike_send_recv(int fd, const struct sockaddr *peer, socklen_t peer_len
         return -1;
       }
       tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "ike_send_recv: no reply after %d ms (attempt %d)", waited,
-                          attempt + 1);
+                        attempt + 1);
       continue;
     }
     ssize_t n = recv(fd, in, in_cap, 0);
@@ -290,7 +293,7 @@ static int ike_send_recv(int fd, const struct sockaddr *peer, socklen_t peer_len
       return -1;
     }
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ike_send_recv: got UDP reply %zd bytes nat_t=%d (attempt %d)", n,
-                        prefix4500, attempt + 1);
+                      prefix4500, attempt + 1);
     /* NAT-T receive path: strip RFC 3948 non-ESP marker before higher-layer parsing. */
     if (prefix4500 && n >= 4 && util_read_be32(in) == 0u) {
       memmove(in, in + 4, (size_t)n - 4);
@@ -298,8 +301,8 @@ static int ike_send_recv(int fd, const struct sockaddr *peer, socklen_t peer_len
     }
     return (int)n;
   }
-  tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG,
-                      "ike_send_recv: all %d attempts failed (total timeout %d ms)", attempts, timeout_ms);
+  tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "ike_send_recv: all %d attempts failed (total timeout %d ms)", attempts,
+                    timeout_ms);
   return -1;
 }
 
@@ -326,8 +329,8 @@ static int ike_send_qm3_payload(int fd, const struct sockaddr *peer, socklen_t p
   }
   ssize_t ns = sendto(fd, sendptr, sendlen, 0, peer, peer_len);
   if (ns != (ssize_t)sendlen) {
-    tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "ike_send_qm3_payload: sendto ret=%zd want=%zu errno=%d", ns,
-                      sendlen, errno);
+    tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "ike_send_qm3_payload: sendto ret=%zd want=%zu errno=%d", ns, sendlen,
+                      errno);
     return -1;
   }
   return 0;
@@ -338,28 +341,36 @@ static int ike_send_qm3_payload(int fd, const struct sockaddr *peer, socklen_t p
  * and inner payloads include SA. Other Quick encrypted packets with the same msgid are logged by the caller.
  */
 static int ike_is_duplicate_qm2_retransmit(int p1_aes, const uint8_t *aeskey, const uint8_t *deskey,
-                                           const uint8_t *qm1_tail, const uint8_t *in, int inlen,
-                                           uint32_t qm_mid) {
-  if (inlen < 28 || in[17] != 0x10) return 0;
-  if (in[18] != IKE_EXCH_QUICK || (in[19] & IKE_FLAG_ENC) == 0) return 0;
-  if (util_read_be32(in + 20) != qm_mid) return 0;
-  if (in[16] != IKE_PT_HASH) return 0;
+                                           const uint8_t *qm1_tail, const uint8_t *in, int inlen, uint32_t qm_mid) {
+  if (inlen < 28 || in[17] != 0x10)
+    return 0;
+  if (in[18] != IKE_EXCH_QUICK || (in[19] & IKE_FLAG_ENC) == 0)
+    return 0;
+  if (util_read_be32(in + 20) != qm_mid)
+    return 0;
+  if (in[16] != IKE_PT_HASH)
+    return 0;
   size_t enc_len = (size_t)inlen - 28;
-  if (enc_len < 16) return 0;
+  if (enc_len < 16)
+    return 0;
   uint8_t dec[768];
   size_t dec_len = 0;
   uint8_t iv_out[16];
   if (p1_aes) {
-    if (isakmp_aes128_decrypt(aeskey, qm1_tail, in + 28, enc_len, dec, &dec_len, iv_out) != 0) return 0;
+    if (isakmp_aes128_decrypt(aeskey, qm1_tail, in + 28, enc_len, dec, &dec_len, iv_out) != 0)
+      return 0;
   } else {
-    if (isakmp_3des_decrypt(deskey, qm1_tail, in + 28, enc_len, dec, &dec_len, iv_out) != 0) return 0;
+    if (isakmp_3des_decrypt(deskey, qm1_tail, in + 28, enc_len, dec, &dec_len, iv_out) != 0)
+      return 0;
   }
   size_t walk = 0;
   uint8_t cur = in[16];
   while (walk + 4 <= dec_len && cur != IKE_PT_NONE) {
     uint16_t pl = util_read_be16(dec + walk + 2);
-    if (pl < 4 || walk + pl > dec_len) return 0;
-    if (cur == IKE_PT_SA) return 1;
+    if (pl < 4 || walk + pl > dec_len)
+      return 0;
+    if (cur == IKE_PT_SA)
+      return 1;
     cur = dec[walk];
     walk += pl;
   }
@@ -372,14 +383,14 @@ static int ike_is_duplicate_qm2_retransmit(int p1_aes, const uint8_t *aeskey, co
  */
 static int ike_qm3_finish_recv_loop(int fd, const struct sockaddr *peer, socklen_t peer_len, const uint8_t *qm3_pkt,
                                     size_t qm3_len, uint8_t *in, size_t in_cap, int prefix4500, uint32_t qm_mid,
-                                    int p1_aes, const uint8_t *aeskey, const uint8_t *deskey,
-                                    const uint8_t *qm1_tail) {
+                                    int p1_aes, const uint8_t *aeskey, const uint8_t *deskey, const uint8_t *qm1_tail) {
   const int total_ms = 16000;
   const int slice_ms = 400;
   int elapsed = 0;
   int resend_count = 0;
 
-  if (ike_send_qm3_payload(fd, peer, peer_len, qm3_pkt, qm3_len, prefix4500) != 0) return -1;
+  if (ike_send_qm3_payload(fd, peer, peer_len, qm3_pkt, qm3_len, prefix4500) != 0)
+    return -1;
 
   while (elapsed < total_ms) {
     if (tunnel_should_stop()) {
@@ -389,7 +400,8 @@ static int ike_qm3_finish_recv_loop(int fd, const struct sockaddr *peer, socklen
     struct pollfd pfd = {.fd = fd, .events = POLLIN};
     int pr = poll(&pfd, 1, slice_ms);
     if (pr < 0) {
-      if (errno == EINTR) continue;
+      if (errno == EINTR)
+        continue;
       if (tunnel_should_stop()) {
         tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "Quick Mode msg3: canceled after poll interruption");
         return -1;
@@ -398,15 +410,18 @@ static int ike_qm3_finish_recv_loop(int fd, const struct sockaddr *peer, socklen
       return -1;
     }
     elapsed += slice_ms;
-    if (pr == 0) continue;
+    if (pr == 0)
+      continue;
 
     ssize_t n = recv(fd, in, in_cap, 0);
     if (n < 0) {
-      if (errno == EINTR) continue;
+      if (errno == EINTR)
+        continue;
       tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "ike_qm3_finish_recv_loop: recv errno=%d", errno);
       return -1;
     }
-    if (n == 0) continue;
+    if (n == 0)
+      continue;
 
     const uint8_t *p = in;
     ssize_t nl = n;
@@ -414,8 +429,10 @@ static int ike_qm3_finish_recv_loop(int fd, const struct sockaddr *peer, socklen
       p += 4;
       nl -= 4;
     }
-    if (nl < 28) continue;
-    if (p[17] != 0x10) continue;
+    if (nl < 28)
+      continue;
+    if (p[17] != 0x10)
+      continue;
 
     if (p[18] == IKE_EXCH_INFO) {
       ike_log_isakmp_summary("Quick Mode msg3 peer reply (Informational)", p, (int)nl);
@@ -424,10 +441,9 @@ static int ike_qm3_finish_recv_loop(int fd, const struct sockaddr *peer, socklen
 
     if (p[18] == IKE_EXCH_QUICK && (p[19] & IKE_FLAG_ENC) && util_read_be32(p + 20) == qm_mid) {
       if (ike_is_duplicate_qm2_retransmit(p1_aes, aeskey, deskey, qm1_tail, p, (int)nl, qm_mid)) {
-        tunnel_engine_log(
-            ANDROID_LOG_DEBUG, LOG_TAG,
-            "Quick Mode: server msg2 retransmit while waiting for QM3 ack; resending HASH(3) (resend=%d)",
-            resend_count);
+        tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
+                          "Quick Mode: server msg2 retransmit while waiting for QM3 ack; resending HASH(3) (resend=%d)",
+                          resend_count);
         if (resend_count < 16 && ike_send_qm3_payload(fd, peer, peer_len, qm3_pkt, qm3_len, prefix4500) == 0)
           resend_count++;
         continue;
@@ -438,12 +454,12 @@ static int ike_qm3_finish_recv_loop(int fd, const struct sockaddr *peer, socklen
   }
 
   tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
-                      "Quick Mode msg3: finished wait %d ms without Informational (peer often silent; ok)", total_ms);
+                    "Quick Mode msg3: finished wait %d ms without Informational (peer often silent; ok)", total_ms);
   return 0;
 }
 
-static void natd_hash(const uint8_t cky_i[8], const uint8_t cky_r[8],
-                      const uint8_t *ip4, uint16_t port_be, uint8_t out[20]) {
+static void natd_hash(const uint8_t cky_i[8], const uint8_t cky_r[8], const uint8_t *ip4, uint16_t port_be,
+                      uint8_t out[20]) {
   uint8_t in[8 + 8 + 4 + 2];
   memcpy(in, cky_i, 8);
   memcpy(in + 8, cky_r, 8);
@@ -480,56 +496,63 @@ typedef struct {
 
 static int parse_payload_chain(const uint8_t *in, int inlen, am2_t *o) {
   memset(o, 0, sizeof(*o));
-  if (inlen < 28) return -1;
+  if (inlen < 28)
+    return -1;
   const uint8_t *p = in + 28;
   int left = inlen - 28;
   uint8_t np = in[16];
   while (left >= 4 && np != IKE_PT_NONE) {
     uint16_t plen = util_read_be16(p + 2);
-    if (plen < 4 || plen > (size_t)left) return -1;
+    if (plen < 4 || plen > (size_t)left)
+      return -1;
     const uint8_t *body = p + 4;
     size_t blen = plen - 4;
     switch (np) {
-      case IKE_PT_SA:
-        o->sa_pkt = p;
-        o->sa_pkt_len = plen;
-        break;
-      case IKE_PT_KE:
-        o->ke_r = body;
-        o->ke_r_len = blen;
-        break;
-      case IKE_PT_NONCE:
-        o->nr = body;
-        o->nr_len = blen;
-        break;
-      case IKE_PT_ID:
-        o->id_r = body;
-        o->id_r_len = blen;
-        break;
-      case IKE_PT_HASH:
-        o->hash_r = body;
-        o->hash_r_len = blen;
-        break;
-      case IKE_PT_NAT_D:
-        if (blen >= 20 && o->natd_count < 4) memcpy(o->natd[o->natd_count++], body, 20);
-        break;
-      default:
-        break;
+    case IKE_PT_SA:
+      o->sa_pkt = p;
+      o->sa_pkt_len = plen;
+      break;
+    case IKE_PT_KE:
+      o->ke_r = body;
+      o->ke_r_len = blen;
+      break;
+    case IKE_PT_NONCE:
+      o->nr = body;
+      o->nr_len = blen;
+      break;
+    case IKE_PT_ID:
+      o->id_r = body;
+      o->id_r_len = blen;
+      break;
+    case IKE_PT_HASH:
+      o->hash_r = body;
+      o->hash_r_len = blen;
+      break;
+    case IKE_PT_NAT_D:
+      if (blen >= 20 && o->natd_count < 4)
+        memcpy(o->natd[o->natd_count++], body, 20);
+      break;
+    default:
+      break;
     }
     np = p[0];
     p += plen;
     left -= (int)plen;
   }
-  if (o->ke_r == NULL || o->nr == NULL || o->hash_r == NULL || o->sa_pkt_len == 0) return -1;
+  if (o->ke_r == NULL || o->nr == NULL || o->hash_r == NULL || o->sa_pkt_len == 0)
+    return -1;
   return 0;
 }
 
 static int derive_3des_key(const uint8_t skeyid_e[20], uint8_t key24[24]) {
   uint8_t k1[20], k2[20], k3[20];
   uint8_t z = 0;
-  if (prf_hmac_sha1(skeyid_e, 20, &z, 1, k1) != 0) return -1;
-  if (prf_hmac_sha1(skeyid_e, 20, k1, sizeof(k1), k2) != 0) return -1;
-  if (prf_hmac_sha1(skeyid_e, 20, k2, sizeof(k2), k3) != 0) return -1;
+  if (prf_hmac_sha1(skeyid_e, 20, &z, 1, k1) != 0)
+    return -1;
+  if (prf_hmac_sha1(skeyid_e, 20, k1, sizeof(k1), k2) != 0)
+    return -1;
+  if (prf_hmac_sha1(skeyid_e, 20, k2, sizeof(k2), k3) != 0)
+    return -1;
   memcpy(key24, k1, 8);
   memcpy(key24 + 8, k2, 8);
   memcpy(key24 + 16, k3, 8);
@@ -566,7 +589,8 @@ static int isakmp_3des_encrypt(const uint8_t key24[24], uint8_t iv_io[8], const 
                                uint8_t *out, size_t *out_len) {
   size_t pad = 8 - (plain_len % 8); // pad is always in [1..8]
   uint8_t buf[512];
-  if (plain_len > sizeof(buf) - pad) return -1;
+  if (plain_len > sizeof(buf) - pad)
+    return -1;
   memcpy(buf, plain, plain_len);
   memset(buf + plain_len, 0, pad);
   size_t tot = plain_len + pad;
@@ -610,9 +634,11 @@ static int isakmp_3des_decrypt(const uint8_t key24[24], const uint8_t iv_in[8], 
     return -1;
   }
   mbedtls_cipher_free(&ciph);
-  while (olen > 0 && plain[olen - 1] == 0) olen--;
+  while (olen > 0 && plain[olen - 1] == 0)
+    olen--;
   *plain_len = olen;
-  if (ct_len >= 8) memcpy(iv_out, ct + ct_len - 8, 8);
+  if (ct_len >= 8)
+    memcpy(iv_out, ct + ct_len - 8, 8);
   return 0;
 }
 
@@ -660,11 +686,14 @@ static void qm_first_iv_aes(const uint8_t p1_last[16], uint32_t mid, uint8_t iv[
  * Returns: 1 = invalid-hash notify seen, 0 = informational without that notify, -1 = decrypt/parse failure. */
 static int info_has_invalid_hash_notify(const uint8_t *pkt, int pkt_len, int p1_aes, const uint8_t *aeskey16,
                                         const uint8_t *deskey24, const uint8_t msg5_last_block[16]) {
-  if (pkt == NULL || pkt_len < 28) return -1;
-  if (pkt[18] != IKE_EXCH_INFO || (pkt[19] & IKE_FLAG_ENC) == 0) return 0;
+  if (pkt == NULL || pkt_len < 28)
+    return -1;
+  if (pkt[18] != IKE_EXCH_INFO || (pkt[19] & IKE_FLAG_ENC) == 0)
+    return 0;
 
   size_t enc_len = (size_t)pkt_len - 28;
-  if (enc_len < 8) return -1;
+  if (enc_len < 8)
+    return -1;
 
   uint32_t mid = util_read_be32(pkt + 20);
   uint8_t plain[512];
@@ -689,22 +718,26 @@ static int info_has_invalid_hash_notify(const uint8_t *pkt, int pkt_len, int p1_
     }
     dec_ok = (isakmp_3des_decrypt(deskey24, iv8, pkt + 28, enc_len, plain, &plain_len, iv_out) == 0);
   }
-  if (!dec_ok) return -1;
+  if (!dec_ok)
+    return -1;
 
   uint8_t np = pkt[16];
   size_t walk = 0;
   while (walk + 4 <= plain_len) {
     uint16_t pl = util_read_be16(plain + walk + 2);
-    if (pl < 4 || walk + pl > plain_len) return -1;
+    if (pl < 4 || walk + pl > plain_len)
+      return -1;
     const uint8_t *body = plain + walk + 4;
     size_t blen = pl - 4;
     if (np == IKE_PT_NOTIFY && blen >= 8) {
       uint16_t ntype = util_read_be16(body + 6);
-      if (ntype == IKE_N_INVALID_HASH_INFORMATION) return 1;
+      if (ntype == IKE_N_INVALID_HASH_INFORMATION)
+        return 1;
     }
     np = plain[walk];
     walk += pl;
-    if (np == IKE_PT_NONE) break;
+    if (np == IKE_PT_NONE)
+      break;
   }
   return 0;
 }
@@ -713,7 +746,8 @@ static int isakmp_aes128_encrypt(const uint8_t key16[16], uint8_t iv_io[16], con
                                  uint8_t *out, size_t *out_len) {
   size_t pad = 16 - (plain_len % 16); // pad is always in [1..16]
   uint8_t buf[512];
-  if (plain_len > sizeof(buf) - pad) return -1;
+  if (plain_len > sizeof(buf) - pad)
+    return -1;
   memcpy(buf, plain, plain_len);
   memset(buf + plain_len, 0, pad);
   size_t tot = plain_len + pad;
@@ -758,28 +792,32 @@ static int isakmp_aes128_decrypt(const uint8_t key16[16], const uint8_t iv_in[16
     return -1;
   }
   mbedtls_cipher_free(&ciph);
-  if (olen == 0) return -1;
+  if (olen == 0)
+    return -1;
   /* Libreswan (RFC 2409) uses zero-byte padding; strip trailing zeros.
    * The payload parser follows next/length fields so an exact strip is not required. */
-  while (olen > 0 && plain[olen - 1] == 0) olen--;
+  while (olen > 0 && plain[olen - 1] == 0)
+    olen--;
   *plain_len = olen;
-  if (ct_len >= 16) memcpy(iv_out, ct + ct_len - 16, 16);
+  if (ct_len >= 16)
+    memcpy(iv_out, ct + ct_len - 16, 16);
   return 0;
 }
 
 static size_t build_p1_sa(uint8_t *b, size_t cap) {
   size_t o = 0;
-  if (o + 8 + 120 > cap) return 0;
+  if (o + 8 + 120 > cap)
+    return 0;
   util_write_be32(b + o, 1);
   o += 4;
   util_write_be32(b + o, 1);
   o += 4;
 
   /* Group 0x000e = MODP2048 (RFC 3526), required by default Libreswan l2tp-psk (modp2048). */
-  static const uint8_t attrs_aes[] = {0x80, 0x01, 0x00, 0x07, 0x80, 0x0e, 0x00, 0x80, 0x80, 0x02, 0x00, 0x02,
- 0x80, 0x03, 0x00, 0x01, 0x80, 0x04, 0x00, 0x0e};
-  static const uint8_t attrs_3des[] = {0x80, 0x01, 0x00, 0x05, 0x80, 0x02, 0x00, 0x02, 0x80, 0x03, 0x00, 0x01,
- 0x80, 0x04, 0x00, 0x0e};
+  static const uint8_t attrs_aes[] = {0x80, 0x01, 0x00, 0x07, 0x80, 0x0e, 0x00, 0x80, 0x80, 0x02,
+                                      0x00, 0x02, 0x80, 0x03, 0x00, 0x01, 0x80, 0x04, 0x00, 0x0e};
+  static const uint8_t attrs_3des[] = {0x80, 0x01, 0x00, 0x05, 0x80, 0x02, 0x00, 0x02,
+                                       0x80, 0x03, 0x00, 0x01, 0x80, 0x04, 0x00, 0x0e};
 
   /*
    * One ISAKMP Proposal with two Transform payloads (AES then 3DES). Libreswan 5.x rejects
@@ -832,42 +870,61 @@ static size_t build_p1_sa(uint8_t *b, size_t cap) {
 //   type 6  = KEY_LENGTH        (128 for AES-128)
 static size_t build_p2_esp_sa(uint8_t *b, size_t cap, uint32_t spi_be) {
   size_t o = 0;
-  if (o + 48 > cap) return 0;
-  util_write_be32(b + o, 1); o += 4;  /* DOI = IPSEC (1) */
-  util_write_be32(b + o, 1); o += 4;  /* Situation = SIT_IDENTITY_ONLY (1) */
+  if (o + 48 > cap)
+    return 0;
+  util_write_be32(b + o, 1);
+  o += 4; /* DOI = IPSEC (1) */
+  util_write_be32(b + o, 1);
+  o += 4; /* Situation = SIT_IDENTITY_ONLY (1) */
   size_t p0 = o;
-  b[o++] = IKE_PT_NONE;  /* next proposal */
-  b[o++] = 0;            /* reserved */
-  size_t p_len_m = o; o += 2;
-  b[o++] = 1;   /* proposal # */
-  b[o++] = 3;   /* protocol = ESP */
-  b[o++] = 4;   /* SPI size */
-  b[o++] = 1;   /* # transforms */
-  util_write_be32(b + o, spi_be); o += 4;
+  b[o++] = IKE_PT_NONE; /* next proposal */
+  b[o++] = 0;           /* reserved */
+  size_t p_len_m = o;
+  o += 2;
+  b[o++] = 1; /* proposal # */
+  b[o++] = 3; /* protocol = ESP */
+  b[o++] = 4; /* SPI size */
+  b[o++] = 1; /* # transforms */
+  util_write_be32(b + o, spi_be);
+  o += 4;
   size_t t0 = o;
-  b[o++] = 0;   /* next transform = NONE */
-  b[o++] = 0;   /* reserved */
-  size_t t_len_m = o; o += 2;
-  b[o++] = 1;   /* transform # */
-  b[o++] = 12;  /* transform ID = ESP_AES (12) */
-  b[o++] = 0; b[o++] = 0;  /* reserved */
+  b[o++] = 0; /* next transform = NONE */
+  b[o++] = 0; /* reserved */
+  size_t t_len_m = o;
+  o += 2;
+  b[o++] = 1;  /* transform # */
+  b[o++] = 12; /* transform ID = ESP_AES (12) */
+  b[o++] = 0;
+  b[o++] = 0; /* reserved */
   // ENCAPSULATION_MODE = UDP-Encap-Transport (type 4, value 4; RFC 3947 sec 6)
-  b[o++] = 0x80; b[o++] = 0x04; b[o++] = 0x00; b[o++] = 0x04;
+  b[o++] = 0x80;
+  b[o++] = 0x04;
+  b[o++] = 0x00;
+  b[o++] = 0x04;
   /* AUTH_ALGORITHM = HMAC-SHA1-96 (type 5, value 2) */
-  b[o++] = 0x80; b[o++] = 0x05; b[o++] = 0x00; b[o++] = 0x02;
+  b[o++] = 0x80;
+  b[o++] = 0x05;
+  b[o++] = 0x00;
+  b[o++] = 0x02;
   /* KEY_LENGTH = 128 bits (IPsec DOI type 6, value 128) */
-  b[o++] = 0x80; b[o++] = 0x06; b[o++] = 0x00; b[o++] = 0x80;
+  b[o++] = 0x80;
+  b[o++] = 0x06;
+  b[o++] = 0x00;
+  b[o++] = 0x80;
   util_write_be16(b + t_len_m, (uint16_t)(o - t0));
   util_write_be16(b + p_len_m, (uint16_t)(o - p0));
   return o;
 }
 
 static int nat_need_4500(const am2_t *a, const uint8_t h_us[20], const uint8_t h_peer[20]) {
-  if (a->natd_count == 0) return 0;
+  if (a->natd_count == 0)
+    return 0;
   int su = 0, sp = 0;
   for (int i = 0; i < a->natd_count; i++) {
-    if (memcmp(a->natd[i], h_us, 20) == 0) su = 1;
-    if (memcmp(a->natd[i], h_peer, 20) == 0) sp = 1;
+    if (memcmp(a->natd[i], h_us, 20) == 0)
+      su = 1;
+    if (memcmp(a->natd[i], h_peer, 20) == 0)
+      sp = 1;
   }
   return !(su && sp);
 }
@@ -876,7 +933,8 @@ static int nat_need_4500(const am2_t *a, const uint8_t h_us[20], const uint8_t h
  * before the responder SPI. Outbound ESP must use our spi_i; inbound keymat uses peer SPI.
  * Prefer the last non-zero ESP SPI that differs from our_esp_spi, else fall back to last seen. */
 static uint32_t extract_peer_esp_spi_from_qm2_sa(const uint8_t *sa_hdr, size_t sa_pl_len, uint32_t our_esp_spi) {
-  if (sa_pl_len < 4 + 12) return 0;
+  if (sa_pl_len < 4 + 12)
+    return 0;
   const uint8_t *b = sa_hdr + 4;
   size_t inner = sa_pl_len - 4;
   const uint8_t *p = b + 8;
@@ -885,29 +943,33 @@ static uint32_t extract_peer_esp_spi_from_qm2_sa(const uint8_t *sa_hdr, size_t s
   uint32_t peer = 0;
   while (left >= 12) {
     uint16_t plen = util_read_be16(p + 2);
-    if (plen < 12 || plen > left) break;
+    if (plen < 12 || plen > left)
+      break;
     if (p[5] == 3 && p[6] == 4) {
       uint32_t spi = util_read_be32(p + 8);
       if (spi != 0) {
         last = spi;
-        if (spi != our_esp_spi) peer = spi;
+        if (spi != our_esp_spi)
+          peer = spi;
       }
     }
     uint8_t np = p[0];
     p += plen;
     left -= plen;
-    if (np == 0) break;
+    if (np == 0)
+      break;
   }
-  if (peer != 0) return peer;
-  if (last == 0) return 0;
+  if (peer != 0)
+    return peer;
+  if (last == 0)
+    return 0;
   if (last == our_esp_spi) {
     tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG,
                       "Quick Mode SA parse ambiguous: only initiator SPI %08x seen in QM2 SA", (unsigned)our_esp_spi);
     return 0;
   }
   tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG,
-                    "Quick Mode SA parse fallback: responder SPI not explicit, using last seen %08x",
-                    (unsigned)last);
+                    "Quick Mode SA parse fallback: responder SPI not explicit, using last seen %08x", (unsigned)last);
   return last;
 }
 
@@ -915,15 +977,16 @@ static uint32_t extract_peer_esp_spi_from_qm2_sa(const uint8_t *sa_hdr, size_t s
  * K1 = prf(SKEYID_d, S)
  * K2 = prf(SKEYID_d, K1 | S)
  * K3 = prf(SKEYID_d, K2 | S) ... */
-static int keymat_expand_ikev1(const uint8_t *skd, size_t skd_len, const uint8_t *seed, size_t seed_len,
-                               uint8_t *out, size_t need) {
+static int keymat_expand_ikev1(const uint8_t *skd, size_t skd_len, const uint8_t *seed, size_t seed_len, uint8_t *out,
+                               size_t need) {
   size_t off = 0;
   uint8_t block[20];
   uint8_t prev[20];
   int have_prev = 0;
   while (off < need) {
     uint8_t inb[128];
-    if (seed_len > sizeof(inb) || 20 + seed_len > sizeof(inb)) return -1;
+    if (seed_len > sizeof(inb) || 20 + seed_len > sizeof(inb))
+      return -1;
     size_t ix = 0;
     if (have_prev) {
       memcpy(inb, prev, 20);
@@ -932,10 +995,12 @@ static int keymat_expand_ikev1(const uint8_t *skd, size_t skd_len, const uint8_t
     have_prev = 1;
     memcpy(inb + ix, seed, seed_len);
     ix += seed_len;
-    if (prf_hmac_sha1(skd, skd_len, inb, ix, block) != 0) return -1;
+    if (prf_hmac_sha1(skd, skd_len, inb, ix, block) != 0)
+      return -1;
     memcpy(prev, block, sizeof(block));
     size_t take = 20;
-    if (off + take > need) take = need - off;
+    if (off + take > need)
+      take = need - off;
     memcpy(out + off, block, take);
     off += take;
   }
@@ -990,7 +1055,8 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE: socket(500) errno=%d", errno);
     goto fail_early;
   }
-  if (util_protect_fd(fd) != 0) goto fail_fd;
+  if (util_protect_fd(fd) != 0)
+    goto fail_fd;
   if (connect(fd, (struct sockaddr *)&peer500, l500) != 0) {
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE: connect(500) errno=%d", errno);
     goto fail_fd;
@@ -1068,24 +1134,32 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
 
   /* MM1: propose SA and advertise NAT-T capability via RFC 3947 VID. */
   o = 0;
-  memcpy(pkt + o, icookie, 8); o += 8;
-  memset(pkt + o, 0, 8);       o += 8;
+  memcpy(pkt + o, icookie, 8);
+  o += 8;
+  memset(pkt + o, 0, 8);
+  o += 8;
   pkt[o++] = IKE_PT_SA;
   pkt[o++] = 0x10;
   pkt[o++] = IKE_EXCH_MAIN;
   pkt[o++] = 0;
-  util_write_be32(pkt + o, 0); o += 4;
-  size_t len_m1 = o; o += 4;
+  util_write_be32(pkt + o, 0);
+  o += 4;
+  size_t len_m1 = o;
+  o += 4;
   // SA payload; next payload is VID so Pluto enables NAT-T before MM3.
   pkt[o++] = IKE_PT_VID;
   pkt[o++] = 0;
-  util_write_be16(pkt + o, (uint16_t)(4 + sa_len)); o += 2;
-  memcpy(pkt + o, sa_inner, sa_len); o += sa_len;
+  util_write_be16(pkt + o, (uint16_t)(4 + sa_len));
+  o += 2;
+  memcpy(pkt + o, sa_inner, sa_len);
+  o += sa_len;
   /* VID payload (RFC 3947 NAT-T) */
   pkt[o++] = IKE_PT_NONE;
   pkt[o++] = 0;
-  util_write_be16(pkt + o, (uint16_t)(4 + IKE_VID_RFC3947_LEN)); o += 2;
-  memcpy(pkt + o, k_vid_rfc3947, IKE_VID_RFC3947_LEN); o += IKE_VID_RFC3947_LEN;
+  util_write_be16(pkt + o, (uint16_t)(4 + IKE_VID_RFC3947_LEN));
+  o += 2;
+  memcpy(pkt + o, k_vid_rfc3947, IKE_VID_RFC3947_LEN);
+  o += IKE_VID_RFC3947_LEN;
   util_write_be32(pkt + len_m1, (uint32_t)o);
 
   tunnel_log("IKE Main Mode msg1 -> %zu bytes (transport=%s)", o, p1_prefix ? "UDP4500+marker" : "UDP500");
@@ -1093,7 +1167,7 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   if (inlen < 28) {
     /* No usable MM2 reply on UDP/500: retry full MM1 over UDP/4500 + non-ESP marker. */
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
-                        "IKE MM1: no reply on UDP 500, retrying via NAT-T UDP 4500 (RFC 3947 non-ESP marker)");
+                      "IKE MM1: no reply on UDP 500, retrying via NAT-T UDP 4500 (RFC 3947 non-ESP marker)");
     close(fd);
     fd = -1;
     if (resolve_udp(server, NAT_T_PORT, &peer_active, &peer_active_len) != 0) {
@@ -1134,7 +1208,8 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
     p1_prefix = 1;
     esp->udp_encap = 1;
     tunnel_log("IKE Main Mode msg1 retry -> %zu bytes (transport=UDP4500+marker)", o);
-    inlen = ike_send_recv(fd, (struct sockaddr *)&peer_active, peer_active_len, pkt, o, in, sizeof(in), 8000, p1_prefix);
+    inlen =
+        ike_send_recv(fd, (struct sockaddr *)&peer_active, peer_active_len, pkt, o, in, sizeof(in), 8000, p1_prefix);
   }
   if (inlen < 28) {
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE MM msg2: no valid reply");
@@ -1157,11 +1232,11 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
     uint8_t mnp = in[16];
     while (mleft >= 4 && mnp != IKE_PT_NONE) {
       uint16_t mpl = util_read_be16(mp + 2);
-      if (mpl < 4 || mpl > (size_t)mleft) break;
+      if (mpl < 4 || mpl > (size_t)mleft)
+        break;
       if (mnp == IKE_PT_SA) {
         for (size_t zi = 0; zi + 4 <= mpl; zi++) {
-          if (mp[zi] == 0x80 && mp[zi + 1] == 0x01 &&
-              mp[zi + 2] == 0x00 && mp[zi + 3] == 0x07) {
+          if (mp[zi] == 0x80 && mp[zi + 1] == 0x01 && mp[zi + 2] == 0x00 && mp[zi + 3] == 0x07) {
             ike->p1_aes = 1;
             break;
           }
@@ -1216,30 +1291,46 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   natd_hash(icookie, ike->rcookie, ip_peer, port_peer_be, h_peer);
 
   o = 0;
-  memcpy(pkt + o, ike->icookie, 8); o += 8;
-  memcpy(pkt + o, ike->rcookie, 8); o += 8;
+  memcpy(pkt + o, ike->icookie, 8);
+  o += 8;
+  memcpy(pkt + o, ike->rcookie, 8);
+  o += 8;
   pkt[o++] = IKE_PT_KE;
   pkt[o++] = 0x10;
   pkt[o++] = IKE_EXCH_MAIN;
   pkt[o++] = 0;
-  util_write_be32(pkt + o, 0); o += 4;
-  size_t len_m3 = o; o += 4;
+  util_write_be32(pkt + o, 0);
+  o += 4;
+  size_t len_m3 = o;
+  o += 4;
 
-  pkt[o++] = IKE_PT_NONCE; pkt[o++] = 0;
-  util_write_be16(pkt + o, (uint16_t)(4 + sizeof(pubkey))); o += 2;
-  memcpy(pkt + o, pubkey, sizeof(pubkey)); o += sizeof(pubkey);
+  pkt[o++] = IKE_PT_NONCE;
+  pkt[o++] = 0;
+  util_write_be16(pkt + o, (uint16_t)(4 + sizeof(pubkey)));
+  o += 2;
+  memcpy(pkt + o, pubkey, sizeof(pubkey));
+  o += sizeof(pubkey);
 
-  pkt[o++] = IKE_PT_NAT_D; pkt[o++] = 0;
-  util_write_be16(pkt + o, (uint16_t)(4 + sizeof(ni))); o += 2;
-  memcpy(pkt + o, ni, sizeof(ni)); o += sizeof(ni);
+  pkt[o++] = IKE_PT_NAT_D;
+  pkt[o++] = 0;
+  util_write_be16(pkt + o, (uint16_t)(4 + sizeof(ni)));
+  o += 2;
+  memcpy(pkt + o, ni, sizeof(ni));
+  o += sizeof(ni);
 
-  pkt[o++] = IKE_PT_NAT_D; pkt[o++] = 0;
-  util_write_be16(pkt + o, (uint16_t)(4 + 20)); o += 2;
-  memcpy(pkt + o, h_us, 20); o += 20;
+  pkt[o++] = IKE_PT_NAT_D;
+  pkt[o++] = 0;
+  util_write_be16(pkt + o, (uint16_t)(4 + 20));
+  o += 2;
+  memcpy(pkt + o, h_us, 20);
+  o += 20;
 
-  pkt[o++] = IKE_PT_NONE; pkt[o++] = 0;
-  util_write_be16(pkt + o, (uint16_t)(4 + 20)); o += 2;
-  memcpy(pkt + o, h_peer, 20); o += 20;
+  pkt[o++] = IKE_PT_NONE;
+  pkt[o++] = 0;
+  util_write_be16(pkt + o, (uint16_t)(4 + 20));
+  o += 2;
+  memcpy(pkt + o, h_peer, 20);
+  o += 20;
 
   util_write_be32(pkt + len_m3, (uint32_t)o);
 
@@ -1267,9 +1358,9 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
    * so they must be copied out NOW before ike_send_recv() for MM5/MM6 overwrites in[].
    * Without this copy, HASH_R would be computed over MM6 ciphertext bytes, not g^xr. */
   uint8_t ke_r_buf[512];
-  size_t  ke_r_len;
+  size_t ke_r_len;
   uint8_t nr_buf[256];
-  size_t  nr_len;
+  size_t nr_len;
   if (am4.ke_r_len > sizeof(ke_r_buf) || am4.nr_len > sizeof(nr_buf)) {
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE MM4: ke_r or nr too large");
     goto fail_fd;
@@ -1316,9 +1407,12 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
     uint8_t z0 = 0, z1 = 1, z2 = 2;
     uint8_t m1[8 + 512];
     size_t m1l = 0;
-    memcpy(m1 + m1l, gxy, gxy_len); m1l += gxy_len;
-    memcpy(m1 + m1l, ike->icookie, 8); m1l += 8;
-    memcpy(m1 + m1l, ike->rcookie, 8); m1l += 8;
+    memcpy(m1 + m1l, gxy, gxy_len);
+    m1l += gxy_len;
+    memcpy(m1 + m1l, ike->icookie, 8);
+    m1l += 8;
+    memcpy(m1 + m1l, ike->rcookie, 8);
+    m1l += 8;
     m1[m1l++] = z0;
     if (prf_hmac_sha1(skeyid, sizeof(skeyid), m1, m1l, skeyid_d) != 0) {
       tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE: prf skeyid_d failed");
@@ -1327,10 +1421,14 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
 
     uint8_t m2[20 + 8 + 512];
     size_t m2l = 0;
-    memcpy(m2 + m2l, skeyid_d, 20); m2l += 20;
-    memcpy(m2 + m2l, gxy, gxy_len); m2l += gxy_len;
-    memcpy(m2 + m2l, ike->icookie, 8); m2l += 8;
-    memcpy(m2 + m2l, ike->rcookie, 8); m2l += 8;
+    memcpy(m2 + m2l, skeyid_d, 20);
+    m2l += 20;
+    memcpy(m2 + m2l, gxy, gxy_len);
+    m2l += gxy_len;
+    memcpy(m2 + m2l, ike->icookie, 8);
+    m2l += 8;
+    memcpy(m2 + m2l, ike->rcookie, 8);
+    m2l += 8;
     m2[m2l++] = z1;
     if (prf_hmac_sha1(skeyid, sizeof(skeyid), m2, m2l, skeyid_a) != 0) {
       tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE: prf skeyid_a failed");
@@ -1339,10 +1437,14 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
 
     uint8_t m3[20 + 8 + 512];
     size_t m3l = 0;
-    memcpy(m3 + m3l, skeyid_a, 20); m3l += 20;
-    memcpy(m3 + m3l, gxy, gxy_len); m3l += gxy_len;
-    memcpy(m3 + m3l, ike->icookie, 8); m3l += 8;
-    memcpy(m3 + m3l, ike->rcookie, 8); m3l += 8;
+    memcpy(m3 + m3l, skeyid_a, 20);
+    m3l += 20;
+    memcpy(m3 + m3l, gxy, gxy_len);
+    m3l += gxy_len;
+    memcpy(m3 + m3l, ike->icookie, 8);
+    m3l += 8;
+    memcpy(m3 + m3l, ike->rcookie, 8);
+    m3l += 8;
     m3[m3l++] = z2;
     if (prf_hmac_sha1(skeyid, sizeof(skeyid), m3, m3l, skeyid_e) != 0) {
       tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE: prf skeyid_e failed");
@@ -1486,7 +1588,8 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
 
     tunnel_log("IKE Main Mode msg5 (encrypted) try=%d/%d hash_sa=%s len=%zu -> %zu bytes (nat_t_prefix=%d)",
                mm5_try + 1, mm5_attempts, sa_hash_tag, sa_hash_len, o, p1_prefix);
-    inlen = ike_send_recv(fd, (struct sockaddr *)&peer_active, peer_active_len, pkt, o, in, sizeof(in), 8000, p1_prefix);
+    inlen =
+        ike_send_recv(fd, (struct sockaddr *)&peer_active, peer_active_len, pkt, o, in, sizeof(in), 8000, p1_prefix);
     if (inlen >= 28 && in[18] == IKE_EXCH_MAIN) {
       sa_hash_used = sa_hash;
       sa_hash_used_len = sa_hash_len;
@@ -1508,19 +1611,17 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
     }
     if (mm5_try + 1 < mm5_attempts &&
         (strcmp(retry_reason, "timeout") == 0 || strcmp(retry_reason, "invalid_hash_notify") == 0)) {
-      tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG,
-                        "IKE MM msg5: retrying alternate SA hash source after %s (%s)", retry_reason, sa_hash_tag);
+      tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "IKE MM msg5: retrying alternate SA hash source after %s (%s)",
+                        retry_reason, sa_hash_tag);
       continue;
     }
-    tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG,
-                      "IKE MM msg5: aborting after %s (exchange=%u flags=0x%02x inlen=%d)", retry_reason,
-                      inlen >= 19 ? in[18] : 0u, inlen >= 20 ? in[19] : 0u, inlen);
+    tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE MM msg5: aborting after %s (exchange=%u flags=0x%02x inlen=%d)",
+                      retry_reason, inlen >= 19 ? in[18] : 0u, inlen >= 20 ? in[19] : 0u, inlen);
     inlen = -1;
     break;
   }
   if (inlen < 28) {
-    tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE MM msg6: no valid reply after %d msg5 attempt(s)",
-                      mm5_attempts);
+    tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE MM msg6: no valid reply after %d msg5 attempt(s)", mm5_attempts);
     goto fail_fd;
   }
   ike_log_isakmp_summary("IKE MM msg6", in, inlen);
@@ -1537,15 +1638,13 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
     size_t dec6_len = 0;
     uint8_t iv6_out[16];
     if (ike->p1_aes) {
-      if (isakmp_aes128_decrypt(aeskey, msg5_iv_out, in + 28, enc6_len,
-                                dec6, &dec6_len, iv6_out) != 0) {
+      if (isakmp_aes128_decrypt(aeskey, msg5_iv_out, in + 28, enc6_len, dec6, &dec6_len, iv6_out) != 0) {
         tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE MM msg6: AES decrypt failed");
         goto fail_fd;
       }
       memcpy(p1_last_block, iv6_out, 16);
     } else {
-      if (isakmp_3des_decrypt(deskey, msg5_iv_out, in + 28, enc6_len,
-                              dec6, &dec6_len, iv6_out) != 0) {
+      if (isakmp_3des_decrypt(deskey, msg5_iv_out, in + 28, enc6_len, dec6, &dec6_len, iv6_out) != 0) {
         tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE MM msg6: 3DES decrypt failed");
         goto fail_fd;
       }
@@ -1563,7 +1662,8 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
       uint8_t cur = in[16];
       while (walk + 4 <= dec6_len) {
         uint16_t pl = util_read_be16(dec6 + walk + 2);
-        if (pl < 4 || walk + pl > dec6_len) break;
+        if (pl < 4 || walk + pl > dec6_len)
+          break;
         if (cur == IKE_PT_ID) {
           id_r = dec6 + walk + 4;
           id_r_len = pl - 4;
@@ -1573,7 +1673,8 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
         }
         cur = dec6[walk];
         walk += pl;
-        if (cur == IKE_PT_NONE) break;
+        if (cur == IKE_PT_NONE)
+          break;
       }
     }
     if (id_r == NULL || hash_r == NULL || hash_r_len < 20) {
@@ -1592,15 +1693,21 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
         goto fail_fd;
       }
       size_t q = 0;
-      memcpy(hb + q, ke_r_buf, ke_r_len); q += ke_r_len;
-      memcpy(hb + q, pubkey, sizeof(pubkey)); q += sizeof(pubkey);
-      memcpy(hb + q, ike->rcookie, 8); q += 8;
-      memcpy(hb + q, ike->icookie, 8); q += 8;
-      memcpy(hb + q, sa_hash_used, sa_hash_used_len); q += sa_hash_used_len;
-      memcpy(hb + q, id_r, id_r_len); q += id_r_len;
+      memcpy(hb + q, ke_r_buf, ke_r_len);
+      q += ke_r_len;
+      memcpy(hb + q, pubkey, sizeof(pubkey));
+      q += sizeof(pubkey);
+      memcpy(hb + q, ike->rcookie, 8);
+      q += 8;
+      memcpy(hb + q, ike->icookie, 8);
+      q += 8;
+      memcpy(hb + q, sa_hash_used, sa_hash_used_len);
+      q += sa_hash_used_len;
+      memcpy(hb + q, id_r, id_r_len);
+      q += id_r_len;
       tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
-          "HASH_R material [%s]: ke_r_len=%zu pubkey_len=%zu sa_len=%zu id_r_len=%zu total=%zu",
-          sa_hash_used_tag, ke_r_len, sizeof(pubkey), sa_hash_used_len, id_r_len, q);
+                        "HASH_R material [%s]: ke_r_len=%zu pubkey_len=%zu sa_len=%zu id_r_len=%zu total=%zu",
+                        sa_hash_used_tag, ke_r_len, sizeof(pubkey), sa_hash_used_len, id_r_len, q);
       ike_hex_dump("HASH_R sa", sa_hash_used, sa_hash_used_len, sa_hash_used_len);
       ike_hex_dump("HASH_R id_r", id_r, id_r_len, id_r_len);
       if (prf_hmac_sha1(skeyid, sizeof(skeyid), hb, q, hash_r_calc) != 0) {
@@ -1610,8 +1717,7 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
       free(hb);
     }
     if (memcmp(hash_r_calc, hash_r, 20) != 0) {
-      tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG,
-          "IKE MM: HASH_R mismatch - wrong PSK, ID, or transform");
+      tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE MM: HASH_R mismatch - wrong PSK, ID, or transform");
       ike_hex_dump("hash_r_peer", hash_r, 20, 20);
       ike_hex_dump("hash_r_calc", hash_r_calc, 20, 20);
       goto fail_fd;
@@ -1644,7 +1750,8 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
         tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE: socket(4500) errno=%d", errno);
         goto fail_early;
       }
-      if (util_protect_fd(fd) != 0) goto fail_fd;
+      if (util_protect_fd(fd) != 0)
+        goto fail_fd;
       if (connect(fd, (struct sockaddr *)&peer_active, peer_active_len) != 0) {
         tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE: connect(4500) errno=%d", errno);
         goto fail_fd;
@@ -1660,7 +1767,8 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   size_t len_mark;
   uint32_t qm_mid;
   mbedtls_ctr_drbg_random(&ctr, (uint8_t *)&qm_mid, sizeof(qm_mid));
-  if (qm_mid == 0) qm_mid = 1;
+  if (qm_mid == 0)
+    qm_mid = 1;
   uint32_t spi_i;
   mbedtls_ctr_drbg_random(&ctr, (uint8_t *)&spi_i, sizeof(spi_i));
 
@@ -1677,11 +1785,13 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   /* ID payloads: [ID_type=1(IPv4), Protocol, Port(BE), IPv4].
    * l2tp-psk uses leftprotoport=17/1701 (server) and rightprotoport=17/%any (client). */
   uint8_t id_ci[8], id_cr[8];
-  id_ci[0] = 1; id_ci[1] = 17;               /* IPv4, UDP */
-  util_write_be16(id_ci + 2, 0);              /* port = any */
+  id_ci[0] = 1;
+  id_ci[1] = 17;                 /* IPv4, UDP */
+  util_write_be16(id_ci + 2, 0); /* port = any */
   memcpy(id_ci + 4, ip_us, 4);
-  id_cr[0] = 1; id_cr[1] = 17;               /* IPv4, UDP */
-  util_write_be16(id_cr + 2, 1701);           /* L2TP port */
+  id_cr[0] = 1;
+  id_cr[1] = 17;                    /* IPv4, UDP */
+  util_write_be16(id_cr + 2, 1701); /* L2TP port */
   memcpy(id_cr + 4, ip_peer, 4);
 
   // HASH(1) = prf(SKEYID_a, M-ID | SA | Ni | IDci | IDcr) (RFC 2409 sec 5.5).
@@ -1689,23 +1799,36 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   // (except the HASH payload itself).
   uint8_t hash1_in[256];
   size_t h1l = 0;
-  util_write_be32(hash1_in + h1l, qm_mid); h1l += 4;
+  util_write_be32(hash1_in + h1l, qm_mid);
+  h1l += 4;
   /* Full SA payload */
-  hash1_in[h1l++] = IKE_PT_NONCE; hash1_in[h1l++] = 0;
-  util_write_be16(hash1_in + h1l, (uint16_t)(4 + esp_sa_len)); h1l += 2;
-  memcpy(hash1_in + h1l, esp_sa, esp_sa_len); h1l += esp_sa_len;
+  hash1_in[h1l++] = IKE_PT_NONCE;
+  hash1_in[h1l++] = 0;
+  util_write_be16(hash1_in + h1l, (uint16_t)(4 + esp_sa_len));
+  h1l += 2;
+  memcpy(hash1_in + h1l, esp_sa, esp_sa_len);
+  h1l += esp_sa_len;
   /* Full Nonce payload */
-  hash1_in[h1l++] = IKE_PT_ID; hash1_in[h1l++] = 0;
-  util_write_be16(hash1_in + h1l, (uint16_t)(4 + sizeof(ni_qm))); h1l += 2;
-  memcpy(hash1_in + h1l, ni_qm, sizeof(ni_qm)); h1l += sizeof(ni_qm);
+  hash1_in[h1l++] = IKE_PT_ID;
+  hash1_in[h1l++] = 0;
+  util_write_be16(hash1_in + h1l, (uint16_t)(4 + sizeof(ni_qm)));
+  h1l += 2;
+  memcpy(hash1_in + h1l, ni_qm, sizeof(ni_qm));
+  h1l += sizeof(ni_qm);
   /* Full IDci payload */
-  hash1_in[h1l++] = IKE_PT_ID; hash1_in[h1l++] = 0;
-  util_write_be16(hash1_in + h1l, (uint16_t)(4 + sizeof(id_ci))); h1l += 2;
-  memcpy(hash1_in + h1l, id_ci, sizeof(id_ci)); h1l += sizeof(id_ci);
+  hash1_in[h1l++] = IKE_PT_ID;
+  hash1_in[h1l++] = 0;
+  util_write_be16(hash1_in + h1l, (uint16_t)(4 + sizeof(id_ci)));
+  h1l += 2;
+  memcpy(hash1_in + h1l, id_ci, sizeof(id_ci));
+  h1l += sizeof(id_ci);
   /* Full IDcr payload */
-  hash1_in[h1l++] = IKE_PT_NONE; hash1_in[h1l++] = 0;
-  util_write_be16(hash1_in + h1l, (uint16_t)(4 + sizeof(id_cr))); h1l += 2;
-  memcpy(hash1_in + h1l, id_cr, sizeof(id_cr)); h1l += sizeof(id_cr);
+  hash1_in[h1l++] = IKE_PT_NONE;
+  hash1_in[h1l++] = 0;
+  util_write_be16(hash1_in + h1l, (uint16_t)(4 + sizeof(id_cr)));
+  h1l += 2;
+  memcpy(hash1_in + h1l, id_cr, sizeof(id_cr));
+  h1l += sizeof(id_cr);
   uint8_t hv1[20];
   if (prf_hmac_sha1(skeyid_a, sizeof(skeyid_a), hash1_in, h1l, hv1) != 0) {
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE QM: prf HASH(1) failed");
@@ -1772,7 +1895,7 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   o += 8;
   memcpy(pkt + o, ike->rcookie, 8);
   o += 8;
-  pkt[o++] = IKE_PT_HASH;   /* first encrypted payload is HASH(1) */
+  pkt[o++] = IKE_PT_HASH; /* first encrypted payload is HASH(1) */
   pkt[o++] = 0x10;
   pkt[o++] = IKE_EXCH_QUICK;
   pkt[o++] = IKE_FLAG_ENC;
@@ -1802,40 +1925,40 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
       uint8_t info_iv[16];
       if (ike->p1_aes) {
         qm_first_iv_aes(p1_last_block, info_mid, info_iv);
-        isakmp_aes128_decrypt(aeskey, info_iv, in + 28, info_enc_len,
-                              info_plain, &info_plain_len, info_iv_out);
+        isakmp_aes128_decrypt(aeskey, info_iv, in + 28, info_enc_len, info_plain, &info_plain_len, info_iv_out);
       } else {
         uint8_t iv8[8];
         qm_first_iv_sha1(p1_last_block, info_mid, iv8);
         memcpy(info_iv, iv8, 8);
-        isakmp_3des_decrypt(deskey, info_iv, in + 28, info_enc_len,
-                            info_plain, &info_plain_len, info_iv_out);
+        isakmp_3des_decrypt(deskey, info_iv, in + 28, info_enc_len, info_plain, &info_plain_len, info_iv_out);
       }
       uint8_t info_np = in[16];
       size_t w = 0;
       while (w + 4 <= info_plain_len) {
         uint16_t pl = util_read_be16(info_plain + w + 2);
-        if (pl < 4 || w + pl > info_plain_len) break;
+        if (pl < 4 || w + pl > info_plain_len)
+          break;
         if (info_np == IKE_PT_NOTIFY && pl >= 12) {
           uint16_t ntype = util_read_be16(info_plain + w + 4 + 6);
           tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG,
-              "Quick Mode: server sent NOTIFY type=%u (0x%04x) - proposal rejected",
-              (unsigned)ntype, (unsigned)ntype);
+                            "Quick Mode: server sent NOTIFY type=%u (0x%04x) - proposal rejected", (unsigned)ntype,
+                            (unsigned)ntype);
         }
         info_np = info_plain[w];
         w += pl;
-        if (info_np == IKE_PT_NONE) break;
+        if (info_np == IKE_PT_NONE)
+          break;
       }
     }
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG,
-        "Quick Mode: server replied with Informational Exchange (not QM2); ESP proposal likely rejected");
+                      "Quick Mode: server replied with Informational Exchange (not QM2); ESP proposal likely rejected");
     goto fail_fd;
   }
 
   if ((in[19] & IKE_FLAG_ENC) == 0 || util_read_be32(in + 20) != qm_mid) {
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG,
- "Quick Mode: unexpected reply flags/msgid (want enc+mid=%u got flags=0x%02x mid=%u)", qm_mid, in[19],
-                        util_read_be32(in + 20));
+                      "Quick Mode: unexpected reply flags/msgid (want enc+mid=%u got flags=0x%02x mid=%u)", qm_mid,
+                      in[19], util_read_be32(in + 20));
     goto fail_fd;
   }
 
@@ -1902,7 +2025,8 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
       cur = next;
     }
     if (!qm2_chain_terminated && !qm2_chain_malformed) {
-      if (walk >= dec_len) qm2_chain_malformed = 1;
+      if (walk >= dec_len)
+        qm2_chain_malformed = 1;
     }
   }
   if (!qm2_chain_terminated || qm2_payload_end == 0 || qm2_chain_malformed) {
@@ -1912,10 +2036,10 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
     goto fail_fd;
   }
   if (nr_qm == NULL || hash2 == NULL || spi_r == 0 || after_hash_off == 0 || after_hash_off >= qm2_payload_end) {
-    tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG,
-                      "Quick Mode: missing required payloads nr=%p hash2=%p spi_r=%08x spi_i=%08x after_hash=%zu payload_end=%zu",
-                      (void *)nr_qm, (void *)hash2, (unsigned)spi_r, (unsigned)spi_i, after_hash_off,
-                      qm2_payload_end);
+    tunnel_engine_log(
+        ANDROID_LOG_ERROR, LOG_TAG,
+        "Quick Mode: missing required payloads nr=%p hash2=%p spi_r=%08x spi_i=%08x after_hash=%zu payload_end=%zu",
+        (void *)nr_qm, (void *)hash2, (unsigned)spi_r, (unsigned)spi_i, after_hash_off, qm2_payload_end);
     goto fail_fd;
   }
   if (nr_qm_len == 0 || nr_qm_len > 64) {
@@ -1934,9 +2058,12 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
     goto fail_fd;
   }
   size_t h2l = 0;
-  util_write_be32(h2chk + h2l, qm_mid); h2l += 4;
-  memcpy(h2chk + h2l, ni_qm, sizeof(ni_qm)); h2l += sizeof(ni_qm);
-  memcpy(h2chk + h2l, dec_qm + after_hash_off, after_hash_len); h2l += after_hash_len;
+  util_write_be32(h2chk + h2l, qm_mid);
+  h2l += 4;
+  memcpy(h2chk + h2l, ni_qm, sizeof(ni_qm));
+  h2l += sizeof(ni_qm);
+  memcpy(h2chk + h2l, dec_qm + after_hash_off, after_hash_len);
+  h2l += after_hash_len;
   uint8_t h2c[20];
   if (prf_hmac_sha1(skeyid_a, sizeof(skeyid_a), h2chk, h2l, h2c) != 0) {
     free(h2chk);
@@ -1949,8 +2076,8 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   }
   if (memcmp(h2c, hash2, 20) != 0) {
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "Quick Mode: HASH(2) mismatch (ESP proposal rejected?)");
-    tunnel_log("Quick Mode: HASH(2) material after_hash=%zu payload_end=%zu material_len=%zu",
-               after_hash_off, qm2_payload_end, after_hash_len);
+    tunnel_log("Quick Mode: HASH(2) material after_hash=%zu payload_end=%zu material_len=%zu", after_hash_off,
+               qm2_payload_end, after_hash_len);
     ike_hex_dump("hash2_peer", hash2, hash2_len < 20 ? hash2_len : 20, 20);
     ike_hex_dump("hash2_calc", h2c, 20, 20);
     goto fail_fd;
@@ -2003,7 +2130,7 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   o += 8;
   memcpy(pkt + o, ike->rcookie, 8);
   o += 8;
-  pkt[o++] = IKE_PT_HASH;   /* first encrypted payload is HASH(3) */
+  pkt[o++] = IKE_PT_HASH; /* first encrypted payload is HASH(3) */
   pkt[o++] = 0x10;
   pkt[o++] = IKE_EXCH_QUICK;
   pkt[o++] = IKE_FLAG_ENC;
@@ -2023,8 +2150,8 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
 
   if (!use4500) {
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG,
-        "IKE: NAT-T was not negotiated; raw ESP requires root (impossible on Android). "
-        "This should not happen with forced NAT-D.");
+                      "IKE: NAT-T was not negotiated; raw ESP requires root (impossible on Android). "
+                      "This should not happen with forced NAT-D.");
     goto fail_fd;
   }
 
@@ -2124,10 +2251,10 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   memcpy(esp->ip_src, ip_us, 4);
   memcpy(esp->ip_dst, ip_peer, 4);
   // Outbound (us->peer): use responder material (keymat_r / spi_r from QM2 parse).
-  memcpy(esp->enc_key,      keymat_r,      16);
-  memcpy(esp->auth_key,     keymat_r + 16, 20);
+  memcpy(esp->enc_key, keymat_r, 16);
+  memcpy(esp->auth_key, keymat_r + 16, 20);
   // Inbound (peer->us): use initiator material (keymat_i / spi_i we proposed).
-  memcpy(esp->enc_key  + 16, keymat_i,      16);
+  memcpy(esp->enc_key + 16, keymat_i, 16);
   memcpy(esp->auth_key + 20, keymat_i + 16, 20);
   esp->seq_i = 1;
   esp->replay_bitmap = 0;
@@ -2136,50 +2263,51 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   if (s_ike_keymat_variants_log_once == 0) {
     s_ike_keymat_variants_log_once = 1;
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
-                      "IKE keymat probe: build=kmat-v3 macro=%d active=%s spi_i=%08x spi_r=%08x",
-                      active_keymat_variant, keymat_variant, (unsigned)spi_i, (unsigned)spi_r);
+                      "IKE keymat probe: build=kmat-v3 macro=%d active=%s spi_i=%08x spi_r=%08x", active_keymat_variant,
+                      keymat_variant, (unsigned)spi_i, (unsigned)spi_r);
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                       "IKE keymat A: out=%02x%02x%02x%02x/%02x%02x%02x%02x in=%02x%02x%02x%02x/%02x%02x%02x%02x",
                       keymat_a_r[0], keymat_a_r[1], keymat_a_r[2], keymat_a_r[3], keymat_a_r[16], keymat_a_r[17],
                       keymat_a_r[18], keymat_a_r[19], keymat_a_i[0], keymat_a_i[1], keymat_a_i[2], keymat_a_i[3],
                       keymat_a_i[16], keymat_a_i[17], keymat_a_i[18], keymat_a_i[19]);
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "IKE keymat A K1/K2 out=%02x%02x%02x%02x/%02x%02x%02x%02x",
-                      keymat_a_r[0], keymat_a_r[1], keymat_a_r[2], keymat_a_r[3],
-                      keymat_a_r[20], keymat_a_r[21], keymat_a_r[22], keymat_a_r[23]);
+                      keymat_a_r[0], keymat_a_r[1], keymat_a_r[2], keymat_a_r[3], keymat_a_r[20], keymat_a_r[21],
+                      keymat_a_r[22], keymat_a_r[23]);
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                       "IKE keymat B: out=%02x%02x%02x%02x/%02x%02x%02x%02x in=%02x%02x%02x%02x/%02x%02x%02x%02x",
                       keymat_b_r[0], keymat_b_r[1], keymat_b_r[2], keymat_b_r[3], keymat_b_r[16], keymat_b_r[17],
                       keymat_b_r[18], keymat_b_r[19], keymat_b_i[0], keymat_b_i[1], keymat_b_i[2], keymat_b_i[3],
                       keymat_b_i[16], keymat_b_i[17], keymat_b_i[18], keymat_b_i[19]);
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "IKE keymat B K1/K2 out=%02x%02x%02x%02x/%02x%02x%02x%02x",
-                      keymat_b_r[0], keymat_b_r[1], keymat_b_r[2], keymat_b_r[3],
-                      keymat_b_r[20], keymat_b_r[21], keymat_b_r[22], keymat_b_r[23]);
+                      keymat_b_r[0], keymat_b_r[1], keymat_b_r[2], keymat_b_r[3], keymat_b_r[20], keymat_b_r[21],
+                      keymat_b_r[22], keymat_b_r[23]);
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                       "IKE keymat C: out=%02x%02x%02x%02x/%02x%02x%02x%02x in=%02x%02x%02x%02x/%02x%02x%02x%02x",
                       keymat_c_r[0], keymat_c_r[1], keymat_c_r[2], keymat_c_r[3], keymat_c_r[16], keymat_c_r[17],
                       keymat_c_r[18], keymat_c_r[19], keymat_c_i[0], keymat_c_i[1], keymat_c_i[2], keymat_c_i[3],
                       keymat_c_i[16], keymat_c_i[17], keymat_c_i[18], keymat_c_i[19]);
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "IKE keymat C K1/K2 out=%02x%02x%02x%02x/%02x%02x%02x%02x",
-                      keymat_c_r[0], keymat_c_r[1], keymat_c_r[2], keymat_c_r[3],
-                      keymat_c_r[20], keymat_c_r[21], keymat_c_r[22], keymat_c_r[23]);
+                      keymat_c_r[0], keymat_c_r[1], keymat_c_r[2], keymat_c_r[3], keymat_c_r[20], keymat_c_r[21],
+                      keymat_c_r[22], keymat_c_r[23]);
   }
 
 #if defined(TUNNEL_FORGE_DEBUG_ESP_KEYMAT) && TUNNEL_FORGE_DEBUG_ESP_KEYMAT
-  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
-                    "DEBUG_ESP_KEYMAT: spi_i=%08x spi_r=%08x variant=%s - compare keymat_* to gateway `ip xfrm state` (enc+auth)",
-                    (unsigned)spi_i, (unsigned)spi_r, keymat_variant);
+  tunnel_engine_log(
+      ANDROID_LOG_DEBUG, LOG_TAG,
+      "DEBUG_ESP_KEYMAT: spi_i=%08x spi_r=%08x variant=%s - compare keymat_* to gateway `ip xfrm state` (enc+auth)",
+      (unsigned)spi_i, (unsigned)spi_r, keymat_variant);
   ike_hex_dump("keymat_i out(enc|auth)", keymat_i, 36, 36);
   ike_hex_dump("keymat_r in(enc|auth)", keymat_r, 36, 36);
 #endif
   if (s_ike_keymap_log_once == 0) {
     s_ike_keymap_log_once = 1;
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
-                      "IKE keymap one-shot: client_out_spi=%08x client_in_spi=%08x out_enc=%02x%02x%02x%02x out_auth=%02x%02x%02x%02x in_enc=%02x%02x%02x%02x in_auth=%02x%02x%02x%02x",
-                      (unsigned)esp->spi_i, (unsigned)esp->spi_r,
-                      esp->enc_key[0], esp->enc_key[1], esp->enc_key[2], esp->enc_key[3],
-                      esp->auth_key[0], esp->auth_key[1], esp->auth_key[2], esp->auth_key[3],
-                      esp->enc_key[16], esp->enc_key[17], esp->enc_key[18], esp->enc_key[19],
-                      esp->auth_key[20], esp->auth_key[21], esp->auth_key[22], esp->auth_key[23]);
+                      "IKE keymap one-shot: client_out_spi=%08x client_in_spi=%08x out_enc=%02x%02x%02x%02x "
+                      "out_auth=%02x%02x%02x%02x in_enc=%02x%02x%02x%02x in_auth=%02x%02x%02x%02x",
+                      (unsigned)esp->spi_i, (unsigned)esp->spi_r, esp->enc_key[0], esp->enc_key[1], esp->enc_key[2],
+                      esp->enc_key[3], esp->auth_key[0], esp->auth_key[1], esp->auth_key[2], esp->auth_key[3],
+                      esp->enc_key[16], esp->enc_key[17], esp->enc_key[18], esp->enc_key[19], esp->auth_key[20],
+                      esp->auth_key[21], esp->auth_key[22], esp->auth_key[23]);
   }
 
   memcpy(&ike->peer, &peer_active, peer_active_len);
@@ -2199,17 +2327,18 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   mbedtls_ctr_drbg_free(&ctr);
   mbedtls_entropy_free(&entropy);
   tunnel_log("IKE+QM ok spi_i=%08x spi_r=%08x udp_encap=%d", (unsigned)spi_i, (unsigned)spi_r, esp->udp_encap);
-  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
-                    "IKE QM SA map: outbound_spi=%08x inbound_spi=%08x profile=%s",
+  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "IKE QM SA map: outbound_spi=%08x inbound_spi=%08x profile=%s",
                     (unsigned)esp->spi_i, (unsigned)esp->spi_r, esp->outbound_profile ? "alt-direction" : "primary");
-  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
-                      "IKE QM keys: inner_ip_src=%02x%02x%02x%02x inner_ip_dst=%02x%02x%02x%02x (for ESP inner UDP pseudo-hdr)",
-                      ip_us[0], ip_us[1], ip_us[2], ip_us[3], ip_peer[0], ip_peer[1], ip_peer[2], ip_peer[3]);
+  tunnel_engine_log(
+      ANDROID_LOG_DEBUG, LOG_TAG,
+      "IKE QM keys: inner_ip_src=%02x%02x%02x%02x inner_ip_dst=%02x%02x%02x%02x (for ESP inner UDP pseudo-hdr)",
+      ip_us[0], ip_us[1], ip_us[2], ip_us[3], ip_peer[0], ip_peer[1], ip_peer[2], ip_peer[3]);
   ike_log_endpoint("IKE QM peer (NAT-T/ESP)", (struct sockaddr *)&peer_active, peer_active_len);
   return 0;
 
 fail_fd:
-  if (fd >= 0) close(fd);
+  if (fd >= 0)
+    close(fd);
 fail_early:
   tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "IKE ipsec_negotiate failed (scroll up for tunnel_engine)");
   mbedtls_ctr_drbg_free(&ctr);

@@ -27,7 +27,8 @@ static packet_node_t *packet_node_new(const uint8_t *buf, size_t len) {
     return NULL;
   }
   packet_node_t *node = (packet_node_t *)malloc(sizeof(*node) + len);
-  if (node == NULL) return NULL;
+  if (node == NULL)
+    return NULL;
   node->next = NULL;
   node->len = len;
   memcpy(node->data, buf, len);
@@ -46,15 +47,18 @@ static void packet_queue_push(packet_node_t **head, packet_node_t **tail, packet
 
 static packet_node_t *packet_queue_pop(packet_node_t **head, packet_node_t **tail) {
   packet_node_t *node = *head;
-  if (node == NULL) return NULL;
+  if (node == NULL)
+    return NULL;
   *head = node->next;
-  if (*head == NULL) *tail = NULL;
+  if (*head == NULL)
+    *tail = NULL;
   node->next = NULL;
   return node;
 }
 
 static void add_ms_to_timespec(struct timespec *ts, int timeout_ms) {
-  if (ts == NULL || timeout_ms <= 0) return;
+  if (ts == NULL || timeout_ms <= 0)
+    return;
   ts->tv_sec += timeout_ms / 1000;
   ts->tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
   if (ts->tv_nsec >= 1000000000L) {
@@ -65,14 +69,16 @@ static void add_ms_to_timespec(struct timespec *ts, int timeout_ms) {
 
 static int set_nonblock(int fd) {
   int flags = fcntl(fd, F_GETFL, 0);
-  if (flags < 0) return -1;
+  if (flags < 0)
+    return -1;
   return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
 static int proxy_queue_signal(proxy_packet_queue_ctx_t *ctx) {
   uint8_t b = 1;
   ssize_t n = write(ctx->notify_pipe[1], &b, sizeof(b));
-  if (n >= 0 || errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+  if (n >= 0 || errno == EAGAIN || errno == EWOULDBLOCK)
+    return 0;
   return -1;
 }
 
@@ -84,22 +90,27 @@ static void proxy_queue_consume_signal(proxy_packet_queue_ctx_t *ctx) {
 
 static ssize_t tun_packet_read(void *ctx, uint8_t *buf, size_t len) {
   tun_packet_endpoint_ctx_t *tun = (tun_packet_endpoint_ctx_t *)ctx;
-  if (tun == NULL || tun->fd < 0 || buf == NULL || len == 0) return -1;
+  if (tun == NULL || tun->fd < 0 || buf == NULL || len == 0)
+    return -1;
   return read(tun->fd, buf, len);
 }
 
 static int tun_packet_write(void *ctx, const uint8_t *buf, size_t len) {
   tun_packet_endpoint_ctx_t *tun = (tun_packet_endpoint_ctx_t *)ctx;
-  if (tun == NULL || tun->fd < 0 || buf == NULL || len == 0) return -1;
+  if (tun == NULL || tun->fd < 0 || buf == NULL || len == 0)
+    return -1;
   ssize_t n = write(tun->fd, buf, len);
-  if (n == (ssize_t)len) return 0;
-  if (n >= 0) errno = EIO;
+  if (n == (ssize_t)len)
+    return 0;
+  if (n >= 0)
+    errno = EIO;
   return -1;
 }
 
 static int tun_packet_poll_fd(void *ctx) {
   tun_packet_endpoint_ctx_t *tun = (tun_packet_endpoint_ctx_t *)ctx;
-  if (tun == NULL) return -1;
+  if (tun == NULL)
+    return -1;
   return tun->fd;
 }
 
@@ -165,7 +176,8 @@ static int proxy_queue_write(void *ctx, const uint8_t *buf, size_t len) {
     return -1;
   }
   packet_node_t *node = packet_node_new(buf, len);
-  if (node == NULL) return -1;
+  if (node == NULL)
+    return -1;
   pthread_mutex_lock(&queue->mutex);
   if (queue->closing) {
     pthread_mutex_unlock(&queue->mutex);
@@ -176,7 +188,8 @@ static int proxy_queue_write(void *ctx, const uint8_t *buf, size_t len) {
   packet_queue_push((packet_node_t **)&queue->inbound_head, (packet_node_t **)&queue->inbound_tail, node);
   queue->inbound_count++;
   queue->inbound_bytes += len;
-  if (queue->inbound_count > queue->inbound_high_water) queue->inbound_high_water = queue->inbound_count;
+  if (queue->inbound_count > queue->inbound_high_water)
+    queue->inbound_high_water = queue->inbound_count;
   pthread_cond_signal(&queue->inbound_cond);
   pthread_mutex_unlock(&queue->mutex);
   return 0;
@@ -216,7 +229,8 @@ int packet_endpoint_poll_fd(packet_endpoint_t *endpoint) {
 }
 
 void packet_endpoint_init_tun(packet_endpoint_t *endpoint, tun_packet_endpoint_ctx_t *ctx, int tun_fd) {
-  if (endpoint == NULL || ctx == NULL) return;
+  if (endpoint == NULL || ctx == NULL)
+    return;
   memset(ctx, 0, sizeof(*ctx));
   ctx->fd = tun_fd;
   endpoint->ctx = ctx;
@@ -227,7 +241,8 @@ void packet_endpoint_init_tun(packet_endpoint_t *endpoint, tun_packet_endpoint_c
 }
 
 void packet_endpoint_init_proxy_placeholder(packet_endpoint_t *endpoint) {
-  if (endpoint == NULL) return;
+  if (endpoint == NULL)
+    return;
   endpoint->ctx = NULL;
   endpoint->read_packet = proxy_placeholder_read;
   endpoint->write_packet = proxy_placeholder_write;
@@ -281,7 +296,8 @@ int packet_endpoint_init_proxy_queue(packet_endpoint_t *endpoint, proxy_packet_q
 }
 
 void packet_endpoint_destroy_proxy_queue(proxy_packet_queue_ctx_t *ctx) {
-  if (ctx == NULL) return;
+  if (ctx == NULL)
+    return;
   pthread_mutex_lock(&ctx->mutex);
   ctx->closing = 1;
   pthread_cond_broadcast(&ctx->inbound_cond);
@@ -290,15 +306,20 @@ void packet_endpoint_destroy_proxy_queue(proxy_packet_queue_ctx_t *ctx) {
     pthread_cond_wait(&ctx->inbound_idle_cond, &ctx->mutex);
   }
   packet_node_t *node;
-  while ((node = packet_queue_pop((packet_node_t **)&ctx->outbound_head, (packet_node_t **)&ctx->outbound_tail)) != NULL) free(node);
-  while ((node = packet_queue_pop((packet_node_t **)&ctx->inbound_head, (packet_node_t **)&ctx->inbound_tail)) != NULL) free(node);
+  while ((node = packet_queue_pop((packet_node_t **)&ctx->outbound_head, (packet_node_t **)&ctx->outbound_tail)) !=
+         NULL)
+    free(node);
+  while ((node = packet_queue_pop((packet_node_t **)&ctx->inbound_head, (packet_node_t **)&ctx->inbound_tail)) != NULL)
+    free(node);
   ctx->outbound_count = 0;
   ctx->outbound_bytes = 0;
   ctx->inbound_count = 0;
   ctx->inbound_bytes = 0;
   pthread_mutex_unlock(&ctx->mutex);
-  if (ctx->notify_pipe[0] >= 0) close(ctx->notify_pipe[0]);
-  if (ctx->notify_pipe[1] >= 0) close(ctx->notify_pipe[1]);
+  if (ctx->notify_pipe[0] >= 0)
+    close(ctx->notify_pipe[0]);
+  if (ctx->notify_pipe[1] >= 0)
+    close(ctx->notify_pipe[1]);
   pthread_cond_destroy(&ctx->inbound_idle_cond);
   pthread_cond_destroy(&ctx->inbound_cond);
   pthread_mutex_destroy(&ctx->mutex);
@@ -310,7 +331,8 @@ int packet_endpoint_proxy_enqueue_outbound(proxy_packet_queue_ctx_t *ctx, const 
     return -1;
   }
   packet_node_t *node = packet_node_new(buf, len);
-  if (node == NULL) return -1;
+  if (node == NULL)
+    return -1;
   pthread_mutex_lock(&ctx->mutex);
   if (ctx->closing) {
     pthread_mutex_unlock(&ctx->mutex);
@@ -329,10 +351,12 @@ int packet_endpoint_proxy_enqueue_outbound(proxy_packet_queue_ctx_t *ctx, const 
   packet_queue_push((packet_node_t **)&ctx->outbound_head, (packet_node_t **)&ctx->outbound_tail, node);
   ctx->outbound_count++;
   ctx->outbound_bytes += len;
-  if (ctx->outbound_count > ctx->outbound_high_water) ctx->outbound_high_water = ctx->outbound_count;
+  if (ctx->outbound_count > ctx->outbound_high_water)
+    ctx->outbound_high_water = ctx->outbound_count;
   const int rc = proxy_queue_signal(ctx);
   pthread_mutex_unlock(&ctx->mutex);
-  if (rc != 0) return -1;
+  if (rc != 0)
+    return -1;
   return 0;
 }
 
@@ -359,7 +383,8 @@ ssize_t packet_endpoint_proxy_dequeue_inbound_wait(proxy_packet_queue_ctx_t *ctx
       ctx->inbound_waiters++;
       while (ctx->inbound_head == NULL && !ctx->closing) {
         int rc = pthread_cond_timedwait(&ctx->inbound_cond, &ctx->mutex, &deadline);
-        if (rc != 0) break;
+        if (rc != 0)
+          break;
       }
       ctx->inbound_waiters--;
       if (ctx->closing && ctx->inbound_waiters == 0) {

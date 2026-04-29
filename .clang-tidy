@@ -1,0 +1,16 @@
+# Start with checks that are useful on legacy C without forcing large mechanical
+# rewrites. Broader style/API-shape checks can be enabled in separate cleanups.
+Checks: >
+  -*,
+  clang-analyzer-*,
+  performance-*,
+  portability-*,
+  readability-duplicate-include,
+  readability-inconsistent-declaration-parameter-name,
+  readability-misleading-indentation,
+  readability-redundant-control-flow,
+  readability-redundant-declaration,
+  readability-suspicious-call-argument
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*android/app/src/main/cpp/.*'
+FormatStyle: file
