@@ -1255,6 +1255,7 @@ class UserspaceTunnelStackTest {
             thread.start()
             Socket("127.0.0.1", server.localPort).use { peer ->
                 peer.soTimeout = 500
+                waitForClientAttachment(stack, session.descriptor.sessionId)
                 val before = backend.outboundPackets.size
                 stack.processInboundPacketForTesting(outOfOrderPacket)
 
@@ -2166,6 +2167,17 @@ class UserspaceTunnelStackTest {
             Thread.sleep(25)
         }
         throw AssertionError("Timed out waiting for $count outbound packets; saw ${backend.outboundPackets.size}")
+    }
+
+    private fun waitForClientAttachment(stack: BridgeUserspaceTunnelStack, sessionId: Int) {
+        val field = BridgeUserspaceTunnelStack::class.java.getDeclaredField("clientAttachments")
+        field.isAccessible = true
+        val attachments = field.get(stack) as Map<*, *>
+        repeat(40) {
+            if (attachments.containsKey(sessionId)) return
+            Thread.sleep(25)
+        }
+        throw AssertionError("Timed out waiting for client attachment for session $sessionId")
     }
 
     private fun waitForOutboundTcpPacket(backend: CapturingBackend, predicate: (ParsedTcpSegment) -> Boolean): ByteArray {
