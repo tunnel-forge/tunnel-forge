@@ -1138,7 +1138,7 @@ internal class BridgeUserspaceTunnelStack(
         val task =
             tcpScheduler.schedule(
                 {
-                    val segment = runtime.outstandingSegmentForRetransmit(startSequence) ?: return@schedule
+                    if (runtime.outstandingSegmentForRetransmit(startSequence) == null) return@schedule
                     if (!running || !bridge.isRunning()) return@schedule
                     retransmitOutstandingTcpSegment(runtime, startSequence, reason = "rto")
                 },
