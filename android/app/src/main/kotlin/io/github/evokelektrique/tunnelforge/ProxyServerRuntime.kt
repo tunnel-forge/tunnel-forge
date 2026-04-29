@@ -1619,8 +1619,6 @@ class ProxyServerRuntime(
     ) {
         val tearingDown = AtomicBoolean(false)
         val failure = AtomicReference<IOException?>(null)
-        val clientInputEnded = AtomicBoolean(false)
-        val upstreamInputEnded = AtomicBoolean(false)
         val remoteToClient =
             submitClientWorker {
                 relayStream(
@@ -1628,7 +1626,6 @@ class ProxyServerRuntime(
                     output = clientOutput,
                     tearingDown = tearingDown,
                     failure = failure,
-                    inputEnded = upstreamInputEnded,
                     onInputClosed = { shutdownSocketOutput(client) },
                     client = client,
                     upstream = upstream,
@@ -1639,7 +1636,6 @@ class ProxyServerRuntime(
             output = upstream.getOutputStream(),
             tearingDown = tearingDown,
             failure = failure,
-            inputEnded = clientInputEnded,
             onInputClosed = { shutdownSocketOutput(upstream) },
             client = client,
             upstream = upstream,
@@ -1672,7 +1668,6 @@ class ProxyServerRuntime(
         output: OutputStream,
         tearingDown: AtomicBoolean,
         failure: AtomicReference<IOException?>,
-        inputEnded: AtomicBoolean,
         onInputClosed: () -> Unit,
         client: Socket,
         upstream: Socket,
@@ -1686,7 +1681,6 @@ class ProxyServerRuntime(
                 output.write(buffer, 0, read)
                 output.flush()
             }
-            inputEnded.set(true)
             onInputClosed()
         } catch (e: IOException) {
             if (!tearingDown.get()) {

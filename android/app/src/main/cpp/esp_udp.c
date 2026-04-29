@@ -526,9 +526,10 @@ static void build_inner_udp(uint8_t *hdr, uint16_t src_port, uint16_t dst_port, 
   util_write_be16(hdr + 6, 0);
 }
 
+#if !defined(TUNNEL_FORGE_ESP_INNER_UDP_NO_CHECKSUM) || !TUNNEL_FORGE_ESP_INNER_UDP_NO_CHECKSUM
 /* RFC 768 / RFC 1071 IPv4 UDP checksum over UDP header (checksum field zero) + payload. */
 static uint16_t ipv4_udp_checksum(const uint8_t ip_src[4], const uint8_t ip_dst[4], const uint8_t *udp,
- size_t udp_len) {
+                                  size_t udp_len) {
   uint32_t sum = 0;
   sum += ((uint32_t)ip_src[0] << 8) | ip_src[1];
   sum += ((uint32_t)ip_src[2] << 8) | ip_src[3];
@@ -546,6 +547,7 @@ static uint16_t ipv4_udp_checksum(const uint8_t ip_src[4], const uint8_t ip_dst[
   if (csum == 0) csum = 0xffffu;
   return csum;
 }
+#endif
 
 /**
  * Encrypt and send one plaintext L2TP payload as ESP transport-mode UDP datagram.
