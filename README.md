@@ -32,7 +32,6 @@
 
 <p align="center">
   <a href="#overview">Overview</a> •
-  <a href="#highlights">Highlights</a> •
   <a href="#requirements">Requirements</a> •
   <a href="#development">Development</a> •
   <a href="#debugging">Debugging</a> •
