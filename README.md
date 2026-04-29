@@ -73,28 +73,26 @@ flutter run
 
 ### Testing
 
-Run Flutter tests:
+Use the Makefile for the common local workflows:
 
 ```sh
-flutter test
+make format
+make check
+make test
+```
+
+`make check` runs Flutter analysis, Android lint, and native C checks. `make test` runs Flutter, Android unit, and native C tests.
+
+For focused commands, run:
+
+```sh
+make help
 ```
 
 Generate a coverage report:
 
 ```sh
 flutter test --coverage
-```
-
-Android unit tests:
-
-```sh
-cd ./android && ./gradlew --stacktrace :app:testDebugUnitTest
-```
-
-Run Android-native tunnel and runtime tests:
-
-```sh
-sh tool/run_native_tests.sh
 ```
 
 ## Local VPN Server
