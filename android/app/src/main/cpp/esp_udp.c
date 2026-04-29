@@ -226,19 +226,27 @@ static void esp_ensure_drbg(void) {
 }
 
 /**
- * Validate and decrypt one inbound ESP datagram into plaintext payload.
+ * Validate and decrypt one inbound ESP datagram into its inner L2TP payload.
  *
- * Pipeline:
- * - Handle NAT-T marker/keepalive framing when udp_encap is enabled.
- * - Validate SPI and replay window constraints before crypto work.
- * - Verify truncated HMAC-SHA1 integrity over ESP header+ciphertext.
- * - AES-CBC decrypt, validate ESP trailer/padding/next-header, and extract payload.
+ * The input may be either a raw ESP packet or an RFC 3948 UDP/4500 packet with the optional
+ * four-byte non-ESP marker. Accepted encrypted packets must pass, in order:
+ * 1. NAT-T keepalive filtering and optional non-ESP marker stripping.
+ * 2. ESP header minimum-length and responder SPI validation.
+ * 3. Replay-window validation using a pending state update.
+ * 4. HMAC-SHA1-96 verification over ESP header, IV, and ciphertext.
+ * 5. AES-CBC decrypt with mbedTLS padding disabled.
+ * 6. ESP trailer, incremental padding, next-header, inner UDP length, and L2TP capacity checks.
  *
- * Side effects:
- * - Updates replay window fields on accepted packets.
- * - Updates drop/failure counters and captures last-failure diagnostics.
+ * Replay state is intentionally committed only after every authentication, decrypt, and inner-payload
+ * validation step succeeds; malformed or unauthenticated packets must not advance the replay window.
  *
- * @return 0 on successful decrypt into @p out, -1 on framing/auth/replay/decrypt/validation failures.
+ * @param k       Active inbound ESP keys and replay-window state. When enc_key_len is 0, this is a cleartext pass-through.
+ * @param in      Received datagram bytes from the shared IKE/ESP UDP socket.
+ * @param in_len  Number of bytes available at @p in.
+ * @param out     Caller-owned output buffer. On success it contains only the L2TP payload, without the inner UDP header.
+ * @param out_len In: capacity of @p out. Out: number of L2TP payload bytes written.
+ *
+ * @return 0 on successful pass-through/decrypt, -1 on framing, SPI, replay, authentication, decrypt, padding, or capacity failure.
  */
 int esp_try_decrypt(esp_keys_t *k, const uint8_t *in, size_t in_len, uint8_t *out, size_t *out_len) {
   if (k->enc_key_len == 0) {
@@ -248,6 +256,14 @@ int esp_try_decrypt(esp_keys_t *k, const uint8_t *in, size_t in_len, uint8_t *ou
     s_last_fail.kind = ESP_FAIL_NONE;
     return 0;
   }
+
+  /**
+   * Step 1: normalize the inbound datagram to the ESP header.
+   *
+   * NAT-T keepalive probes are valid UDP/4500 traffic but are not ESP. When udp_encap is active,
+   * RFC 3948 packets can also carry a zero non-ESP marker before the SPI; authentication later starts
+   * after that marker so the ICV input matches the peer's ESP bytes.
+   */
   if (k->udp_encap && nat_t_keepalive_is_probe(in, in_len)) {
     esp_fail_capture(ESP_FAIL_NAT_KEEPALIVE, in_len, in, in_len, 0, 0, 0, 0, 0);
     return -1;
@@ -282,6 +298,13 @@ int esp_try_decrypt(esp_keys_t *k, const uint8_t *in, size_t in_len, uint8_t *ou
                       (unsigned)spi, (unsigned)k->spi_r);
     return -1;
   }
+
+  /**
+   * Step 2: check replay protection using pending next-state values.
+   *
+   * The packet sequence number must be accepted before expensive crypto work, but replay_top and
+   * replay_bitmap are not written back until HMAC, decrypt, padding, and inner UDP validation all pass.
+   */
   uint32_t seq = util_read_be32(p);
   uint32_t replay_top_next = k->replay_top;
   uint32_t replay_bitmap_next = k->replay_bitmap;
@@ -336,6 +359,12 @@ int esp_try_decrypt(esp_keys_t *k, const uint8_t *in, size_t in_len, uint8_t *ou
   const uint8_t *ct = p;
   const uint8_t *icv = p + ct_len;
 
+  /**
+   * Step 3: verify integrity with the inbound HMAC-SHA1-96 key.
+   *
+   * The ICV covers the ESP header through ciphertext and excludes the optional UDP/4500 non-ESP marker.
+   * AES decrypt must not run on packets that fail this check.
+   */
   uint8_t mac_calc[32];
   const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA1);
   mbedtls_md_context_t ctx;
@@ -361,6 +390,12 @@ int esp_try_decrypt(esp_keys_t *k, const uint8_t *in, size_t in_len, uint8_t *ou
     return -1;
   }
 
+  /**
+   * Step 4: decrypt the ciphertext with AES-CBC.
+   *
+   * mbedTLS padding is disabled because ESP has its own trailer layout:
+   * payload || 1,2,3... padding || pad length || next header.
+   */
   mbedtls_cipher_context_t ciph;
   mbedtls_cipher_init(&ciph);
   const mbedtls_cipher_info_t *info = mbedtls_cipher_info_from_values(MBEDTLS_CIPHER_ID_AES, (int)k->enc_key_len * 8,
@@ -409,6 +444,13 @@ int esp_try_decrypt(esp_keys_t *k, const uint8_t *in, size_t in_len, uint8_t *ou
     return -1;
   }
   mbedtls_cipher_free(&ciph);
+
+  /**
+   * Step 5: validate the ESP trailer and unwrap transport-mode UDP.
+   *
+   * This app expects UDP as ESP next-header and L2TP as the inner UDP payload. Only after the UDP
+   * length and caller capacity are validated do we memmove the L2TP payload to the start of @p out.
+   */
   if (olen < 2) {
     s_esp_drop_stats.plain_too_short++;
     esp_fail_capture(ESP_FAIL_PLAIN_SHORT, in_len, esp_head, 8, 0, 0, olen, 0, 0);
