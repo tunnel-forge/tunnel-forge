@@ -1883,9 +1883,9 @@ private data class PlainHttpForwardResult(
 )
 
 private sealed class HttpBodyFraming {
-    data object none : HttpBodyFraming()
-    data object chunked : HttpBodyFraming()
-    data object closeDelimited : HttpBodyFraming()
+    object none : HttpBodyFraming()
+    object chunked : HttpBodyFraming()
+    object closeDelimited : HttpBodyFraming()
     data class fixed(val length: Long) : HttpBodyFraming()
 }
 
