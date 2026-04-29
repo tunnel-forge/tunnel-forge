@@ -135,7 +135,7 @@ docker exec -it ipsec-vpn-server tail -f /var/log/auth.log
 
 ## Feedback
 
-Use GitHub Issues or [Telegram channel](https://t.me/TunnelForge?direct) for bugs, feature requests or general feedback. When reporting a connection problem,
+Use GitHub Issues or [Telegram channel](https://t.me/TunnelForge) for bugs, feature requests or general feedback. When reporting a connection problem,
 include the values used in the profile (such as MTU and DNS), Android version, device model, and app logs (debug).
 
 ## Licensing
