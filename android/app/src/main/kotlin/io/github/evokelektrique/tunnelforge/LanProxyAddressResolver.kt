@@ -167,32 +167,34 @@ class LanProxyAddressResolver(
 
     internal fun collectCandidates(): List<ProxyInterfaceCandidate> {
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
+        val activeNetwork = connectivity?.activeNetwork
         val activeInterface =
-            connectivity?.activeNetwork?.let { activeNetwork ->
-                connectivity.getLinkProperties(activeNetwork)?.interfaceName
+            activeNetwork?.let { network ->
+                connectivity.getLinkProperties(network)?.interfaceName
             }
         val metadataByInterface = linkedMapOf<String, ProxyInterfaceMetadata>()
-        if (connectivity != null) {
-            @Suppress("DEPRECATION")
-            val networks = connectivity.allNetworks
-            for (network in networks) {
-                val capabilities = connectivity.getNetworkCapabilities(network) ?: continue
-                if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
-                val linkProperties = connectivity.getLinkProperties(network) ?: continue
-                val interfaceName = linkProperties.interfaceName ?: continue
-                if (interfaceName.isIgnoredProxyLanInterface()) continue
-                val metadata =
-                    metadataByInterface.getOrPut(interfaceName) {
-                        ProxyInterfaceMetadata(
-                            transport = resolveTransport(interfaceName, capabilities),
-                            isActive = interfaceName == activeInterface,
-                        )
+        if (connectivity != null && activeNetwork != null) {
+            val capabilities = connectivity.getNetworkCapabilities(activeNetwork)
+            val linkProperties = connectivity.getLinkProperties(activeNetwork)
+            if (capabilities != null &&
+                !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+                linkProperties != null
+            ) {
+                val interfaceName = linkProperties.interfaceName
+                if (interfaceName != null && !interfaceName.isIgnoredProxyLanInterface()) {
+                    val metadata =
+                        metadataByInterface.getOrPut(interfaceName) {
+                            ProxyInterfaceMetadata(
+                                transport = resolveTransport(interfaceName, capabilities),
+                                isActive = interfaceName == activeInterface,
+                            )
+                        }
+                    metadata.isActive = metadata.isActive || interfaceName == activeInterface
+                    for (linkAddress in linkProperties.linkAddresses) {
+                        val address = linkAddress.address as? Inet4Address ?: continue
+                        if (!address.isUsableProxyLanAddress()) continue
+                        metadata.addresses.add(address.hostAddress ?: continue)
                     }
-                metadata.isActive = metadata.isActive || interfaceName == activeInterface
-                for (linkAddress in linkProperties.linkAddresses) {
-                    val address = linkAddress.address as? Inet4Address ?: continue
-                    if (!address.isUsableProxyLanAddress()) continue
-                    metadata.addresses.add(address.hostAddress ?: continue)
                 }
             }
         }
