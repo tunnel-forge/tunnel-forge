@@ -1,3 +1,4 @@
+/* NAT-T keepalive probe detection and periodic send helper (RFC 3948 UDP encapsulation). */
 #include "nat_t_keepalive.h"
 
 int nat_t_keepalive_is_probe(const uint8_t *buf, size_t len) {

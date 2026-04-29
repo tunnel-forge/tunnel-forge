@@ -45,6 +45,10 @@ typedef struct {
 #define L2TP_DISPATCH_OK 0
 #define L2TP_DISPATCH_REMOTE_CLOSED 1
 
+/**
+ * L2TPv2 control handshake over ESP (or cleartext) to @p peer. Fills tunnel/session ids in @p s.
+ * @return 0 on ICCN complete; -1 on I/O or protocol failure.
+ */
 int l2tp_handshake(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len, l2tp_session_t *s);
 
 /**
@@ -54,10 +58,15 @@ int l2tp_handshake(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, soc
 int l2tp_data_extract_ppp(const uint8_t *plain, size_t plain_len, const l2tp_session_t *s, const uint8_t **ppp_out,
                           size_t *ppp_len_out, int diag);
 
+/**
+ * Demux one decrypted L2TP payload: control messages vs data channel PPP toward @p endpoint.
+ * @return L2TP_DISPATCH_* code; REMOTE_CLOSED when peer tears down session.
+ */
 int l2tp_dispatch_incoming(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
                            l2tp_session_t *s, const uint8_t *data, size_t len, packet_endpoint_t *endpoint,
                            ppp_session_t *ppp);
 
+/** Wrap @p ppp_len bytes in L2TP data header and esp_encrypt_send to peer. */
 int l2tp_send_ppp(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len, l2tp_session_t *s,
                   const uint8_t *ppp, size_t ppp_len);
 

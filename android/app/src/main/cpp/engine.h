@@ -12,10 +12,14 @@
 
 #include "util_endian.h"
 
+/** IKEv1 ISAKMP (cleartext) default port. */
 #define IKE_PORT 500
+/** IPsec NAT-T / IKE over UDP (RFC 3948). */
 #define NAT_T_PORT 4500
+/** Classic L2TP data channel port (inner UDP in ESP transport mode). */
 #define L2TP_PORT 1701
 
+/** RFC 3948 four-byte prefix value before ISAKMP on UDP 4500 (zero = non-ESP / IKE). */
 #define ESP_UDP_NON_ESP_MARKER 0u
 
 /** Return values from [tunnel_loop_run] to Kotlin / JNI. */
@@ -28,6 +32,7 @@
 #define TUNNEL_EXIT_PROXY_NOT_IMPLEMENTED 11
 #define TUNNEL_EXIT_STOPPED 12
 
+/** VpnService.protect(fd) when protection is enabled; no-op if disabled or JNI missing. */
 int util_protect_fd(int fd);
 void engine_set_socket_protection_enabled(int enabled);
 
@@ -50,9 +55,13 @@ int tunnel_proxy_is_bridge_active(void);
 int tunnel_proxy_enqueue_outbound_packet(const uint8_t *packet, size_t len);
 ssize_t tunnel_proxy_dequeue_inbound_packet(uint8_t *packet, size_t len);
 ssize_t tunnel_proxy_dequeue_inbound_packet_wait(uint8_t *packet, size_t len, int timeout_ms);
+/** Configure DNS intercept forward address (used with tunnel VPN DNS queue). */
 int tunnel_vpn_dns_set_intercept_ipv4(const char *ipv4);
+/** Wait for intercepted DNS query from tunnel thread (Kotlin services it). */
 ssize_t tunnel_vpn_dns_dequeue_query_wait(uint8_t *packet, size_t len, int timeout_ms);
+/** Inject DNS response bytes toward TUN via tunnel loop. */
 int tunnel_vpn_dns_write_response_packet(const uint8_t *packet, size_t len);
+/** Cooperative stop flag (set from JNI); poll in native loops. */
 int tunnel_should_stop(void);
 
 /* Do not pass secrets as format args. */
@@ -64,6 +73,7 @@ void engine_notify_tunnel_ready(const char *detail);
 
 void engine_set_java_vm(JavaVM *vm);
 JavaVM *engine_get_java_vm(void);
+/** Cache JNI class/method IDs; call from JNI_OnLoad or first attach. */
 int engine_jni_init(JNIEnv *env);
 void engine_jni_cleanup(JNIEnv *env);
 

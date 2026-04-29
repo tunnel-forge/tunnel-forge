@@ -66,6 +66,31 @@ static void recv_plain_log_stats(const char *ctx, const recv_plain_stats_t *st, 
                     st->decrypt_fail_alt, elapsed_ms, timeout_ms);
 }
 
+/**
+ * Receive one plain L2TP payload from the shared UDP/4500 socket.
+ *
+ * Data flow summary:
+ * - Poll the socket in short slices until timeout/cancel/data.
+ * - Ignore NAT-T keepalives and ISAKMP/IKE datagrams that must not enter ESP decrypt.
+ * - Accept either cleartext payloads (when ESP decrypt is disabled) or ESP-decrypted payloads.
+ * - Try primary keys first, then optional alternate keys, and report which keyset succeeded.
+ *
+ * Ownership/parameter assumptions:
+ * - @p out points to caller-owned storage of size @p out_cap.
+ * - @p esp is required; @p esp_alt and @p used_alt are optional.
+ * - @p used_alt is reset to 0 on entry and set to 1 only when alternate keys decrypt successfully.
+ *
+ * Loop/timeout and cancellation:
+ * - Uses an overall timeout budget (@p timeout_ms) plus a hard safety cap of 256 iterations.
+ * - Poll wait is sliced to <=200 ms so tunnel_should_stop() is observed promptly.
+ * - Returns early with -1 when tunnel_should_stop() is set.
+ *
+ * Diagnostics intent:
+ * - Tracks skip/decrypt counters and logs them on exit paths to aid field debugging.
+ *
+ * @return Plain payload length on success; -1 on timeout, cancellation, poll/recv errors, decrypt failure, or
+ *         output buffer overflow.
+ */
 static int recv_plain(int esp_fd, esp_keys_t *esp, esp_keys_t *esp_alt, int *used_alt, uint8_t *out,
                       size_t out_cap, int timeout_ms) {
   struct timeval start;
@@ -73,6 +98,7 @@ static int recv_plain(int esp_fd, esp_keys_t *esp, esp_keys_t *esp_alt, int *use
   if (used_alt != NULL) *used_alt = 0;
   gettimeofday(&start, NULL);
 
+  /* Bounded retry loop to prevent endless keepalive/noise processing. */
   for (int iter = 0; iter < 256; iter++) {
     if (tunnel_should_stop()) {
       tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "l2tp recv_plain: canceled before poll");
@@ -91,6 +117,7 @@ static int recv_plain(int esp_fd, esp_keys_t *esp, esp_keys_t *esp_alt, int *use
     int remaining_ms = timeout_ms - elapsed_ms;
     if (remaining_ms <= 0) return -1;
 
+    /* Poll in short slices so cancellation checks stay responsive. */
     struct pollfd pfd = {.fd = esp_fd, .events = POLLIN};
     int waited = 0;
     int pr = 0;
@@ -175,6 +202,7 @@ static int recv_plain(int esp_fd, esp_keys_t *esp, esp_keys_t *esp_alt, int *use
     }
 
     if (esp->enc_key_len == 0) {
+      /* Cleartext mode: accept the datagram as-is when encryption is not configured. */
       if ((size_t)n > out_cap) return -1;
       memcpy(out, raw, (size_t)n);
       recv_plain_log_stats("cleartext", &stats, elapsed_ms, timeout_ms);
@@ -193,6 +221,7 @@ static int recv_plain(int esp_fd, esp_keys_t *esp, esp_keys_t *esp_alt, int *use
     if (esp_alt != NULL) {
       plen = out_cap;
       stats.decrypt_try_alt++;
+      /* Secondary keyset supports rekey transitions and alternate SA selection. */
       if (esp_try_decrypt(esp_alt, raw, (size_t)n, out, &plen) == 0) {
         stats.decrypt_ok_alt++;
         if (used_alt != NULL) *used_alt = 1;
@@ -441,6 +470,18 @@ static int recv_until_mt(int esp_fd, esp_keys_t *esp, const struct sockaddr *pee
   return -1;
 }
 
+/**
+ * Run L2TPv2 control-plane handshake (SCCRQ through ICCN) over the ESP/cleartext UDP path.
+ *
+ * Phases:
+ * - Send SCCRQ with mandatory AVPs; wait for SCCRP and learn peer tunnel id.
+ * - If SCCRP times out, retry with alternate ESP key-direction profile (interop with some gateways).
+ * - Send SCCCN, then ICRQ/ICRP/ICCN to establish session ids.
+ *
+ * Side effects: initializes @p s tunnel/session ids; may mutate @p esp when fallback profile succeeds.
+ *
+ * @return 0 when ICCN is sent and session is ready; -1 on timeout, parse, or send failure.
+ */
 static int l2tp_handshake_inner(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
                                 l2tp_session_t *s) {
   memset(s, 0, sizeof(*s));
@@ -480,6 +521,7 @@ static int l2tp_handshake_inner(int esp_fd, esp_keys_t *esp, const struct sockad
     static const struct profile_try tries[] = {
         {1, 0, "alt-direction"},
     };
+    /* SCCRP missing: some peers only decrypt when SPI/key direction matches; try prepared variant. */
     tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG,
                       "l2tp: SCCRP wait failed after primary profile; trying ESP profile fallbacks");
     for (size_t ti = 0; ti < sizeof(tries) / sizeof(tries[0]) && ilen < 0; ti++) {
@@ -554,6 +596,7 @@ static int l2tp_handshake_inner(int esp_fd, esp_keys_t *esp, const struct sockad
   avp_u16(avps, &ao, L2TP_AVP_ASSIGNED_SESSION, local_sid);
   if (send_ctrl(esp_fd, esp, peer, peer_len, s, avps, ao) != 0) return -1;
 
+  /* Drain stray post-handshake datagram so data-plane loop does not inherit stale control noise. */
   (void)recv_plain(esp_fd, esp, NULL, NULL, in, sizeof(in), 1500);
 
   tunnel_log("l2tp ok remote_tid=%u remote_sid=%u local_tid=%u local_sid=%u", (unsigned)s->tunnel_id,
@@ -561,6 +604,7 @@ static int l2tp_handshake_inner(int esp_fd, esp_keys_t *esp, const struct sockad
   return 0;
 }
 
+/** Public entry: enables handshake trace budget then delegates to l2tp_handshake_inner(). */
 int l2tp_handshake(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len, l2tp_session_t *s) {
   s_l2tp_hs_trace_rem = 128;
   int r = l2tp_handshake_inner(esp_fd, esp, peer, peer_len, s);
@@ -592,6 +636,14 @@ static void l2tp_warn_data_extract(const char *why, uint16_t flags, size_t plain
   }
 }
 
+/**
+ * Parse RFC 2661 L2TP Data Message header and return pointer/length of embedded PPP payload.
+ *
+ * Walks flags T/L/S/O optional fields, validates tunnel/session ids against @p s when non-NULL.
+ *
+ * @param diag When non-zero, rate-limited WARN on validation failures.
+ * @return 0 with outputs set on success; -1 on malformed header or tid/sid mismatch.
+ */
 int l2tp_data_extract_ppp(const uint8_t *plain, size_t plain_len, const l2tp_session_t *s, const uint8_t **ppp_out,
                           size_t *ppp_len_out, int diag) {
   if (plain_len < 2u || ppp_out == NULL || ppp_len_out == NULL) {
@@ -603,6 +655,7 @@ int l2tp_data_extract_ppp(const uint8_t *plain, size_t plain_len, const l2tp_ses
     if (diag) l2tp_warn_data_extract("type_T_not_data", flags, plain_len, s, 0, 0, 0);
     return -1;
   }
+  /* Data message: optional L (length), required tunnel/session, optional S (Ns/Nr), optional O (offset). */
   size_t off = 2u;
   if ((flags & L2TP_DATA_FLAG_L) != 0u) {
     if (plain_len < off + 2u) {

@@ -1,7 +1,10 @@
 #ifndef TUNNEL_FORGE_IKEV1_INTERNAL_H
 #define TUNNEL_FORGE_IKEV1_INTERNAL_H
 
-/* ISAKMP payload and exchange-type constants for ikev1.c only (RFC 2408, 2409, NAT-D 3947). */
+/*
+ * ISAKMP payload and exchange-type constants for ikev1.c only (RFC 2408, 2409, NAT-D RFC 3947).
+ * Not part of the public JNI/engine API.
+ */
 
 #include <stddef.h>
 #include <stdint.h>

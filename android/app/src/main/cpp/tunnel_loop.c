@@ -296,14 +296,41 @@ void tunnel_negotiated_dns_ipv4(uint8_t primary_out[4], uint8_t secondary_out[4]
   if (secondary_out != NULL) memcpy(secondary_out, g_state.ppp.secondary_dns, 4);
 }
 
+/*
+ * Run the negotiated tunnel data plane for one packet endpoint.
+ *
+ * Preconditions:
+ * - tunnel_negotiate() completed successfully and set g_state.ready.
+ * - endpoint is initialized and supports packet_endpoint_read/write/poll_fd.
+ * - tun_fd is a valid TUN descriptor for TUN-backed mode, or < 0 for proxy-only mode.
+ *
+ * Main phases:
+ * 1) Initialization: clear g_stop, optionally enable VPN DNS interception bridge state.
+ * 2) Poll loop: wait on endpoint + ESP socket (+ DNS queue when enabled).
+ * 3) Packet routing: endpoint->PPP/ESP egress, ESP->L2TP/PPP ingress, optional DNS intercept queueing.
+ * 4) Shutdown: close active session, clear DNS bridge atomics, destroy DNS queue endpoint state.
+ *
+ * Stop and return behavior:
+ * - Loop runs until g_stop is set, or peer teardown is reported by l2tp_dispatch_incoming().
+ * - Returns TUNNEL_EXIT_BAD_ARGS when called before negotiation.
+ * - Returns TUNNEL_EXIT_POLL_ERROR on poll failure paths.
+ * - Returns TUNNEL_EXIT_OK after normal/remote-requested shutdown cleanup.
+ *
+ * Shared side effects:
+ * - Uses atomics g_stop, g_vpn_dns_bridge_active, g_vpn_dns_tun_fd.
+ * - May call tunnel_close_active_session(), which closes ESP fd and clears g_state.ready.
+ */
 static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint) {
+  /* Readiness guard: run loop is only valid after negotiation state is established. */
   if (!g_state.ready) {
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "tunnel_run_loop: not negotiated");
     return TUNNEL_EXIT_BAD_ARGS;
   }
+  /* Each invocation starts with cooperative stop cleared. */
   atomic_store(&g_stop, 0);
   int vpn_dns_enabled_for_loop = 0;
   packet_endpoint_t vpn_dns_endpoint;
+  /* Activate DNS intercept bridge only when TUN exists and feature flag is enabled. */
   if (tun_fd >= 0 && atomic_load(&g_vpn_dns_intercept_enabled)) {
     if (packet_endpoint_init_proxy_queue(&vpn_dns_endpoint, &g_vpn_dns_queue) == 0) {
       atomic_store(&g_vpn_dns_tun_fd, tun_fd);
@@ -317,6 +344,7 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
 
   const int endpoint_fd = packet_endpoint_poll_fd(endpoint);
   const int vpn_dns_fd = vpn_dns_enabled_for_loop ? packet_endpoint_poll_fd(&vpn_dns_endpoint) : -1;
+  /* Poll fds are prepared once; loop mutates only events/revents and pending state. */
   if ((endpoint_fd >= 0 && set_nonblock(endpoint_fd) != 0) || set_nonblock(g_state.ike.esp_fd) != 0) {
     tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "nonblock failed: errno=%d", errno);
   }
@@ -335,6 +363,7 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
   size_t vpn_dns_pending_response_len = 0u;
   time_t last_outbound_to_peer = time(NULL);
 
+  /* Data-plane loop: handle endpoint egress, ESP ingress, and optional DNS bridge traffic. */
   while (!atomic_load(&g_stop)) {
     if (vpn_dns_enabled_for_loop && vpn_dns_pending_response_len > 0u) {
       vpn_dns_try_write_pending_response(endpoint, vpn_dns_pending_response, &vpn_dns_pending_response_len);
@@ -349,6 +378,7 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
     int pr = poll(fds, vpn_dns_enabled_for_loop ? 3u : 2u, 500);
     if (pr < 0) {
       if (errno == EINTR) continue;
+      /* Poll failure is terminal: close session first, then unwind DNS bridge state. */
       tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "poll failed errno=%d, closing ESP fd", errno);
       tunnel_close_active_session("poll error", 1);
       if (vpn_dns_enabled_for_loop) {
@@ -359,6 +389,7 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
       return TUNNEL_EXIT_POLL_ERROR;
     }
     if (pr == 0) {
+      /* Idle tick: emit periodic counters and send NAT-T keepalive when due. */
       engine_dp_maybe_log_summary(time(NULL));
       if (g_state.esp.udp_encap && g_state.esp.enc_key_len) {
         time_t now = time(NULL);
@@ -390,13 +421,14 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
     }
 
     if (fds[0].revents & POLLIN) {
-        ssize_t n = packet_endpoint_read(endpoint, tun_buf, sizeof(tun_buf));
-        if (n > 0) {
-          engine_dp_note_tun_rx();
-          if (vpn_dns_enabled_for_loop && vpn_dns_intercept_query(tun_buf, (size_t)n)) {
-            continue;
-          }
-          if (ppp_encapsulate_and_send(g_state.ike.esp_fd, &g_state.esp,
+      /* Endpoint->peer egress path, with optional DNS query interception before PPP encapsulation. */
+      ssize_t n = packet_endpoint_read(endpoint, tun_buf, sizeof(tun_buf));
+      if (n > 0) {
+        engine_dp_note_tun_rx();
+        if (vpn_dns_enabled_for_loop && vpn_dns_intercept_query(tun_buf, (size_t)n)) {
+          continue;
+        }
+        if (ppp_encapsulate_and_send(g_state.ike.esp_fd, &g_state.esp,
                                      (struct sockaddr *)&g_state.ike.peer,
                                      g_state.ike.peer_len, &g_state.l2tp,
                                      &g_state.ppp, tun_buf, (size_t)n) < 0) {
@@ -410,6 +442,7 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
     }
 
     if (fds[1].revents & POLLIN) {
+      /* Peer->endpoint ingress path: ESP receive, decrypt, then L2TP/PPP dispatch. */
       ssize_t n = recv(g_state.ike.esp_fd, esp_buf, sizeof(esp_buf), 0);
       if (n > 0) {
         engine_dp_note_esp_rx();
@@ -425,6 +458,7 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
               l2tp_dispatch_incoming(g_state.ike.esp_fd, &g_state.esp, (struct sockaddr *)&g_state.ike.peer,
                                      g_state.ike.peer_len, &g_state.l2tp, plain, plain_len, endpoint, &g_state.ppp);
           if (dispatch_rc == L2TP_DISPATCH_REMOTE_CLOSED) {
+            /* Remote requested teardown; break to shared cleanup path below. */
             tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "peer requested L2TP tunnel teardown");
             break;
           }
@@ -445,6 +479,7 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
     engine_dp_maybe_log_summary(time(NULL));
   }
 
+  /* Unified shutdown path for stop flag and peer-triggered close. */
   tunnel_close_active_session("tunnel stopped", 1);
   if (vpn_dns_enabled_for_loop) {
     atomic_store(&g_vpn_dns_bridge_active, 0);

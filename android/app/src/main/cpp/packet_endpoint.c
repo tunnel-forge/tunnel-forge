@@ -1,3 +1,6 @@
+/*
+ * TUN and in-memory proxy packet queues backing packet_endpoint_t (mutex, cond, notify pipe).
+ */
 #include "packet_endpoint.h"
 
 #include <errno.h>

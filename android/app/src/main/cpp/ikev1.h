@@ -9,6 +9,7 @@
 typedef struct {
   uint8_t icookie[8];
   uint8_t rcookie[8];
+  /** Phase-1 PRF outputs (lengths follow negotiated transforms). */
   uint8_t skeyid[32];
   size_t skeyid_len;
   uint8_t skeyid_e[32];
@@ -21,6 +22,7 @@ typedef struct {
   int nat_t;
   /** Phase 1 uses AES-128-CBC instead of 3DES (same MODP2048 DH). */
   int p1_aes;
+  /** Connected UDP socket used for IKE then ESP (same fd after negotiation). */
   int esp_fd;
   struct sockaddr_storage peer;
   socklen_t peer_len;

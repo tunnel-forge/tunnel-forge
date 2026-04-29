@@ -203,6 +203,16 @@ static void strip_leading_zeros(uint8_t *buf, size_t *len) {
   }
 }
 
+/**
+ * Send one IKE datagram and wait for a matching UDP reply with bounded retries.
+ *
+ * Behavior:
+ * - Optionally wraps outbound payload with the RFC 3948 4-byte non-ESP marker when prefix4500 is set.
+ * - Uses a short retry schedule derived from timeout_ms, with poll slicing to keep cancellation responsive.
+ * - Strips the 4-byte non-ESP marker from inbound replies on NAT-T paths before returning.
+ *
+ * @return received payload size on success, -1 on cancellation, timeout, poll/send/recv failures.
+ */
 static int ike_send_recv(int fd, const struct sockaddr *peer, socklen_t peer_len, const uint8_t *out, size_t out_len,
                          uint8_t *in, size_t in_cap, int timeout_ms, int prefix4500) {
   uint8_t wr[4096];
@@ -224,6 +234,7 @@ static int ike_send_recv(int fd, const struct sockaddr *peer, socklen_t peer_len
       (timeout_ms >= 16000) ? 4 : (timeout_ms >= 10000) ? 3 : (timeout_ms >= 4000) ? 2 : 1;
   int remaining = timeout_ms;
 
+  /* Retry loop: re-send request each attempt until reply or timeout budget is exhausted. */
   for (int attempt = 0; attempt < attempts && remaining > 0; attempt++) {
     if (tunnel_should_stop()) {
       tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "ike_send_recv: canceled before send");
@@ -240,6 +251,7 @@ static int ike_send_recv(int fd, const struct sockaddr *peer, socklen_t peer_len
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                         "ike_send_recv: attempt %d/%d wait=%d ms remaining=%d ms", attempt + 1, attempts, wait,
                         remaining);
+    /* Poll in small slices so stop requests are honored promptly. */
     int waited = 0;
     int pr = 0;
     struct pollfd pfd = {.fd = fd, .events = POLLIN};
@@ -279,6 +291,7 @@ static int ike_send_recv(int fd, const struct sockaddr *peer, socklen_t peer_len
     }
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ike_send_recv: got UDP reply %zd bytes nat_t=%d (attempt %d)", n,
                         prefix4500, attempt + 1);
+    /* NAT-T receive path: strip RFC 3948 non-ESP marker before higher-layer parsing. */
     if (prefix4500 && n >= 4 && util_read_be32(in) == 0u) {
       memmove(in, in + 4, (size_t)n - 4);
       n -= 4;
@@ -931,6 +944,21 @@ static int keymat_expand_ikev1(const uint8_t *skd, size_t skd_len, const uint8_t
 
 /* --- IKEv1 Main Mode + Quick Mode until ESP keys and udp_encap socket are ready --- */
 
+/**
+ * Perform IKEv1 Main Mode + Quick Mode to derive ESP transport keys and connected socket state.
+ *
+ * High-level phases:
+ * 1) Resolve peer endpoint and initialize RNG/DH state.
+ * 2) Run Main Mode exchange (MM1..MM6), including NAT-T transport fallback and cookie/state capture.
+ * 3) Derive phase-1 and phase-2 key material, authenticate peer responses, and negotiate ESP proposal.
+ * 4) Complete Quick Mode and finalize ESP socket/profile fields in @p ike and @p esp.
+ *
+ * Side effects:
+ * - Initializes/overwrites session structs and connected socket descriptors.
+ * - Updates NAT-T mode, peer endpoint selection, SPI/key material, replay state, and negotiation flags.
+ *
+ * @return 0 on success, -1 on negotiation failure or cancellation.
+ */
 static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *ike, esp_keys_t *esp) {
   memset(ike, 0, sizeof(*ike));
   memset(esp, 0, sizeof(*esp));
@@ -1038,7 +1066,7 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   memcpy(&peer_active, &peer500, l500);
   int p1_prefix = 0;
 
-  // IKEv1 Main Mode message 1: SA + NAT-T VID (RFC 3947).
+  /* MM1: propose SA and advertise NAT-T capability via RFC 3947 VID. */
   o = 0;
   memcpy(pkt + o, icookie, 8); o += 8;
   memset(pkt + o, 0, 8);       o += 8;
@@ -1063,6 +1091,7 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   tunnel_log("IKE Main Mode msg1 -> %zu bytes (transport=%s)", o, p1_prefix ? "UDP4500+marker" : "UDP500");
   inlen = ike_send_recv(fd, (struct sockaddr *)&peer_active, peer_active_len, pkt, o, in, sizeof(in), 8000, p1_prefix);
   if (inlen < 28) {
+    /* No usable MM2 reply on UDP/500: retry full MM1 over UDP/4500 + non-ESP marker. */
     tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
                         "IKE MM1: no reply on UDP 500, retrying via NAT-T UDP 4500 (RFC 3947 non-ESP marker)");
     close(fd);
@@ -1115,7 +1144,7 @@ static int ipsec_negotiate(const char *server, const char *psk, ike_session_t *i
   ike_log_isakmp_summary("IKE MM msg2", in, inlen);
   memcpy(ike->rcookie, in + 8, 8);
 
-  // Save the MM2 SA body (selected/accepted SA Libreswan uses for HASH_R).
+  /* Persist MM2-selected SA body for HASH_R verification compatibility with peers. */
   // RFC 2409: HASH_I and HASH_R both use SAi_b from MM1, but Libreswan computes HASH_R over the
   // SA body it sent in MM2, so verify HASH_R against this body.
   uint8_t sa2_body[256];

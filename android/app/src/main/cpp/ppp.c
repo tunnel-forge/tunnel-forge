@@ -80,6 +80,14 @@ static long long ppp_now_ms(void) {
   return ((long long)now.tv_sec * 1000ll) + ((long long)now.tv_usec / 1000ll);
 }
 
+/**
+ * Receive one PPP frame from the L2TP data channel within a deadline.
+ *
+ * Polls @p esp_fd in short slices, decrypts ESP when configured, strips L2TP data header via
+ * l2tp_data_extract_ppp(), and copies the PPP payload into @p out.
+ *
+ * @return PPP payload length on success; -1 on cancel, timeout, socket error, or oversize payload.
+ */
 static int recv_ppp(int esp_fd, esp_keys_t *esp, l2tp_session_t *l2tp, uint8_t *out, size_t cap, int ms) {
   struct timeval start;
   gettimeofday(&start, NULL);
@@ -134,6 +142,7 @@ static int recv_ppp(int esp_fd, esp_keys_t *esp, l2tp_session_t *l2tp, uint8_t *
       memcpy(plain, raw, (size_t)n);
       plen = (size_t)n;
     } else {
+      /* Decrypt failures are non-fatal: peer may send IKE/NAT-T noise on same socket. */
       if (esp_try_decrypt(esp, raw, (size_t)n, plain, &plen) != 0) {
         char detail[160];
         esp_decrypt_last_fail_snprint(detail, sizeof(detail));
@@ -363,8 +372,30 @@ static void lcp_apply_conf_reject(const uint8_t *lcp, size_t lcp_len, int *inclu
   }
 }
 
+/**
+ * Negotiate LCP open state for the PPP link on the current L2TP session.
+ *
+ * The routine drives only the LCP Configure-Request handshake phase:
+ * - send local Configure-Request,
+ * - process peer Configure-Request / Configure-Ack / Configure-Nak / Configure-Reject,
+ * - adapt future Configure-Requests until our request id is acknowledged or retries are exhausted.
+ *
+ * Runtime LCP data-plane messages such as Echo-Request replies and Protocol-Reject generation are handled later in
+ * ppp_dispatch_ppp_frame(), not in this handshake helper.
+ *
+ * @param esp_fd     ESP UDP socket fd used for PPP-over-L2TP transport.
+ * @param esp        Active ESP keys/state for send/receive helpers.
+ * @param peer       Remote UDP endpoint.
+ * @param peer_len   Length of @p peer.
+ * @param l2tp       Active L2TP session descriptor.
+ * @param auth_out   Negotiated authentication kind on success.
+ * @param ppp        PPP session state (for negotiated framing hints and MTU selection).
+ *
+ * @return 0 when LCP reaches open/acknowledged state, -1 on timeout, parse, or send/receive failure.
+ */
 static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
                              l2tp_session_t *l2tp, ppp_auth_kind_t *auth_out, ppp_session_t *ppp) {
+  /* Local state for our Configure-Request sequence and adaptive option set. */
   uint8_t id = 1;
   ppp_auth_kind_t auth = PPP_AUTH_MSCHAPV2;
   uint8_t pkt[64];
@@ -373,6 +404,7 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
   int lcp_peer_framing_seen = 0;
   int lcp_accm_in_cr = 1;
   int lcp_auth_in_cr = 1;
+  /* Phase 1: send initial Configure-Request. */
   int plen = lcp_build_cr(pkt, sizeof(pkt), id, auth, cr_mru, 1, lcp_accm_in_cr, lcp_auth_in_cr);
   if (plen < 0) return -1;
   tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp lcp: send Configure-Request id=%u auth=%s mru=%u", (unsigned)id,
@@ -387,6 +419,7 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
   int peer_cr_hex_done = 0;
   int applied_peer_lcp_auth_hint = 0;
   int pending_resend_cr_after_ack = 0;
+  /* Phase 2: bounded receive/process loop until our current request id is acknowledged. */
   for (int round = 0; round < 16 && !got_ack; round++) {
     int n = recv_ppp(esp_fd, esp, l2tp, in, sizeof(in), 4000);
     if (n < 8) {
@@ -401,6 +434,7 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
     uint8_t code = p[2];
     uint8_t rid = p[3];
     if (code == 1) {
+      /* Peer Configure-Request: observe framing/options, send Configure-Ack, optionally realign auth request. */
       if (!lcp_peer_framing_seen) {
         lcp_peer_framing_seen = 1;
         lcp_out_include_ac = (in[0] == 0xff && in[1] == 0x03) ? 1 : 0;
@@ -460,11 +494,12 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
       continue;
     }
     if (code == 2 && rid == id) {
+      /* Terminal condition: our current Configure-Request is acknowledged. */
       got_ack = 1;
       break;
     }
     if (code == 4 && rid == id) {
-      /* Configure-Reject: peer refuses option(s) from our Configure-Request (e.g. Magic/ACCM not wanted). */
+      /* Configure-Reject: remove rejected options and resend with next id. */
       {
         char hx[128];
         size_t lim = len < 40u ? len : 40u;
@@ -492,6 +527,7 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
       continue;
     }
     if (code == 3 && rid == id) {
+      /* Configure-Nak: adopt suggested auth family and resend with next id. */
       uint16_t lcp_len = util_read_be16(p + 4);
       if (lcp_len >= 6 && (size_t)lcp_len <= len) {
         if (lcp_nak_wants_pap(p + 6, (size_t)lcp_len - 6)) {
@@ -511,6 +547,7 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
     }
   }
   if (!got_ack) {
+    /* Round budget exhausted without Configure-Ack for our request id. */
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "ppp: LCP timeout");
     return -1;
   }
@@ -551,6 +588,14 @@ static int chap_md5_response(const uint8_t chap_id, const char *password, const 
   return 0;
 }
 
+/**
+ * Complete MS-CHAPv2 authentication after LCP (CHAP challenge/response/success or failure).
+ *
+ * Waits for CHAP Challenge (code 1), builds Response (code 2) with MS-CHAPv2 response blob, then polls for
+ * Success (3) or Failure (4). Failure parses optional peer text for diagnostics.
+ *
+ * @return 0 on Success; -1 on I/O error, timeout, or Failure.
+ */
 static int ppp_auth_mschapv2(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
                              l2tp_session_t *l2tp, const char *user, const char *password) {
   uint8_t in[4096];
@@ -594,6 +639,7 @@ static int ppp_auth_mschapv2(int esp_fd, esp_keys_t *esp, const struct sockaddr 
     util_write_be16(out + lenpos, (uint16_t)(o - chap_start));
     if (send_ppp(esp_fd, esp, peer, peer_len, l2tp, out, o) < 0) return -1;
 
+    /* Wait for CHAP Success (3) or Failure (4) after MS-CHAPv2 Response. */
     for (int j = 0; j < 16; j++) {
       n = recv_ppp(esp_fd, esp, l2tp, in, sizeof(in), 5000);
       if (n < 8) continue;
@@ -813,19 +859,39 @@ static int ipcp_build_cr(uint8_t *out, size_t cap, uint8_t id, const uint8_t ip[
   return (int)o;
 }
 
+/**
+ * Negotiate IPCP parameters (IPv4 address and optional DNS servers) after LCP/auth complete.
+ *
+ * The local side starts with zero-valued requests ("please assign") and iteratively adapts based on peer
+ * Configure-Nak / Configure-Reject responses. While awaiting final Configure-Ack for our id, non-IPCP traffic
+ * (including LCP chatter) is skipped rather than treated as fatal.
+ *
+ * Retry behavior:
+ * - Resend the current Configure-Request when recv times out/returns short.
+ * - Also resend after servicing a peer Configure-Request when resend_after_ms elapsed.
+ *
+ * On successful Configure-Ack, requested values are committed into @p ppp. If the negotiated local IPv4 remains
+ * zero/missing, the code applies a compatibility fallback of 10.0.0.2.
+ *
+ * @return 0 on success, -1 on timeout or transport/build errors.
+ */
 static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
                               l2tp_session_t *l2tp, ppp_session_t *ppp) {
+  /* Re-transmit cadence when no useful IPCP progress is observed. */
   const long long resend_after_ms = 1500ll;
+  /* Current outbound Configure-Request id and requested values (0.0.0.0 means "suggest/assign"). */
   uint8_t id = 1;
   uint8_t req_ip[4] = {0, 0, 0, 0};
   uint8_t req_primary_dns[4] = {0, 0, 0, 0};
   uint8_t req_secondary_dns[4] = {0, 0, 0, 0};
+  /* PPP framing mode and per-option include flags adapt to peer behavior. */
   int ipcp_out_include_ac = 1;
   int ipcp_peer_framing_seen = 0;
   int include_ip_opt = 1;
   int include_primary_dns_opt = 1;
   int include_secondary_dns_opt = 1;
   uint8_t pkt[64];
+  /* Phase 1: send initial IPCP Configure-Request. */
   int plen = ipcp_build_cr(pkt, sizeof(pkt), id, req_ip, ipcp_out_include_ac, include_ip_opt, req_primary_dns,
                            include_primary_dns_opt, req_secondary_dns, include_secondary_dns_opt);
   if (plen < 0) return -1;
@@ -841,6 +907,7 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
 
   uint8_t in[4096];
   int got_ack = 0;
+  /* Phase 2: process IPCP exchanges until our current request id is acknowledged. */
   for (int round = 0; round < 32 && !got_ack; round++) {
     int n = recv_ppp(esp_fd, esp, l2tp, in, sizeof(in), 5000);
     if (n < 8) {
@@ -863,6 +930,7 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
       continue;
     }
     if (proto != PROTO_IPCP) {
+      /* LCP and unrelated protocols are expected while waiting; skip and continue. */
       if (proto == PROTO_LCP && len >= proto_len + 1u) {
         tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp: skip LCP code=%u while awaiting Configure-Ack",
                           (unsigned)p[proto_len]);
@@ -888,6 +956,7 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
     const uint8_t *ipcp_msg = p + 2u;
 
     if (code == 1) {
+      /* Peer Configure-Request: capture hints, send Configure-Ack, maybe re-send our current request. */
       if (!ipcp_peer_framing_seen) {
         ipcp_peer_framing_seen = 1;
         ipcp_out_include_ac = (in[0] == 0xff && in[1] == 0x03) ? 1 : 0;
@@ -920,9 +989,11 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
     }
 
     if (code == 2 && rid == id) {
+      /* Our Configure-Ack: commit negotiated addressing and DNS values. */
       if (ipcp_opts_first_ipv4_option(ipcp_msg, ipcplen, IPCP_OPT_IP_ADDRESS, ppp->local_ip) != 0) {
         memcpy(ppp->local_ip, req_ip, 4);
       }
+      /* Compatibility fallback for peers that acknowledge but leave local IP unset/zero. */
       if (ipcp_ipv4_is_zero(ppp->local_ip)) {
         ppp->local_ip[0] = 10;
         ppp->local_ip[1] = 0;
@@ -961,6 +1032,7 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
     }
 
     if (code == 3 && rid == id) {
+      /* Configure-Nak: adopt peer-suggested values and resend next Configure-Request. */
       if (ipcp_opts_first_ipv4_option(ipcp_msg, ipcplen, IPCP_OPT_IP_ADDRESS, req_ip) == 0) {
         tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp: Configure-Nak id=%u suggested=%u.%u.%u.%u",
                           (unsigned)rid, (unsigned)req_ip[0], (unsigned)req_ip[1], (unsigned)req_ip[2],
@@ -991,6 +1063,7 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
     }
 
     if (code == 4 && rid == id) {
+      /* Configure-Reject: disable rejected options and resend with next id. */
       tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "ppp ipcp: Configure-Reject id=%u", (unsigned)rid);
       ipcp_apply_conf_reject_opts(ipcp_msg, ipcplen, &include_ip_opt, &include_primary_dns_opt,
                                   &include_secondary_dns_opt);
@@ -1012,6 +1085,7 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
   }
 
   if (!got_ack) {
+    /* IPCP did not reach Configure-Ack for our request within retry budget. */
     tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "ppp ipcp: timeout without Configure-Ack");
     return -1;
   }
@@ -1048,6 +1122,13 @@ static uint32_t ppp_csum_acc_bytes(uint32_t sum, const uint8_t *p, size_t n) {
   return sum;
 }
 
+/**
+ * If @p pkt is an unfragmented IPv4 TCP SYN, lower TCP MSS option to @p clamp_mss when larger.
+ *
+ * Rewrites MSS in place and clears the TCP checksum field (caller path recomputes if needed).
+ *
+ * @return 1 if MSS was clamped, 0 if not applicable or already within limit.
+ */
 static int ppp_clamp_tcp_syn_mss(uint8_t *pkt, size_t len, uint16_t clamp_mss, uint16_t *old_mss_out,
                                  uint16_t *new_mss_out) {
   if (pkt == NULL || len < 20u || clamp_mss == 0u) return 0;
@@ -1080,6 +1161,7 @@ static int ppp_clamp_tcp_syn_mss(uint8_t *pkt, size_t len, uint16_t clamp_mss, u
     if (opt + 1u >= tcp_hlen) break;
     uint8_t olen = l4[opt + 1u];
     if (olen < 2u || opt + (size_t)olen > tcp_hlen) break;
+    /* TCP option kind 2: Maximum Segment Size (4 bytes). */
     if (kind == 2u && olen == 4u) {
       uint16_t old_mss = util_read_be16(l4 + opt + 2u);
       if (old_mss > clamp_mss) {
@@ -1290,6 +1372,13 @@ static int ppp_send_lcp_echo_reply(int esp_fd, esp_keys_t *esp, const struct soc
   return l2tp_send_ppp(esp_fd, esp, peer, peer_len, l2tp, buf, ppp_prefix + (size_t)lcp_len);
 }
 
+/**
+ * Data-plane demux for one PPP frame from peer: IPv4 to endpoint, IPv6CP Protocol-Reject, LCP Echo-Reply, else warn.
+ *
+ * Strips optional Address+Control (0xff 0x03); protocol field may be 1 or 2 bytes (PFC).
+ *
+ * @return 0 when handled or intentionally ignored; -1 on TUN/endpoint write failure.
+ */
 int ppp_dispatch_ppp_frame(int esp_fd, esp_keys_t *esp, const struct sockaddr *peer, socklen_t peer_len,
                            l2tp_session_t *l2tp, ppp_session_t *ppp, const uint8_t *frame, size_t len,
                            packet_endpoint_t *endpoint) {
@@ -1307,6 +1396,7 @@ int ppp_dispatch_ppp_frame(int esp_fd, esp_keys_t *esp, const struct sockaddr *p
   if (ppp_read_protocol(p, len, &proto, &proto_len) != 0 || len < proto_len) return -1;
   p += proto_len;
   len -= proto_len;
+  /* 0x0021: deliver IPv4 datagram to TUN (or proxy endpoint). */
   if (proto == PROTO_IP) {
     if (packet_endpoint_write(endpoint, p, len) != 0) {
       static time_t s_last_tun_write_warn;
@@ -1324,6 +1414,7 @@ int ppp_dispatch_ppp_frame(int esp_fd, esp_keys_t *esp, const struct sockaddr *p
     }
     return 0;
   }
+  /* 0x8057: IPv6CP not supported; signal with LCP Protocol-Reject. */
   if (proto == PROTO_IPV6CP) {
     static int s_ipv6cp_info_once;
     if (esp != NULL && peer != NULL && l2tp != NULL) {
@@ -1336,6 +1427,7 @@ int ppp_dispatch_ppp_frame(int esp_fd, esp_keys_t *esp, const struct sockaddr *p
     }
     return 0;
   }
+  /* 0xc021: post-negotiation LCP (typically Echo-Request keepalive). */
   if (proto == PROTO_LCP) {
     if (len >= 4 && p[0] == (uint8_t)LCP_CODE_ECHO_REQUEST && esp != NULL && peer != NULL && l2tp != NULL) {
       if (ppp_send_lcp_echo_reply(esp_fd, esp, peer, peer_len, l2tp, ppp, p, len) >= 0) return 0;

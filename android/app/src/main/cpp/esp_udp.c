@@ -225,6 +225,21 @@ static void esp_ensure_drbg(void) {
   s_esp_drbg_inited = 1;
 }
 
+/**
+ * Validate and decrypt one inbound ESP datagram into plaintext payload.
+ *
+ * Pipeline:
+ * - Handle NAT-T marker/keepalive framing when udp_encap is enabled.
+ * - Validate SPI and replay window constraints before crypto work.
+ * - Verify truncated HMAC-SHA1 integrity over ESP header+ciphertext.
+ * - AES-CBC decrypt, validate ESP trailer/padding/next-header, and extract payload.
+ *
+ * Side effects:
+ * - Updates replay window fields on accepted packets.
+ * - Updates drop/failure counters and captures last-failure diagnostics.
+ *
+ * @return 0 on successful decrypt into @p out, -1 on framing/auth/replay/decrypt/validation failures.
+ */
 int esp_try_decrypt(esp_keys_t *k, const uint8_t *in, size_t in_len, uint8_t *out, size_t *out_len) {
   if (k->enc_key_len == 0) {
     if (in_len > *out_len) return -1;
@@ -240,6 +255,7 @@ int esp_try_decrypt(esp_keys_t *k, const uint8_t *in, size_t in_len, uint8_t *ou
   const uint8_t *p = in;
   size_t left = in_len;
   if (k->udp_encap) {
+    /* UDP/4500 packets may carry the RFC 3948 non-ESP marker before SPI. */
     if (left < 4) {
       esp_fail_capture(ESP_FAIL_SHORT_UDP_PREFIX, in_len, p, left, 0, 0, left, 0, 0);
       return -1;
@@ -271,6 +287,7 @@ int esp_try_decrypt(esp_keys_t *k, const uint8_t *in, size_t in_len, uint8_t *ou
   uint32_t replay_bitmap_next = k->replay_bitmap;
   int replay_commit = 0;
   if (k->enc_key_len != 0) {
+    /* Replay window check follows RFC-style sliding bitmap semantics (32-packet window). */
     const uint32_t W = 32;
     if (seq == 0) {
       s_esp_drop_stats.replay_seq_zero++;
@@ -488,8 +505,18 @@ static uint16_t ipv4_udp_checksum(const uint8_t ip_src[4], const uint8_t ip_dst[
   return csum;
 }
 
+/**
+ * Encrypt and send one plaintext L2TP payload as ESP transport-mode UDP datagram.
+ *
+ * Behavior:
+ * - Wraps plaintext as inner UDP(L2TP) payload, then builds ESP header/IV/trailer.
+ * - Applies AES-CBC encryption and appends 96-bit truncated HMAC-SHA1 ICV.
+ * - Sends the final packet to connected peer endpoint and emits bounded diagnostics.
+ *
+ * @return sendto() byte count on success path, -1 on local build/encrypt/auth failures.
+ */
 int esp_encrypt_send(int fd, esp_keys_t *k, const struct sockaddr *peer, socklen_t peer_len, const uint8_t *plain,
-                       size_t plain_len) {
+                     size_t plain_len) {
   if (k->enc_key_len == 0) {
     return (int)sendto(fd, plain, plain_len, 0, peer, peer_len);
   }
@@ -517,7 +544,7 @@ int esp_encrypt_send(int fd, esp_keys_t *k, const struct sockaddr *peer, socklen
 
   uint8_t buf[4096];
   size_t off = 0;
-  // RFC 3948 sec 2.2: ESP packets on UDP 4500 start directly with the SPI (non-zero).
+  /* RFC 3948: outbound ESP-on-UDP packet starts directly at SPI (no non-ESP marker). */
   size_t esp_start = 0;
   util_write_be32(buf + off, k->spi_i);
   off += 4;
@@ -533,6 +560,7 @@ int esp_encrypt_send(int fd, esp_keys_t *k, const struct sockaddr *peer, socklen
   }
   memcpy(buf + off, iv, 16);
   off += 16;
+  /* ESP trailer: PKCS#7-style incremental pad bytes + pad length + next header(UDP). */
   size_t pad_len = (16 - ((esp_plain_len + 2) % 16)) % 16;
   size_t ct_len = esp_plain_len + pad_len + 2;
   if (off + ct_len + 12 > sizeof(buf)) return -1;
@@ -570,6 +598,7 @@ int esp_encrypt_send(int fd, esp_keys_t *k, const struct sockaddr *peer, socklen
   mbedtls_cipher_free(&ciph);
   off += olen;
 
+  /* Integrity covers ESP header + IV + ciphertext; 96-bit truncation appended as ICV. */
   const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA1);
   mbedtls_md_context_t mctx;
   mbedtls_md_init(&mctx);

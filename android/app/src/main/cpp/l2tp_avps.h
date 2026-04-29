@@ -51,6 +51,7 @@ int l2tp_ctrl_result_details(const uint8_t *pkt, size_t len, uint16_t *result_co
 /** Message Type AVP (type 0) value. */
 int l2tp_ctrl_msg_type(const uint8_t *pkt, size_t len, uint16_t *mt);
 
+/** Read Ns/Nr from fixed control header (after 12-byte prefix). @return 0 on success. */
 int l2tp_ctrl_get_ns_nr(const uint8_t *pkt, size_t len, uint16_t *ns, uint16_t *nr);
 
 #endif

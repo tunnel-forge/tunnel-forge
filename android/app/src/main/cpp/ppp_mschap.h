@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/** Parsed MS-CHAPv2 Failure message tokens (E= R= V= M=). */
 typedef struct {
   int has_error_code;
   int error_code;
@@ -19,6 +20,7 @@ typedef struct {
 int ppp_mschapv2_response_value(const char *username, const char *password, const uint8_t auth_challenge[16],
  uint8_t peer_challenge[16], uint8_t value49_out[49]);
 
+/** Consume ASCII digits at *idx; @return 0 and set *out when at least one digit read. */
 static inline int ppp_mschapv2_parse_uint_token(const uint8_t *p, size_t len, size_t *idx, int *out) {
   int value = 0;
   int digits = 0;
@@ -32,6 +34,7 @@ static inline int ppp_mschapv2_parse_uint_token(const uint8_t *p, size_t len, si
   return 0;
 }
 
+/** Scan human-readable Failure payload for E/R/V/M key=value pairs; @return 0 if any token found. */
 static inline int ppp_mschapv2_parse_failure(const uint8_t *msg, size_t len,
                                              ppp_mschapv2_failure_info_t *out) {
   if (msg == NULL || out == NULL) return -1;
