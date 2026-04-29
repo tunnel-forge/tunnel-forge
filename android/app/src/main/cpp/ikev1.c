@@ -551,10 +551,9 @@ static void qm_first_iv_sha1(const uint8_t p1_last_block[8], uint32_t msg_id, ui
 
 static int isakmp_3des_encrypt(const uint8_t key24[24], uint8_t iv_io[8], const uint8_t *plain, size_t plain_len,
                                uint8_t *out, size_t *out_len) {
-  size_t pad = 8 - (plain_len % 8);
-  if (pad == 0) pad = 8;
+  size_t pad = 8 - (plain_len % 8); // pad is always in [1..8]
   uint8_t buf[512];
-  if (plain_len + pad > sizeof(buf)) return -1;
+  if (plain_len > sizeof(buf) - pad) return -1;
   memcpy(buf, plain, plain_len);
   memset(buf + plain_len, 0, pad);
   size_t tot = plain_len + pad;
@@ -699,10 +698,9 @@ static int info_has_invalid_hash_notify(const uint8_t *pkt, int pkt_len, int p1_
 
 static int isakmp_aes128_encrypt(const uint8_t key16[16], uint8_t iv_io[16], const uint8_t *plain, size_t plain_len,
                                  uint8_t *out, size_t *out_len) {
-  size_t pad = 16 - (plain_len % 16);
-  if (pad == 0) pad = 16;
+  size_t pad = 16 - (plain_len % 16); // pad is always in [1..16]
   uint8_t buf[512];
-  if (plain_len + pad > sizeof(buf)) return -1;
+  if (plain_len > sizeof(buf) - pad) return -1;
   memcpy(buf, plain, plain_len);
   memset(buf + plain_len, 0, pad);
   size_t tot = plain_len + pad;
@@ -946,7 +944,6 @@ static uint32_t extract_peer_esp_spi_from_qm2_sa(const uint8_t *sa_hdr, size_t s
   if (sa_pl_len < 4 + 12) return 0;
   const uint8_t *b = sa_hdr + 4;
   size_t inner = sa_pl_len - 4;
-  if (inner < 12) return 0;
   const uint8_t *p = b + 8;
   size_t left = inner - 8;
   uint32_t last = 0;

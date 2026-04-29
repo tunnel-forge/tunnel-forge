@@ -157,7 +157,7 @@ static int recv_plain(int esp_fd, esp_keys_t *esp, esp_keys_t *esp_alt, int *use
                           (unsigned)w0, (unsigned)w1, (unsigned)w2);
     } else {
       tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "l2tp recv_plain: got %zd bytes raw[0..3]=%02x%02x%02x%02x", n,
-                          n > 0 ? raw[0] : 0, n > 1 ? raw[1] : 0, n > 2 ? raw[2] : 0, n > 3 ? raw[3] : 0);
+                          raw[0], n > 1 ? raw[1] : 0, n > 2 ? raw[2] : 0, n > 3 ? raw[3] : 0);
     }
 
     if (esp->udp_encap && (size_t)n >= 4 && util_read_be32(raw) == ESP_UDP_NON_ESP_MARKER &&

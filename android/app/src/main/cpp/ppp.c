@@ -210,7 +210,7 @@ static int lcp_build_cr(uint8_t *out, size_t cap, uint8_t id, ppp_auth_kind_t au
   o += 2;
   if (include_accm) {
     /* ACCM 00 00 00 00: keep this unless peer explicitly Configure-Rejects it. */
-    if (o + 6u > cap) return -1;
+    if (o > cap || cap - o < 6u) return -1;
     out[o++] = 2;
     out[o++] = 6;
     util_write_be32(out + o, 0u);
@@ -219,19 +219,19 @@ static int lcp_build_cr(uint8_t *out, size_t cap, uint8_t id, ppp_auth_kind_t au
   if (include_auth) {
     out[o++] = 3;
     if (auth == PPP_AUTH_PAP) {
-      if (o + 3 > cap) return -1;
+      if (o > cap || cap - o < 3u) return -1;
       out[o++] = 4;
       util_write_be16(out + o, PROTO_PAP);
       o += 2;
     } else if (auth == PPP_AUTH_MSCHAPV2) {
-      if (o + 4 > cap) return -1;
+      if (o > cap || cap - o < 4u) return -1;
       out[o++] = 5;
       out[o++] = 0xc2;
       out[o++] = 0x23;
       out[o++] = 0x81;
     } else {
       /* RFC 1994 CHAP: Authentication-Protocol 0xc223 + algorithm 0x05 (MD5-Challenge). */
-      if (o + 4 > cap) return -1;
+      if (o > cap || cap - o < 4u) return -1;
       out[o++] = 5;
       out[o++] = 0xc2;
       out[o++] = 0x23;
@@ -403,9 +403,9 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
     if (code == 1) {
       if (!lcp_peer_framing_seen) {
         lcp_peer_framing_seen = 1;
-        lcp_out_include_ac = (n >= 2 && in[0] == 0xff && in[1] == 0x03) ? 1 : 0;
+        lcp_out_include_ac = (in[0] == 0xff && in[1] == 0x03) ? 1 : 0;
         tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp lcp peer raw addr_ctl=%d in0=%02x in1=%02x", lcp_out_include_ac,
-                          n > 0 ? in[0] : 0, n > 1 ? in[1] : 0);
+                          in[0], in[1]);
       }
       if (!peer_cr_hex_done) {
         peer_cr_hex_done = 1;
@@ -890,7 +890,7 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
     if (code == 1) {
       if (!ipcp_peer_framing_seen) {
         ipcp_peer_framing_seen = 1;
-        ipcp_out_include_ac = (n >= 2 && in[0] == 0xff && in[1] == 0x03) ? 1 : 0;
+        ipcp_out_include_ac = (in[0] == 0xff && in[1] == 0x03) ? 1 : 0;
         tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp ipcp peer framing addr_ctl=%d", ipcp_out_include_ac);
       }
       uint8_t peer_gw[4];
@@ -1126,7 +1126,6 @@ static void ppp_fix_tun_ipv4_checksums(uint8_t *pkt, size_t len) {
   uint8_t *l4 = pkt + ihl;
 
   if (proto == PPP_IPPROTO_UDP) {
-    if (l4_len < 8u) return;
     if (util_read_be16(l4 + 6) != 0u) return;
     uint32_t sum = 0;
     sum = ppp_csum_acc_bytes(sum, pkt + 12, 4);
@@ -1299,7 +1298,7 @@ int ppp_dispatch_ppp_frame(int esp_fd, esp_keys_t *esp, const struct sockaddr *p
   const uint8_t log_b1 = frame[1];
   const size_t log_frame_len = len;
   const uint8_t *p = frame;
-  if (len >= 2 && p[0] == 0xff && p[1] == 0x03) {
+  if (p[0] == 0xff && p[1] == 0x03) {
     p += 2;
     len -= 2;
   }

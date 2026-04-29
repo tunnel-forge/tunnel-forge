@@ -315,10 +315,6 @@ int esp_try_decrypt(esp_keys_t *k, const uint8_t *in, size_t in_len, uint8_t *ou
   p += 16;
   left -= 16;
   const size_t icv_len = 12;
-  if (left < icv_len) {
-    esp_fail_capture(ESP_FAIL_SHORT_POST_IV, in_len, esp_head, 8, 0, 0, left, 0, 0);
-    return -1;
-  }
   size_t ct_len = left - icv_len;
   const uint8_t *ct = p;
   const uint8_t *icv = p + ct_len;
