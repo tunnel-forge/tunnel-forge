@@ -603,6 +603,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun readUtf8Text(uri: Uri): String {
+        ProfileImportUriValidator.requireSafeProfileImportUri(uri)
         val input =
             contentResolver.openInputStream(uri)
                 ?: throw IllegalStateException("Input stream unavailable")
