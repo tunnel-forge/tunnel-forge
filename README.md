@@ -56,7 +56,7 @@ TunnelForge bridges that gap. It is a Flutter-based Android app that restores L2
 - Custom DNS supporting UDP, TCP, TLS and HTTPS
 - Variable MTU
 
-# Development
+## Development
 
 ### Requirements
 
@@ -83,6 +83,12 @@ Generate a coverage report:
 
 ```sh
 flutter test --coverage
+```
+
+Android unit tests:
+
+```sh
+cd ./android && ./gradlew --stacktrace :app:testDebugUnitTest
 ```
 
 Run Android-native tunnel and runtime tests:
