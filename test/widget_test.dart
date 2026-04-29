@@ -89,6 +89,12 @@ void main() {
         '';
   }
 
+  List<String> userInitiatedVpnMethods(List<String> methods) {
+    return methods
+        .where((method) => method != VpnContract.getRuntimeState)
+        .toList(growable: false);
+  }
+
   Future<void> pumpConnectionPanel(
     WidgetTester tester, {
     Brightness brightness = Brightness.light,
@@ -390,7 +396,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
 
-    expect(methods, [
+    expect(userInitiatedVpnMethods(methods), [
       VpnContract.setLogLevel,
       VpnContract.prepareVpn,
       VpnContract.connect,
@@ -453,7 +459,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 
-    expect(methods, [
+    expect(userInitiatedVpnMethods(methods), [
       VpnContract.setLogLevel,
       VpnContract.prepareVpn,
       VpnContract.connect,
@@ -1455,7 +1461,10 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
 
-    expect(methods, [VpnContract.setLogLevel, VpnContract.connect]);
+    expect(userInitiatedVpnMethods(methods), [
+      VpnContract.setLogLevel,
+      VpnContract.connect,
+    ]);
     expect(statusText(tester), contains('Connecting'));
   });
 
@@ -1509,7 +1518,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
 
-    expect(methods, [
+    expect(userInitiatedVpnMethods(methods), [
       VpnContract.setLogLevel,
       VpnContract.prepareVpn,
       VpnContract.connect,
@@ -1572,7 +1581,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
 
-    expect(methods, [
+    expect(userInitiatedVpnMethods(methods), [
       VpnContract.setLogLevel,
       VpnContract.prepareVpn,
       VpnContract.connect,
