@@ -14,6 +14,7 @@ import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.util.Log
+import androidx.core.content.IntentCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -588,13 +589,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun parseSendIntent(intent: Intent): Map<String, String?>? {
-        val uri =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent.getParcelableExtra(Intent.EXTRA_STREAM)
-            } ?: return null
+        val uri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java) ?: return null
         if (!looksLikeProfileFile(intent, uri)) return null
         return profileFileTransfer(uri)
     }
