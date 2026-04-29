@@ -42,34 +42,28 @@
 
 ## Overview
 
-Tunnel Forge is an Android-focused Flutter project for L2TP/IPsec connections. The UI is written
-in Flutter, while the tunnel and proxy pieces live in the Android layer.
+Android 12 removed built-in support for L2TP and PPTP, cutting off countless organizations, schools, and universities that depend on these protocols for their VPN infrastructure.
 
-## Why
+TunnelForge bridges that gap. It is a Flutter-based Android app that restores L2TP/IPsec (IKEv1) connectivity on modern Android devices, giving users and IT administrators a reliable path back to their existing VPN servers without requiring changes on the server side.
 
-Android no longer includes built-in support for L2TP/IPsec with IKEv1. That left some existing VPN setups without a simple way to connect from newer devices.
+### Key featues:
 
-Tunnel Forge was made for those cases: older networks, routers, labs, and systems that still depend on L2TP/IPsec and cannot be replaced right away.
-
-It keeps those connections usable without changing the whole VPN setup.
-
-## Highlights
-
-- L2TP/IPsec (IKEv1) client flow
-- Full-device VPN mode through `VpnService`
+- L2TP with optional IPsec (IKEv1) client flow
+- Full-device VPN mode
 - Proxy-only mode with local HTTP and SOCKS5 listeners
-- Full-tunnel and per-app routing
-- Local profiles with secure credential storage
-- Connection status and logs in the app
-- Flutter and Android-native tests
+- Per-app routing (Inclusive and Exclusive)
+- Multi profiles with credential storage
+- Connection status and detailed logs
+- Custom DNS supporting UDP, TCP, TLS and HTTPS
+- Variable MTU
 
-## Requirements
+# Development
+
+### Requirements
 
 - Flutter with Dart `3.11+`
 - Android SDK for Flutter Android builds
 - Android `minSdk 31` or newer for the app target
-
-## Development
 
 ### Quick Start
 
@@ -136,9 +130,8 @@ docker exec -it ipsec-vpn-server tail -f /var/log/auth.log
 
 ## Feedback
 
-Use GitHub Issues for bugs, regressions, or feature requests. When reporting a connection problem,
-include the profile mode, Android version, device model, and any relevant output from
-`tool/vpn_debug.sh`.
+Use GitHub Issues or [Telegram channel](https://t.me/TunnelForge?direct) for bugs, feature requests or general feedback. When reporting a connection problem,
+include the values used in the profile (such as MTU and DNS), Android version, device model, and app logs (debug).
 
 ## Licensing
 
