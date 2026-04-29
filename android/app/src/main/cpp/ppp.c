@@ -219,7 +219,7 @@ static int lcp_build_cr(uint8_t *out, size_t cap, uint8_t id, ppp_auth_kind_t au
   o += 2;
   if (include_accm) {
     /* ACCM 00 00 00 00: keep this unless peer explicitly Configure-Rejects it. */
-    if (o > cap || cap - o < 6u) return -1;
+    if (o + 6u > cap) return -1;
     out[o++] = 2;
     out[o++] = 6;
     util_write_be32(out + o, 0u);
@@ -228,19 +228,19 @@ static int lcp_build_cr(uint8_t *out, size_t cap, uint8_t id, ppp_auth_kind_t au
   if (include_auth) {
     out[o++] = 3;
     if (auth == PPP_AUTH_PAP) {
-      if (o > cap || cap - o < 3u) return -1;
+      if (o + 3u > cap) return -1;
       out[o++] = 4;
       util_write_be16(out + o, PROTO_PAP);
       o += 2;
     } else if (auth == PPP_AUTH_MSCHAPV2) {
-      if (o > cap || cap - o < 4u) return -1;
+      if (o + 4u > cap) return -1;
       out[o++] = 5;
       out[o++] = 0xc2;
       out[o++] = 0x23;
       out[o++] = 0x81;
     } else {
       /* RFC 1994 CHAP: Authentication-Protocol 0xc223 + algorithm 0x05 (MD5-Challenge). */
-      if (o > cap || cap - o < 4u) return -1;
+      if (o + 4u > cap) return -1;
       out[o++] = 5;
       out[o++] = 0xc2;
       out[o++] = 0x23;
