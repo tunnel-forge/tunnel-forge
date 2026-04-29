@@ -14,6 +14,7 @@ import 'package:tunnel_forge/features/profiles/domain/profile_transfer.dart';
 import 'package:tunnel_forge/features/profiles/data/profile_transfer_bridge.dart';
 import 'package:tunnel_forge/core/logging/log_entry.dart';
 import 'package:tunnel_forge/features/tunnel/data/vpn_client.dart';
+import 'package:tunnel_forge/features/tunnel/domain/tunnel_runtime_state.dart';
 import '../domain/home_models.dart';
 import '../domain/home_repositories.dart';
 
@@ -429,6 +430,9 @@ class TunnelRepositoryImpl implements TunnelRepository {
 
   @override
   Stream<TunnelHostUpdate> get tunnelStates => _tunnelStateController.stream;
+
+  @override
+  Future<TunnelRuntimeState> getRuntimeState() => _client.getRuntimeState();
 
   @override
   Future<void> connect(TunnelConnectRequest request) {

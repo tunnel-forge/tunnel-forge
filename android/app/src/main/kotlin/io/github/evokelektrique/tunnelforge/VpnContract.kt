@@ -8,6 +8,7 @@ object VpnContract {
     const val CONNECT = "connect"
     const val DISCONNECT = "disconnect"
     const val SET_LOG_LEVEL = "setLogLevel"
+    const val GET_RUNTIME_STATE = "getRuntimeState"
 
     /** Correlation id for one connect attempt (Flutter -> Android). */
     const val ARG_ATTEMPT_ID = "attemptId"

@@ -1077,6 +1077,35 @@ class TunnelVpnService : VpnService() {
             val worker = Thread.currentThread()
             svc.mainHandler.post { svc.handleNativeTunnelReady(readyDetail, worker) }
         }
+
+        @JvmStatic
+        fun runtimeSnapshot(): Map<String, Any?>? {
+            val svc = instance ?: return null
+            if (!svc.hasActiveSession()) return null
+            val attemptId =
+                synchronized(svc.sessionLock) {
+                    svc.activeAttemptId
+                }
+            val connected = svc.connectedEmitted.get()
+            val proxyConfig = svc.activeProxyConfig
+            val proxyExposure =
+                svc.localProxyRuntime?.exposureInfo()
+                    ?: proxyConfig?.let {
+                        ProxyExposureInfo.loopback(
+                            httpPort = it.httpPort,
+                            socksPort = it.socksPort,
+                            lanRequested = it.allowLanConnections,
+                            active = connected,
+                        )
+                    }
+            return RuntimeStateSnapshot.tunnel(
+                state = if (connected) VpnContract.TUNNEL_CONNECTED else VpnContract.TUNNEL_CONNECTING,
+                detail = if (connected) svc.connectedNotificationText() else "Restoring active VPN tunnel session...",
+                attemptId = attemptId,
+                connectionMode = VpnContract.MODE_VPN_TUNNEL,
+                proxyExposure = proxyExposure,
+            )
+        }
     }
 
     private fun prefixAttempt(attemptId: String): String =

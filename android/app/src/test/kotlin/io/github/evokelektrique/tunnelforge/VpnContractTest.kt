@@ -13,6 +13,7 @@ class VpnContractTest {
     @Test
     fun connectExtras() {
         assertEquals("setLogLevel", VpnContract.SET_LOG_LEVEL)
+        assertEquals("getRuntimeState", VpnContract.GET_RUNTIME_STATE)
         assertEquals("logLevel", VpnContract.ARG_LOG_LEVEL)
         assertEquals("server", VpnContract.ARG_SERVER)
         assertEquals("user", VpnContract.ARG_USER)

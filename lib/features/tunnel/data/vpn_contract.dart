@@ -9,6 +9,7 @@ abstract final class VpnContract {
   static const String connect = 'connect';
   static const String disconnect = 'disconnect';
   static const String setLogLevel = 'setLogLevel';
+  static const String getRuntimeState = 'getRuntimeState';
 
   /// Correlates one connect attempt across Dart UI, logs, and Android logcat.
   static const String argAttemptId = 'attemptId';

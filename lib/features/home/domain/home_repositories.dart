@@ -4,6 +4,7 @@ import 'package:tunnel_forge/core/network/connectivity_checker.dart';
 import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
 import 'package:tunnel_forge/features/profiles/domain/profile_transfer.dart';
 import 'package:tunnel_forge/core/logging/log_entry.dart';
+import 'package:tunnel_forge/features/tunnel/domain/tunnel_runtime_state.dart';
 import 'home_models.dart';
 
 abstract class ProfilesRepository {
@@ -55,6 +56,7 @@ abstract class TunnelRepository {
   Stream<ProxyExposure> get proxyExposures;
 
   Future<bool> prepareVpn();
+  Future<TunnelRuntimeState> getRuntimeState();
   Future<void> connect(TunnelConnectRequest request);
   Future<void> disconnect({
     required ConnectionMode connectionMode,

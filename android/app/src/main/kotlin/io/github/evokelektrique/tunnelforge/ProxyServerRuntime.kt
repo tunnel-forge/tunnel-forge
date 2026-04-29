@@ -139,6 +139,8 @@ class ProxyServerRuntime(
         )
     }
 
+    fun exposureInfo(): ProxyExposureInfo = config.exposure
+
     private fun startListener(
         name: String,
         bindHost: String,

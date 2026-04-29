@@ -37,7 +37,13 @@ class ProxyTunnelService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+    }
+
     override fun onDestroy() {
+        instance = null
         shutdownActiveSession(reason = "service destroy")
         super.onDestroy()
     }
@@ -596,6 +602,42 @@ class ProxyTunnelService : Service() {
         private fun sanitizeMtu(value: Int): Int = TunnelVpnService.sanitizeMtu(value)
 
         private fun prefixAttempt(attemptId: String): String = if (attemptId.isEmpty()) "" else "attempt=$attemptId "
+
+        @Volatile
+        private var instance: ProxyTunnelService? = null
+
+        @JvmStatic
+        fun runtimeSnapshot(): Map<String, Any?>? {
+            val svc = instance ?: return null
+            val active =
+                synchronized(svc.sessionLock) {
+                    svc.worker != null ||
+                        svc.userspaceStack != null ||
+                        svc.proxyRuntime != null ||
+                        svc.proxyTransport != null ||
+                        svc.packetBridge != null
+                }
+            if (!active) return null
+            val attemptId = svc.currentAttemptId()
+            val connected = svc.connectedEmitted
+            val exposure =
+                svc.proxyRuntime?.exposureInfo()
+                    ?: svc.activeProxyConfig?.let {
+                        ProxyExposureInfo.loopback(
+                            httpPort = it.httpPort,
+                            socksPort = it.socksPort,
+                            lanRequested = it.allowLanConnections,
+                            active = connected,
+                        )
+                    }
+            return RuntimeStateSnapshot.tunnel(
+                state = if (connected) VpnContract.TUNNEL_CONNECTED else VpnContract.TUNNEL_CONNECTING,
+                detail = if (connected) "Local proxy listeners are active." else "Restoring active local proxy session...",
+                attemptId = attemptId,
+                connectionMode = VpnContract.MODE_PROXY_ONLY,
+                proxyExposure = exposure,
+            )
+        }
     }
 }
 

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
 import 'package:tunnel_forge/core/logging/log_entry.dart';
 import 'package:tunnel_forge/features/tunnel/data/vpn_contract.dart';
+import 'package:tunnel_forge/features/tunnel/domain/tunnel_runtime_state.dart';
 
 /// Host -> Dart: [VpnTunnelState] value, a human-readable [detail], and the originating [attemptId].
 typedef VpnTunnelHostCallback =
@@ -95,6 +96,42 @@ class VpnClient {
     final v = await _channel.invokeMethod<Object>(VpnContract.prepareVpn);
     if (v is bool) return v;
     return false;
+  }
+
+  Future<TunnelRuntimeState> getRuntimeState() async {
+    try {
+      final raw = await _channel.invokeMethod<Object>(
+        VpnContract.getRuntimeState,
+      );
+      if (raw is! Map) return const TunnelRuntimeState.idle();
+      final state =
+          raw[VpnContract.argTunnelState]?.toString() ?? VpnTunnelState.stopped;
+      final detail = raw[VpnContract.argTunnelDetail]?.toString() ?? 'Idle';
+      final attemptId = raw[VpnContract.argAttemptId]?.toString() ?? '';
+      final mode = ConnectionMode.fromJson(raw[VpnContract.argConnectionMode]);
+      final exposure = ProxyExposure.tryFromMap(
+        raw,
+        activeKey: VpnContract.argProxyExposureActive,
+        bindAddressKey: VpnContract.argProxyExposureBindAddress,
+        displayAddressKey: VpnContract.argProxyExposureDisplayAddress,
+        httpPortKey: VpnContract.argProxyExposureHttpPort,
+        socksPortKey: VpnContract.argProxyExposureSocksPort,
+        lanRequestedKey: VpnContract.argProxyExposureLanRequested,
+        lanActiveKey: VpnContract.argProxyExposureLanActive,
+        warningKey: VpnContract.argProxyExposureWarning,
+      );
+      return TunnelRuntimeState(
+        state: state,
+        detail: detail,
+        connectionMode: mode,
+        attemptId: attemptId,
+        proxyExposure: exposure,
+      );
+    } on PlatformException {
+      return const TunnelRuntimeState.idle();
+    } on MissingPluginException {
+      return const TunnelRuntimeState.idle();
+    }
   }
 
   Future<void> connect({

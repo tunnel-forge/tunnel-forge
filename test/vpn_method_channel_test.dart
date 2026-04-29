@@ -5,6 +5,7 @@ import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
 import 'package:tunnel_forge/core/logging/log_entry.dart';
 import 'package:tunnel_forge/features/tunnel/data/vpn_client.dart';
 import 'package:tunnel_forge/features/tunnel/data/vpn_contract.dart';
+import 'package:tunnel_forge/features/tunnel/domain/tunnel_runtime_state.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -15,6 +16,7 @@ void main() {
     });
 
     test('proxy exposure event contract', () {
+      expect(VpnContract.getRuntimeState, 'getRuntimeState');
       expect(VpnContract.onProxyExposureChanged, 'onProxyExposureChanged');
       expect(VpnContract.argProxyExposureActive, 'proxyExposureActive');
       expect(
@@ -230,6 +232,61 @@ void main() {
         VpnContract.argConnectionMode: VpnContract.modeProxyOnly,
         VpnContract.argAttemptId: 'attempt-1',
       });
+    });
+
+    test('getRuntimeState parses connected proxy snapshot', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel(VpnContract.channel), (
+            call,
+          ) async {
+            expect(call.method, VpnContract.getRuntimeState);
+            return <String, Object?>{
+              VpnContract.argTunnelState: VpnTunnelState.connected,
+              VpnContract.argTunnelDetail: 'Local proxy listeners are active.',
+              VpnContract.argAttemptId: 'attempt-proxy',
+              VpnContract.argConnectionMode: ConnectionMode.proxyOnly.jsonValue,
+              VpnContract.argProxyExposureActive: true,
+              VpnContract.argProxyExposureBindAddress: '0.0.0.0',
+              VpnContract.argProxyExposureDisplayAddress: '192.168.1.24',
+              VpnContract.argProxyExposureHttpPort: 18080,
+              VpnContract.argProxyExposureSocksPort: 11080,
+              VpnContract.argProxyExposureLanRequested: true,
+              VpnContract.argProxyExposureLanActive: true,
+              VpnContract.argProxyExposureWarning: null,
+            };
+          });
+      final state = await VpnClient().getRuntimeState();
+      expect(
+        state,
+        const TunnelRuntimeState(
+          state: VpnTunnelState.connected,
+          detail: 'Local proxy listeners are active.',
+          connectionMode: ConnectionMode.proxyOnly,
+          attemptId: 'attempt-proxy',
+          proxyExposure: ProxyExposure(
+            active: true,
+            bindAddress: '0.0.0.0',
+            displayAddress: '192.168.1.24',
+            httpPort: 18080,
+            socksPort: 11080,
+            lanRequested: true,
+            lanActive: true,
+          ),
+        ),
+      );
+    });
+
+    test('getRuntimeState returns idle on platform error', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel(VpnContract.channel), (
+            call,
+          ) async {
+            throw PlatformException(code: 'boom');
+          });
+      expect(
+        await VpnClient().getRuntimeState(),
+        const TunnelRuntimeState.idle(),
+      );
     });
 
     test('tunnel state callback parses attempt id when present', () async {

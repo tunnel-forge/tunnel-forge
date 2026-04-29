@@ -263,6 +263,9 @@ class MainActivity : FlutterActivity() {
                     EngineLogPolicy.update(EngineLogLevel.fromWireValue(rawLevel))
                     result.success(null)
                 }
+                VpnContract.GET_RUNTIME_STATE -> {
+                    result.success(currentRuntimeState())
+                }
                 VpnContract.DISCONNECT -> {
                     val args = call.arguments as? Map<*, *>
                     val rawMode = args?.get(VpnContract.ARG_CONNECTION_MODE)?.toString()
@@ -474,6 +477,23 @@ class MainActivity : FlutterActivity() {
                 null,
             )
         }
+    }
+
+    private fun currentRuntimeState(): Map<String, Any?> {
+        val vpnSnapshot = TunnelVpnService.runtimeSnapshot()
+        if (vpnSnapshot != null) {
+            return vpnSnapshot
+        }
+        val proxySnapshot = ProxyTunnelService.runtimeSnapshot()
+        if (proxySnapshot != null) {
+            return proxySnapshot
+        }
+        return RuntimeStateSnapshot.tunnel(
+            state = VpnContract.TUNNEL_STOPPED,
+            detail = "Idle",
+            attemptId = "",
+            connectionMode = VpnContract.MODE_VPN_TUNNEL,
+        )
     }
 
     private fun sanitizePort(raw: Any?, fallback: Int): Int {

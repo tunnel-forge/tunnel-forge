@@ -9,6 +9,7 @@ import 'package:tunnel_forge/features/home/presentation/bloc/tunnel_bloc.dart';
 import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
 import 'package:tunnel_forge/core/logging/log_entry.dart';
 import 'package:tunnel_forge/features/tunnel/data/vpn_contract.dart';
+import 'package:tunnel_forge/features/tunnel/domain/tunnel_runtime_state.dart';
 
 void main() {
   blocTest<TunnelBloc, TunnelState>(
@@ -102,6 +103,133 @@ void main() {
   );
 
   blocTest<TunnelBloc, TunnelState>(
+    'startup bootstraps connected vpn runtime state',
+    build: () => TunnelBloc(
+      _FakeTunnelRepository(
+        runtimeState: const TunnelRuntimeState(
+          state: VpnTunnelState.connected,
+          detail: 'VPN connected',
+          connectionMode: ConnectionMode.vpnTunnel,
+          attemptId: 'attempt-vpn',
+        ),
+      ),
+      _FakeLogsRepository(),
+    ),
+    act: (bloc) => bloc.add(const TunnelStarted()),
+    expect: () => const [
+      TunnelState(
+        tunnelUp: true,
+        connectionMode: ConnectionMode.vpnTunnel,
+        activeAttemptId: 'attempt-vpn',
+      ),
+    ],
+  );
+
+  blocTest<TunnelBloc, TunnelState>(
+    'startup bootstraps connected proxy runtime state with exposure',
+    build: () => TunnelBloc(
+      _FakeTunnelRepository(
+        runtimeState: const TunnelRuntimeState(
+          state: VpnTunnelState.connected,
+          detail: 'Local proxy listeners are active.',
+          connectionMode: ConnectionMode.proxyOnly,
+          attemptId: 'attempt-proxy',
+          proxyExposure: ProxyExposure(
+            active: true,
+            bindAddress: '0.0.0.0',
+            displayAddress: '192.168.1.20',
+            httpPort: 18080,
+            socksPort: 11080,
+            lanRequested: true,
+            lanActive: true,
+          ),
+        ),
+      ),
+      _FakeLogsRepository(),
+    ),
+    act: (bloc) => bloc.add(const TunnelStarted()),
+    expect: () => const [
+      TunnelState(
+        tunnelUp: true,
+        connectionMode: ConnectionMode.proxyOnly,
+        activeAttemptId: 'attempt-proxy',
+        proxyExposure: ProxyExposure(
+          active: true,
+          bindAddress: '0.0.0.0',
+          displayAddress: '192.168.1.20',
+          httpPort: 18080,
+          socksPort: 11080,
+          lanRequested: true,
+          lanActive: true,
+        ),
+      ),
+    ],
+  );
+
+  blocTest<TunnelBloc, TunnelState>(
+    'connect request is ignored when runtime bootstrap has tunnel up',
+    build: () {
+      _countingTunnelRepository = _CountingTunnelRepository(
+        runtimeState: const TunnelRuntimeState(
+          state: VpnTunnelState.connected,
+          detail: 'Local proxy listeners are active.',
+          connectionMode: ConnectionMode.proxyOnly,
+          attemptId: 'attempt-proxy',
+        ),
+      );
+      return TunnelBloc(_countingTunnelRepository, _FakeLogsRepository());
+    },
+    act: (bloc) async {
+      bloc.add(const TunnelStarted());
+      await Future<void>.delayed(Duration.zero);
+      bloc.add(TunnelConnectRequested(_connectRequest()));
+    },
+    expect: () => const [
+      TunnelState(
+        tunnelUp: true,
+        connectionMode: ConnectionMode.proxyOnly,
+        activeAttemptId: 'attempt-proxy',
+      ),
+    ],
+    verify: (_) {
+      expect(_countingTunnelRepository.connectCalls, 0);
+    },
+  );
+
+  blocTest<TunnelBloc, TunnelState>(
+    'connect request waits for pending runtime bootstrap before guard',
+    build: () {
+      _deferredTunnelRepository = _DeferredTunnelRepository();
+      return TunnelBloc(_deferredTunnelRepository, _FakeLogsRepository());
+    },
+    act: (bloc) async {
+      bloc.add(const TunnelStarted());
+      await Future<void>.delayed(Duration.zero);
+      bloc.add(TunnelConnectRequested(_connectRequest()));
+      await Future<void>.delayed(Duration.zero);
+      expect(_deferredTunnelRepository.connectCalls, 0);
+      _deferredTunnelRepository.completeRuntimeState(
+        const TunnelRuntimeState(
+          state: VpnTunnelState.connected,
+          detail: 'Local proxy listeners are active.',
+          connectionMode: ConnectionMode.proxyOnly,
+          attemptId: 'attempt-proxy',
+        ),
+      );
+    },
+    expect: () => const [
+      TunnelState(
+        tunnelUp: true,
+        connectionMode: ConnectionMode.proxyOnly,
+        activeAttemptId: 'attempt-proxy',
+      ),
+    ],
+    verify: (_) {
+      expect(_deferredTunnelRepository.connectCalls, 0);
+    },
+  );
+
+  blocTest<TunnelBloc, TunnelState>(
     'untagged terminal event is ignored while an attempt is active',
     build: () => TunnelBloc(_FakeTunnelRepository(), _FakeLogsRepository()),
     seed: () => const TunnelState(
@@ -146,6 +274,7 @@ void main() {
 }
 
 late _CountingTunnelRepository _countingTunnelRepository;
+late _DeferredTunnelRepository _deferredTunnelRepository;
 
 TunnelConnectRequest _connectRequest() {
   return const TunnelConnectRequest(
@@ -165,6 +294,10 @@ TunnelConnectRequest _connectRequest() {
 }
 
 class _FakeTunnelRepository implements TunnelRepository {
+  _FakeTunnelRepository({this.runtimeState = const TunnelRuntimeState.idle()});
+
+  final TunnelRuntimeState runtimeState;
+
   @override
   Stream<EngineLogMessage> get engineLogs => const Stream.empty();
 
@@ -176,6 +309,9 @@ class _FakeTunnelRepository implements TunnelRepository {
 
   @override
   Future<bool> prepareVpn() async => true;
+
+  @override
+  Future<TunnelRuntimeState> getRuntimeState() async => runtimeState;
 
   @override
   Future<void> connect(TunnelConnectRequest request) async {}
@@ -200,11 +336,25 @@ class _FakeTunnelRepository implements TunnelRepository {
 }
 
 class _CountingTunnelRepository extends _FakeTunnelRepository {
+  _CountingTunnelRepository({super.runtimeState});
+
   int connectCalls = 0;
 
   @override
   Future<void> connect(TunnelConnectRequest request) async {
     connectCalls += 1;
+  }
+}
+
+class _DeferredTunnelRepository extends _CountingTunnelRepository {
+  final Completer<TunnelRuntimeState> _runtimeState =
+      Completer<TunnelRuntimeState>();
+
+  @override
+  Future<TunnelRuntimeState> getRuntimeState() => _runtimeState.future;
+
+  void completeRuntimeState(TunnelRuntimeState state) {
+    _runtimeState.complete(state);
   }
 }
 

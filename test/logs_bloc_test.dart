@@ -7,6 +7,7 @@ import 'package:tunnel_forge/features/home/domain/home_models.dart';
 import 'package:tunnel_forge/features/home/domain/home_repositories.dart';
 import 'package:tunnel_forge/features/home/presentation/bloc/logs_bloc.dart';
 import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
+import 'package:tunnel_forge/features/tunnel/domain/tunnel_runtime_state.dart';
 
 void main() {
   late _FakeSettingsRepository settingsRepository;
@@ -122,6 +123,10 @@ class _RecordingTunnelRepository implements TunnelRepository {
 
   @override
   Future<bool> prepareVpn() async => true;
+
+  @override
+  Future<TunnelRuntimeState> getRuntimeState() async =>
+      const TunnelRuntimeState.idle();
 
   @override
   Future<void> connect(TunnelConnectRequest request) async {}

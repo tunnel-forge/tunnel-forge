@@ -165,6 +165,7 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
   StreamSubscription<TunnelHostUpdate>? _tunnelStatesSub;
   StreamSubscription<EngineLogMessage>? _engineLogsSub;
   StreamSubscription<ProxyExposure>? _proxyExposureSub;
+  Future<void>? _runtimeBootstrapFuture;
   Timer? _awaitTimer;
   int _messageId = 0;
 
@@ -184,14 +185,28 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
     _proxyExposureSub = _tunnelRepository.proxyExposures.listen((exposure) {
       add(TunnelProxyExposureReceived(exposure));
     });
+    final bootstrap = _bootstrapRuntimeState(emit);
+    _runtimeBootstrapFuture = bootstrap;
+    try {
+      await bootstrap;
+    } finally {
+      if (identical(_runtimeBootstrapFuture, bootstrap)) {
+        _runtimeBootstrapFuture = null;
+      }
+    }
   }
 
   Future<void> _onConnectRequested(
     TunnelConnectRequested event,
     Emitter<TunnelState> emit,
   ) async {
+    final runtimeBootstrap = _runtimeBootstrapFuture;
+    if (runtimeBootstrap != null) {
+      await runtimeBootstrap;
+    }
     if (state.busy ||
         state.stopRequested ||
+        state.tunnelUp ||
         (state.awaitingTunnel && !state.tunnelUp)) {
       return;
     }
@@ -640,6 +655,45 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
     _awaitTimer = Timer(const Duration(seconds: 60), () {
       add(TunnelAwaitTimedOut(attemptId));
     });
+  }
+
+  Future<void> _bootstrapRuntimeState(Emitter<TunnelState> emit) async {
+    final runtimeState = await _tunnelRepository.getRuntimeState();
+    if (runtimeState.state == VpnTunnelState.stopped) {
+      return;
+    }
+    final connected = runtimeState.state == VpnTunnelState.connected;
+    final connecting = runtimeState.state == VpnTunnelState.connecting;
+    if (!connected && !connecting) {
+      return;
+    }
+    emit(
+      state.copyWith(
+        busy: false,
+        tunnelUp: connected,
+        awaitingTunnel: connecting,
+        stopRequested: false,
+        timedOutThisAttempt: false,
+        connectionMode: runtimeState.connectionMode,
+        activeAttemptId: runtimeState.attemptId.isEmpty
+            ? null
+            : runtimeState.attemptId,
+        connectStartedAt: connecting ? DateTime.now() : null,
+        clearConnectStartedAt: connected,
+        proxyExposure: runtimeState.proxyExposure,
+        clearProxyExposure: runtimeState.proxyExposure == null,
+        clearMessage: true,
+      ),
+    );
+    if (connecting) {
+      _scheduleAwaitTimeout(runtimeState.attemptId);
+    } else {
+      _cancelAwaitTimer();
+    }
+    _logInfo(
+      'Recovered runtime state from Android: state=${runtimeState.state} mode=${runtimeState.connectionMode.jsonValue}${runtimeState.attemptId.isEmpty ? '' : ' attempt=${runtimeState.attemptId}'}',
+      tag: 'TunnelState',
+    );
   }
 
   void _cancelAwaitTimer() {
