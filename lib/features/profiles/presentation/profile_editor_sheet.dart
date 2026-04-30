@@ -84,6 +84,8 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
   late final TextEditingController _dns1Controller;
   late final TextEditingController _dns2Controller;
   late final TextEditingController _mtuController;
+  bool _passwordVisible = false;
+  bool _pskVisible = false;
   int _lastMessageId = 0;
 
   @override
@@ -131,6 +133,35 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
       enabledBorder: border,
       focusedBorder: border.copyWith(
         borderSide: BorderSide(color: cs.primary, width: 2),
+      ),
+    );
+  }
+
+  Widget _secretField({
+    required BuildContext context,
+    required TextEditingController controller,
+    required String label,
+    String? hint,
+    required bool visible,
+    required String showTooltip,
+    required String hideTooltip,
+    required VoidCallback onToggle,
+    required ValueChanged<String> onChanged,
+  }) {
+    return TextField(
+      controller: controller,
+      obscureText: !visible,
+      enableSuggestions: false,
+      autocorrect: false,
+      onChanged: onChanged,
+      decoration: _deco(context, label: label, hint: hint).copyWith(
+        suffixIcon: IconButton(
+          tooltip: visible ? hideTooltip : showTooltip,
+          icon: Icon(
+            visible ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+          ),
+          onPressed: onToggle,
+        ),
       ),
     );
   }
@@ -394,26 +425,34 @@ class _ProfileEditorViewState extends State<ProfileEditorView> {
                             decoration: _deco(context, label: t.username),
                           ),
                           const SizedBox(height: 12),
-                          TextField(
+                          _secretField(
+                            context: context,
                             controller: _passwordController,
-                            obscureText: true,
+                            label: t.password,
+                            visible: _passwordVisible,
+                            showTooltip: t.showPassword,
+                            hideTooltip: t.hidePassword,
+                            onToggle: () => setState(
+                              () => _passwordVisible = !_passwordVisible,
+                            ),
                             onChanged: (value) => context
                                 .read<ProfileFormBloc>()
                                 .add(ProfileFormPasswordChanged(value)),
-                            decoration: _deco(context, label: t.password),
                           ),
                           const SizedBox(height: 12),
-                          TextField(
+                          _secretField(
+                            context: context,
                             controller: _pskController,
-                            obscureText: true,
+                            label: t.ipsecPsk,
+                            hint: t.ipsecPskHint,
+                            visible: _pskVisible,
+                            showTooltip: t.showIpsecPsk,
+                            hideTooltip: t.hideIpsecPsk,
+                            onToggle: () =>
+                                setState(() => _pskVisible = !_pskVisible),
                             onChanged: (value) => context
                                 .read<ProfileFormBloc>()
                                 .add(ProfileFormPskChanged(value)),
-                            decoration: _deco(
-                              context,
-                              label: t.ipsecPsk,
-                              hint: t.ipsecPskHint,
-                            ),
                           ),
                           const SizedBox(height: 12),
                           CheckboxListTile(

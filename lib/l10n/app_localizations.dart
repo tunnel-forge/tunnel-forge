@@ -510,11 +510,15 @@ extension AppStrings on AppLocalizations {
       AppText.pick('Hostname or IP address', 'نام میزبان یا نشانی IP');
   String get username => AppText.pick('Username', 'نام کاربری');
   String get password => AppText.pick('Password', 'رمز عبور');
+  String get showPassword => AppText.pick('Show password', 'نمایش رمز عبور');
+  String get hidePassword => AppText.pick('Hide password', 'پنهان کردن رمز عبور');
   String get ipsecPsk => AppText.pick('IPsec PSK', 'کلید مشترک IPsec');
-  String get ipsecPskHint => AppText.pick(
-    'Leave blank if your server doesn\'t use IPsec',
-    'اگر سرور شما از IPsec استفاده نمی‌کند خالی بگذارید',
-  );
+  String get showIpsecPsk =>
+      AppText.pick('Show IPsec PSK', 'نمایش کلید مشترک IPsec');
+  String get hideIpsecPsk =>
+      AppText.pick('Hide IPsec PSK', 'پنهان کردن کلید مشترک IPsec');
+  String get ipsecPskHint =>
+      AppText.pick('Optional', 'اختیاری');
   String get automatic => AppText.pick('Automatic', 'خودکار');
   String get automaticDnsHelp => AppText.pick(
     'Receive DNS configuration automatically from the VPN server during PPP negotiation.',

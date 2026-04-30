@@ -130,6 +130,62 @@ void main() {
     );
   });
 
+  testWidgets('password and psk visibility toggles are independent', (
+    tester,
+  ) async {
+    final store = await buildStore();
+    const profile = Profile(
+      id: 'profile-secrets',
+      displayName: 'Office',
+      server: 'vpn.example.com',
+      user: 'alice',
+      dnsAutomatic: true,
+      dns1Host: '',
+      dns1Protocol: DnsProtocol.dnsOverUdp,
+      dns2Host: '',
+      dns2Protocol: DnsProtocol.dnsOverUdp,
+    );
+    await store.upsertProfile(profile, password: 'pw', psk: 'psk');
+
+    await pumpHost(tester, store: store, profileId: profile.id);
+
+    TextField fieldByLabel(String label) => tester.widget<TextField>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField && widget.decoration?.labelText == label,
+      ),
+    );
+
+    expect(fieldByLabel('Password').obscureText, isTrue);
+    expect(fieldByLabel('IPsec PSK').obscureText, isTrue);
+    expect(find.byTooltip('Show password'), findsOneWidget);
+    expect(find.byTooltip('Show IPsec PSK'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Show password'));
+    await tester.pump();
+
+    expect(fieldByLabel('Password').obscureText, isFalse);
+    expect(fieldByLabel('IPsec PSK').obscureText, isTrue);
+    expect(find.byTooltip('Hide password'), findsOneWidget);
+    expect(find.byTooltip('Show IPsec PSK'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Show IPsec PSK'));
+    await tester.pump();
+
+    expect(fieldByLabel('Password').obscureText, isFalse);
+    expect(fieldByLabel('IPsec PSK').obscureText, isFalse);
+    expect(find.byTooltip('Hide password'), findsOneWidget);
+    expect(find.byTooltip('Hide IPsec PSK'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Hide password'));
+    await tester.pump();
+
+    expect(fieldByLabel('Password').obscureText, isTrue);
+    expect(fieldByLabel('IPsec PSK').obscureText, isFalse);
+    expect(find.byTooltip('Show password'), findsOneWidget);
+    expect(find.byTooltip('Hide IPsec PSK'), findsOneWidget);
+  });
+
   testWidgets('shows inline error when mtu is invalid', (tester) async {
     final store = await buildStore();
     const profile = Profile(
