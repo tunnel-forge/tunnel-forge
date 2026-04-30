@@ -1,12 +1,15 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Per-app VPN picker: enumerate installed packages (Android 11+ visibility). Play: declare justification if publishing. -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!-- Per-app VPN picker needs a complete app list for split-tunnel package selection. -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
 
     <application
         android:label="@string/app_name"
@@ -35,7 +38,8 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="tf" android:host="p" />
             </intent-filter>
-            <intent-filter>
+            <!-- Local profile import, not an Android App Link. -->
+            <intent-filter tools:ignore="AppLinkUrlError">
                 <action android:name="android.intent.action.VIEW" />
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
