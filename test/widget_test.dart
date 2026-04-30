@@ -304,7 +304,10 @@ void main() {
       final connectedStatus = tester.widget<Text>(
         find.byKey(const Key('vpn_status')),
       );
-      expect(buttonBackground(tester), const AppSemanticColors.light().connected);
+      expect(
+        buttonBackground(tester),
+        const AppSemanticColors.light().connected,
+      );
       expect(
         actionRingColor(tester),
         const AppSemanticColors.light().connected.withValues(alpha: 0.32),
