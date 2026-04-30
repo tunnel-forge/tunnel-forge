@@ -140,17 +140,20 @@ void main() {
     );
   }
 
+  Future<void> settleConnectionAnimation(WidgetTester tester) async {
+    await tester.pump(const Duration(milliseconds: 560));
+  }
+
   Color? buttonBackground(WidgetTester tester, {bool disabled = false}) {
-    final button = tester.widget<FilledButton>(
-      find.byKey(const Key('vpn_connect')),
+    final fill = tester.widget<AnimatedContainer>(
+      find.byKey(const Key('vpn_connect_fill')),
     );
-    return button.style?.backgroundColor?.resolve(
-      disabled ? {WidgetState.disabled} : <WidgetState>{},
-    );
+    final decoration = fill.decoration as BoxDecoration?;
+    return decoration?.color;
   }
 
   Color? actionRingColor(WidgetTester tester) {
-    final container = tester.widget<Container>(
+    final container = tester.widget<AnimatedContainer>(
       find.byKey(const Key('vpn_action_ring')),
     );
     final decoration = container.decoration as BoxDecoration?;
@@ -243,6 +246,7 @@ void main() {
       expect(find.text('Ready'), findsOneWidget);
 
       await pumpConnectionPanel(tester, brightness: Brightness.dark);
+      await settleConnectionAnimation(tester);
       final darkStatus = tester.widget<Text>(
         find.byKey(const Key('vpn_status')),
       );
@@ -272,6 +276,7 @@ void main() {
       expect(find.text('Connecting...'), findsOneWidget);
 
       await pumpConnectionPanel(tester, tunnelUp: true, label: 'Connected');
+      await settleConnectionAnimation(tester);
 
       final connectedStatus = tester.widget<Text>(
         find.byKey(const Key('vpn_status')),

@@ -13,6 +13,9 @@ enum _ConnectionVisualState {
 
 enum ConnectivityBadgeState { idle, checking, success, failure }
 
+const _kConnectionAnimationDuration = Duration(milliseconds: 520);
+const _kConnectionAnimationCurve = Curves.easeInOutCubic;
+
 /// VPN tab: active profile summary and the large connect / disconnect control.
 class ConnectionPanel extends StatelessWidget {
   const ConnectionPanel({
@@ -245,8 +248,10 @@ class ConnectionPanel extends StatelessWidget {
                     return Column(
                       children: [
                         Center(
-                          child: Container(
+                          child: AnimatedContainer(
                             key: const Key('vpn_action_ring'),
+                            duration: _kConnectionAnimationDuration,
+                            curve: _kConnectionAnimationCurve,
                             width: 172,
                             height: 172,
                             decoration: BoxDecoration(
@@ -257,34 +262,114 @@ class ConnectionPanel extends StatelessWidget {
                             child: Stack(
                               alignment: Alignment.center,
                               children: [
-                                FilledButton(
-                                  key: const Key('vpn_connect'),
-                                  onPressed: locked || profileMissing
-                                      ? null
-                                      : onPrimary,
-                                  style: FilledButton.styleFrom(
-                                    shape: const CircleBorder(),
-                                    fixedSize: const Size.square(136),
-                                    backgroundColor: buttonBg,
-                                    foregroundColor: buttonFg,
-                                    disabledBackgroundColor: buttonBg,
-                                    disabledForegroundColor: buttonFg,
-                                    elevation: 0,
-                                  ),
-                                  child: showProgress
-                                      ? SizedBox(
-                                          width: 32,
-                                          height: 32,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2.6,
-                                            color: spinnerColor,
+                                TweenAnimationBuilder<Color?>(
+                                  tween: ColorTween(end: buttonFg),
+                                  duration: _kConnectionAnimationDuration,
+                                  curve: _kConnectionAnimationCurve,
+                                  builder: (context, animatedFg, child) {
+                                    final effectiveFg = animatedFg ?? buttonFg;
+                                    return Stack(
+                                      alignment: Alignment.center,
+                                      children: [
+                                        AnimatedContainer(
+                                          key: const Key('vpn_connect_fill'),
+                                          duration:
+                                              _kConnectionAnimationDuration,
+                                          curve: _kConnectionAnimationCurve,
+                                          width: 136,
+                                          height: 136,
+                                          decoration: BoxDecoration(
+                                            color: buttonBg,
+                                            shape: BoxShape.circle,
                                           ),
-                                        )
-                                      : Icon(
-                                          Icons.power_settings_new,
-                                          size: 44,
-                                          color: buttonFg,
                                         ),
+                                        FilledButton(
+                                          key: const Key('vpn_connect'),
+                                          onPressed: locked || profileMissing
+                                              ? null
+                                              : onPrimary,
+                                          style: ButtonStyle(
+                                            fixedSize:
+                                                const WidgetStatePropertyAll(
+                                                  Size.square(136),
+                                                ),
+                                            shape: const WidgetStatePropertyAll(
+                                              CircleBorder(),
+                                            ),
+                                            elevation:
+                                                const WidgetStatePropertyAll(0),
+                                            backgroundColor:
+                                                WidgetStateProperty.resolveWith(
+                                                  (_) => Colors.transparent,
+                                                ),
+                                            foregroundColor:
+                                                WidgetStateProperty.resolveWith(
+                                                  (_) => effectiveFg,
+                                                ),
+                                            overlayColor:
+                                                WidgetStatePropertyAll(
+                                                  effectiveFg.withValues(
+                                                    alpha: 0.10,
+                                                  ),
+                                                ),
+                                            shadowColor:
+                                                const WidgetStatePropertyAll(
+                                                  Colors.transparent,
+                                                ),
+                                            surfaceTintColor:
+                                                const WidgetStatePropertyAll(
+                                                  Colors.transparent,
+                                                ),
+                                          ),
+                                          child: AnimatedSwitcher(
+                                            duration:
+                                                _kConnectionAnimationDuration,
+                                            switchInCurve:
+                                                _kConnectionAnimationCurve,
+                                            switchOutCurve: Curves.easeInCubic,
+                                            transitionBuilder: (child, animation) {
+                                              final curved = CurvedAnimation(
+                                                parent: animation,
+                                                curve:
+                                                    _kConnectionAnimationCurve,
+                                              );
+                                              return FadeTransition(
+                                                opacity: curved,
+                                                child: ScaleTransition(
+                                                  scale: Tween<double>(
+                                                    begin: 0.88,
+                                                    end: 1,
+                                                  ).animate(curved),
+                                                  child: child,
+                                                ),
+                                              );
+                                            },
+                                            child: showProgress
+                                                ? SizedBox(
+                                                    key: const ValueKey(
+                                                      'vpn_progress',
+                                                    ),
+                                                    width: 32,
+                                                    height: 32,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                          strokeWidth: 2.6,
+                                                          color: spinnerColor,
+                                                        ),
+                                                  )
+                                                : Icon(
+                                                    Icons.power_settings_new,
+                                                    key: const ValueKey(
+                                                      'vpn_power_icon',
+                                                    ),
+                                                    size: 44,
+                                                    color: effectiveFg,
+                                                  ),
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  },
                                 ),
                                 if (profileMissing)
                                   SizedBox(
@@ -307,90 +392,137 @@ class ConnectionPanel extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 14),
-                        Material(
+                        TweenAnimationBuilder<Color?>(
                           key: const Key('vpn_status_badge'),
-                          color: statusBadgeBackground,
-                          borderRadius: BorderRadius.circular(999),
-                          child: InkWell(
-                            onTap: showConnectivity ? onConnectivityTap : null,
-                            borderRadius: BorderRadius.circular(999),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(
-                                      color: statusColor,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    connectButtonLabel,
-                                    key: const Key('vpn_status'),
-                                    style: textTheme.labelMedium?.copyWith(
-                                      color: statusColor,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  if (showConnectivity) ...[
-                                    Padding(
+                          tween: ColorTween(end: statusBadgeBackground),
+                          duration: _kConnectionAnimationDuration,
+                          curve: _kConnectionAnimationCurve,
+                          builder: (context, animatedBadgeBackground, child) {
+                            final effectiveBadgeBackground =
+                                animatedBadgeBackground ??
+                                statusBadgeBackground;
+                            return TweenAnimationBuilder<Color?>(
+                              tween: ColorTween(end: statusColor),
+                              duration: _kConnectionAnimationDuration,
+                              curve: _kConnectionAnimationCurve,
+                              builder: (context, animatedStatusColor, child) {
+                                final effectiveStatusColor =
+                                    animatedStatusColor ?? statusColor;
+                                return Material(
+                                  color: effectiveBadgeBackground,
+                                  borderRadius: BorderRadius.circular(999),
+                                  child: InkWell(
+                                    onTap: showConnectivity
+                                        ? onConnectivityTap
+                                        : null,
+                                    borderRadius: BorderRadius.circular(999),
+                                    child: Padding(
                                       padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
+                                        horizontal: 10,
+                                        vertical: 6,
                                       ),
-                                      child: Container(
-                                        width: 1,
-                                        height: 12,
-                                        color: statusColor.withValues(
-                                          alpha: 0.28,
-                                        ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          AnimatedContainer(
+                                            duration:
+                                                _kConnectionAnimationDuration,
+                                            curve: _kConnectionAnimationCurve,
+                                            width: 8,
+                                            height: 8,
+                                            decoration: BoxDecoration(
+                                              color: effectiveStatusColor,
+                                              shape: BoxShape.circle,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          AnimatedDefaultTextStyle(
+                                            duration:
+                                                _kConnectionAnimationDuration,
+                                            curve: _kConnectionAnimationCurve,
+                                            style:
+                                                textTheme.labelMedium?.copyWith(
+                                                  color: effectiveStatusColor,
+                                                  fontWeight: FontWeight.w700,
+                                                ) ??
+                                                TextStyle(
+                                                  color: effectiveStatusColor,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                            child: Text(
+                                              connectButtonLabel,
+                                              key: const Key('vpn_status'),
+                                              style: textTheme.labelMedium
+                                                  ?.copyWith(
+                                                    color: effectiveStatusColor,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                            ),
+                                          ),
+                                          if (showConnectivity) ...[
+                                            Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 8,
+                                                  ),
+                                              child: Container(
+                                                width: 1,
+                                                height: 12,
+                                                color: effectiveStatusColor
+                                                    .withValues(alpha: 0.28),
+                                              ),
+                                            ),
+                                            if (connectivityBadgeState ==
+                                                ConnectivityBadgeState.checking)
+                                              SizedBox(
+                                                key: const Key(
+                                                  'connectivity_status_spinner',
+                                                ),
+                                                width: 12,
+                                                height: 12,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                      color: connectivityColor,
+                                                    ),
+                                              )
+                                            else
+                                              AnimatedContainer(
+                                                key: const Key(
+                                                  'connectivity_status_dot',
+                                                ),
+                                                duration:
+                                                    _kConnectionAnimationDuration,
+                                                curve:
+                                                    _kConnectionAnimationCurve,
+                                                width: 8,
+                                                height: 8,
+                                                decoration: BoxDecoration(
+                                                  color: connectivityColor,
+                                                  shape: BoxShape.circle,
+                                                ),
+                                              ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              connectivityBadgeLabel,
+                                              key: const Key(
+                                                'connectivity_status',
+                                              ),
+                                              style: textTheme.labelMedium
+                                                  ?.copyWith(
+                                                    color: connectivityColor,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                            ),
+                                          ],
+                                        ],
                                       ),
                                     ),
-                                    if (connectivityBadgeState ==
-                                        ConnectivityBadgeState.checking)
-                                      SizedBox(
-                                        key: const Key(
-                                          'connectivity_status_spinner',
-                                        ),
-                                        width: 12,
-                                        height: 12,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: connectivityColor,
-                                        ),
-                                      )
-                                    else
-                                      Container(
-                                        key: const Key(
-                                          'connectivity_status_dot',
-                                        ),
-                                        width: 8,
-                                        height: 8,
-                                        decoration: BoxDecoration(
-                                          color: connectivityColor,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      connectivityBadgeLabel,
-                                      key: const Key('connectivity_status'),
-                                      style: textTheme.labelMedium?.copyWith(
-                                        color: connectivityColor,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ),
+                                  ),
+                                );
+                              },
+                            );
+                          },
                         ),
                       ],
                     );

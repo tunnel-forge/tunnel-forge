@@ -670,7 +670,7 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
             layoutBuilder: (currentChild, previousChildren) => Stack(
               fit: StackFit.expand,
               alignment: Alignment.topCenter,
-              children: <Widget>[...previousChildren, ?currentChild],
+              children: <Widget>[?currentChild, ...previousChildren],
             ),
             transitionBuilder: (child, animation) {
               final curved = CurvedAnimation(
@@ -679,141 +679,139 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
               );
               return FadeTransition(
                 opacity: curved,
-                child: SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(0.08, 0),
-                    end: Offset.zero,
-                  ).animate(curved),
-                  child: ScaleTransition(
-                    scale: Tween<double>(begin: 0.985, end: 1).animate(curved),
-                    child: child,
-                  ),
+                child: ScaleTransition(
+                  scale: Tween<double>(begin: 0.975, end: 1).animate(curved),
+                  child: child,
                 ),
               );
             },
             child: SizedBox.expand(
               key: ValueKey<int>(navState.index),
-              child: switch (navState.index) {
-                0 => Align(
-                  alignment: Alignment.topCenter,
-                  child: ConnectionPanel(
-                    profilesLoading: profilesState.loading,
-                    profileSummaryTitle: profileSummaryTitle,
-                    profileSummarySubtitle: profileSummarySubtitle,
-                    onOpenProfilePicker: _openProfilePicker,
-                    busy: tunnelState.busy,
-                    tunnelUp: tunnelState.tunnelUp,
-                    awaitingTunnel: tunnelState.awaitingTunnel,
-                    stopRequested: tunnelState.stopRequested,
-                    canStartConnection: profilesState.hasActiveProfile,
-                    connectButtonLabel: _connectButtonLabel(
-                      tunnelState,
-                      profilesState.hasActiveProfile,
-                      settingsState.connectionMode,
-                    ),
-                    onPrimary: () => _primaryAction(
-                      profilesState,
-                      settingsState,
-                      tunnelState,
-                    ),
-                    onUnavailablePrimaryTap: () =>
-                        _handleMissingProfileTap(profilesState),
-                    connectivityBadgeState: connectivityState.badgeState,
-                    connectivityBadgeLabel: _connectivityBadgeLabel(
-                      connectivityState,
-                    ),
-                    onConnectivityTap: () =>
-                        context.read<ConnectivityBloc>().add(
-                          ConnectivityRunRequested(
-                            _connectivityPingRequest(
-                              settingsState,
-                              tunnelState,
+              child: ColoredBox(
+                color: Theme.of(context).colorScheme.surface,
+                child: switch (navState.index) {
+                  0 => Align(
+                    alignment: Alignment.topCenter,
+                    child: ConnectionPanel(
+                      profilesLoading: profilesState.loading,
+                      profileSummaryTitle: profileSummaryTitle,
+                      profileSummarySubtitle: profileSummarySubtitle,
+                      onOpenProfilePicker: _openProfilePicker,
+                      busy: tunnelState.busy,
+                      tunnelUp: tunnelState.tunnelUp,
+                      awaitingTunnel: tunnelState.awaitingTunnel,
+                      stopRequested: tunnelState.stopRequested,
+                      canStartConnection: profilesState.hasActiveProfile,
+                      connectButtonLabel: _connectButtonLabel(
+                        tunnelState,
+                        profilesState.hasActiveProfile,
+                        settingsState.connectionMode,
+                      ),
+                      onPrimary: () => _primaryAction(
+                        profilesState,
+                        settingsState,
+                        tunnelState,
+                      ),
+                      onUnavailablePrimaryTap: () =>
+                          _handleMissingProfileTap(profilesState),
+                      connectivityBadgeState: connectivityState.badgeState,
+                      connectivityBadgeLabel: _connectivityBadgeLabel(
+                        connectivityState,
+                      ),
+                      onConnectivityTap: () =>
+                          context.read<ConnectivityBloc>().add(
+                            ConnectivityRunRequested(
+                              _connectivityPingRequest(
+                                settingsState,
+                                tunnelState,
+                              ),
                             ),
                           ),
+                      colorScheme: Theme.of(context).colorScheme,
+                      textTheme: Theme.of(context).textTheme,
+                    ),
+                  ),
+                  1 => LogsPanel(
+                    logs: logsState.visibleLogs,
+                    scrollController: _logsScroll,
+                    colorScheme: Theme.of(context).colorScheme,
+                    textTheme: Theme.of(context).textTheme,
+                    stickToBottom: _logsStickToBottom,
+                    onJumpToLatest: _jumpLogsToBottom,
+                    wordWrap: logsState.wordWrap,
+                    hasAnyLogs: logsState.entries.isNotEmpty,
+                  ),
+                  _ => SettingsPanel(
+                    language: languageController.language,
+                    onLanguageChanged: languageController.setLanguage,
+                    themeMode: appThemeState.themeMode,
+                    onThemeModeChanged: (mode) =>
+                        context.read<AppThemeBloc>().add(AppThemeChanged(mode)),
+                    connectionMode: settingsState.connectionMode,
+                    splitTunnelSettings: settingsState.splitTunnelSettings,
+                    proxySettings: settingsState.proxySettings,
+                    connectivityCheckSettings:
+                        settingsState.connectivityCheckSettings,
+                    onConnectionModeChanged: (mode) => context
+                        .read<SettingsBloc>()
+                        .add(SettingsConnectionModeChanged(mode)),
+                    onSplitTunnelSettingsChanged: (settings) => context
+                        .read<SettingsBloc>()
+                        .add(SettingsSplitTunnelSettingsChanged(settings)),
+                    onProxySettingsChanged: (settings) => context
+                        .read<SettingsBloc>()
+                        .add(SettingsProxySettingsChanged(settings)),
+                    proxyExposure: tunnelState.proxyExposure,
+                    onConnectivityCheckSettingsChanged: (settings) =>
+                        context.read<SettingsBloc>().add(
+                          SettingsConnectivityCheckSettingsChanged(settings),
                         ),
+                    onChooseApps: _pickAppsForVpn,
+                    onOpenL2tpSecurityNotice: _openL2tpSecurityNotice,
+                    installedVersion: settingsState.installedVersion,
+                    installedVersionError: settingsState.installedVersionError,
+                    appUpdateStatus: settingsState.appUpdateStatus,
+                    latestReleaseVersion: settingsState.latestReleaseVersion,
+                    updateErrorMessage: settingsState.updateErrorMessage,
+                    onRefreshVersionCheck: () => context
+                        .read<SettingsBloc>()
+                        .add(const SettingsVersionCheckRequested()),
+                    onOpenReleasePage: () => _openReleasePage(
+                      settingsState.latestReleaseUrl ?? _kGithubReleasesUrl,
+                    ),
+                    onOpenTelegram: () => _openExternalUrl(
+                      _kTelegramUrl,
+                      invalidMessage: AppText.pick(
+                        'Telegram link is invalid.',
+                        'پیوند تلگرام معتبر نیست.',
+                      ),
+                      failureMessage: AppText.pick(
+                        'Could not open Telegram.',
+                        'تلگرام باز نشد.',
+                      ),
+                    ),
+                    onOpenGithub: () => _openExternalUrl(
+                      _kProjectGithubUrl,
+                      invalidMessage: AppText.pick(
+                        'GitHub link is invalid.',
+                        'پیوند GitHub معتبر نیست.',
+                      ),
+                      failureMessage: AppText.pick(
+                        'Could not open GitHub.',
+                        'GitHub باز نشد.',
+                      ),
+                    ),
+                    routingLocked:
+                        profilesState.loading ||
+                        tunnelState.busy ||
+                        tunnelState.stopRequested ||
+                        tunnelState.tunnelUp ||
+                        tunnelState.awaitingTunnel,
                     colorScheme: Theme.of(context).colorScheme,
                     textTheme: Theme.of(context).textTheme,
                   ),
-                ),
-                1 => LogsPanel(
-                  logs: logsState.visibleLogs,
-                  scrollController: _logsScroll,
-                  colorScheme: Theme.of(context).colorScheme,
-                  textTheme: Theme.of(context).textTheme,
-                  stickToBottom: _logsStickToBottom,
-                  onJumpToLatest: _jumpLogsToBottom,
-                  wordWrap: logsState.wordWrap,
-                  hasAnyLogs: logsState.entries.isNotEmpty,
-                ),
-                _ => SettingsPanel(
-                  language: languageController.language,
-                  onLanguageChanged: languageController.setLanguage,
-                  themeMode: appThemeState.themeMode,
-                  onThemeModeChanged: (mode) =>
-                      context.read<AppThemeBloc>().add(AppThemeChanged(mode)),
-                  connectionMode: settingsState.connectionMode,
-                  splitTunnelSettings: settingsState.splitTunnelSettings,
-                  proxySettings: settingsState.proxySettings,
-                  connectivityCheckSettings:
-                      settingsState.connectivityCheckSettings,
-                  onConnectionModeChanged: (mode) => context
-                      .read<SettingsBloc>()
-                      .add(SettingsConnectionModeChanged(mode)),
-                  onSplitTunnelSettingsChanged: (settings) => context
-                      .read<SettingsBloc>()
-                      .add(SettingsSplitTunnelSettingsChanged(settings)),
-                  onProxySettingsChanged: (settings) => context
-                      .read<SettingsBloc>()
-                      .add(SettingsProxySettingsChanged(settings)),
-                  proxyExposure: tunnelState.proxyExposure,
-                  onConnectivityCheckSettingsChanged: (settings) => context
-                      .read<SettingsBloc>()
-                      .add(SettingsConnectivityCheckSettingsChanged(settings)),
-                  onChooseApps: _pickAppsForVpn,
-                  onOpenL2tpSecurityNotice: _openL2tpSecurityNotice,
-                  installedVersion: settingsState.installedVersion,
-                  installedVersionError: settingsState.installedVersionError,
-                  appUpdateStatus: settingsState.appUpdateStatus,
-                  latestReleaseVersion: settingsState.latestReleaseVersion,
-                  updateErrorMessage: settingsState.updateErrorMessage,
-                  onRefreshVersionCheck: () => context.read<SettingsBloc>().add(
-                    const SettingsVersionCheckRequested(),
-                  ),
-                  onOpenReleasePage: () => _openReleasePage(
-                    settingsState.latestReleaseUrl ?? _kGithubReleasesUrl,
-                  ),
-                  onOpenTelegram: () => _openExternalUrl(
-                    _kTelegramUrl,
-                    invalidMessage: AppText.pick(
-                      'Telegram link is invalid.',
-                      'پیوند تلگرام معتبر نیست.',
-                    ),
-                    failureMessage: AppText.pick(
-                      'Could not open Telegram.',
-                      'تلگرام باز نشد.',
-                    ),
-                  ),
-                  onOpenGithub: () => _openExternalUrl(
-                    _kProjectGithubUrl,
-                    invalidMessage: AppText.pick(
-                      'GitHub link is invalid.',
-                      'پیوند GitHub معتبر نیست.',
-                    ),
-                    failureMessage: AppText.pick(
-                      'Could not open GitHub.',
-                      'GitHub باز نشد.',
-                    ),
-                  ),
-                  routingLocked:
-                      profilesState.loading ||
-                      tunnelState.busy ||
-                      tunnelState.stopRequested ||
-                      tunnelState.tunnelUp ||
-                      tunnelState.awaitingTunnel,
-                  colorScheme: Theme.of(context).colorScheme,
-                  textTheme: Theme.of(context).textTheme,
-                ),
-              },
+                },
+              ),
             ),
           ),
         ),
