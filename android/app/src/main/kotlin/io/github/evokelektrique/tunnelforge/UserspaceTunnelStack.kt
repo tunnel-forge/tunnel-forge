@@ -990,10 +990,15 @@ internal class BridgeUserspaceTunnelStack(
                 if (runtime.currentSendCredit() <= 0) {
                     schedulePersistProbe(runtime, buffer[offset])
                 }
-                var credit = runtime.awaitSendCredit(DATA_SEND_WINDOW_WAIT_MS)
+                val creditWait = runtime.awaitSendCredit(DATA_SEND_WINDOW_WAIT_MS)
+                var credit = creditWait.credit
                 if (credit <= 0) {
-                    val message =
-                        "Timed out waiting for remote TCP receive window sid=$sessionId outstanding=${runtime.outstandingBytes()} peerWindow=${runtime.peerWindowSize()}."
+                    val message = creditWait.failureMessage
+                        ?: if (!running || !bridge.isRunning()) {
+                            "Proxy packet bridge stopped."
+                        } else {
+                            "Timed out waiting for remote TCP receive window sid=$sessionId outstanding=${runtime.outstandingBytes()} peerWindow=${runtime.peerWindowSize()}."
+                        }
                     failTcpRuntime(runtime, reason = "send-window-timeout", message = message, closeClient = true)
                     throw IOException(message)
                 }
@@ -1482,6 +1487,11 @@ private data class TcpAckUpdate(
     val fastRetransmitStartSequence: Long? = null,
 )
 
+private data class TcpSendCreditWaitResult(
+    val credit: Int,
+    val failureMessage: String? = null,
+)
+
 private const val INITIAL_TCP_RTO_MS = 1_000L
 private const val MIN_TCP_RTO_MS = 500L
 private const val MAX_TCP_RTO_MS = 8_000L
@@ -1707,22 +1717,31 @@ private class TcpSessionRuntime(
     }
 
     @Synchronized
-    fun awaitSendCredit(timeoutMs: Long): Int {
+    fun awaitSendCredit(timeoutMs: Long): TcpSendCreditWaitResult {
         val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(1L)
         while (connectState == ConnectWaitState.established && sessionWaitState == SessionWaitState.pending) {
             val credit = sendCreditLocked()
-            if (credit > 0) return credit.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            if (credit > 0) return TcpSendCreditWaitResult(credit.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
             val remaining = deadline - System.currentTimeMillis()
-            if (remaining <= 0L) return 0
+            if (remaining <= 0L) return TcpSendCreditWaitResult(0)
             try {
                 monitorWait(remaining)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
-                signalRuntimeFailure("Proxy session interrupted while waiting for TCP send window.")
-                return 0
+                val message = "Proxy session interrupted while waiting for TCP send window."
+                signalRuntimeFailure(message)
+                return TcpSendCreditWaitResult(0, message)
             }
         }
-        return 0
+        val message =
+            terminalFailureMessage
+                ?: connectFailureMessage
+                ?: when {
+                    connectState != ConnectWaitState.established -> "TCP session is not established."
+                    sessionWaitState != SessionWaitState.pending -> "TCP session is closed."
+                    else -> null
+                }
+        return TcpSendCreditWaitResult(0, message)
     }
 
     @Synchronized

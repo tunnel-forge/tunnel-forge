@@ -10,6 +10,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -308,6 +309,45 @@ class DnsSupportTest {
             releaseFirst.countDown()
             bridge.close()
         }
+    }
+
+    @Test
+    fun vpnDnsPacketBridgeCloseInterruptsAndJoinsReaderThread() {
+        val readStarted = CountDownLatch(1)
+        val interrupted = AtomicBoolean(false)
+        val nativeIo =
+            object : VpnDnsNativeIo {
+                override fun readQuery(maxLen: Int): ByteArray? {
+                    readStarted.countDown()
+                    while (!Thread.currentThread().isInterrupted) {
+                        try {
+                            Thread.sleep(1_000)
+                        } catch (_: InterruptedException) {
+                            interrupted.set(true)
+                            Thread.currentThread().interrupt()
+                        }
+                    }
+                    return null
+                }
+
+                override fun queueResponse(packet: ByteArray): Int = 0
+            }
+        val bridge =
+            VpnDnsPacketBridge(
+                virtualDnsIpv4 = TunnelVpnService.MANUAL_DNS_VIRTUAL_IPV4,
+                exchangeClient =
+                    object : DnsExchangeClient {
+                        override fun exchange(query: ByteArray): ByteArray = byteArrayOf()
+                    },
+                logger = { _, _ -> },
+                nativeIo = nativeIo,
+            )
+
+        bridge.start()
+        assertTrue(readStarted.await(1, TimeUnit.SECONDS))
+        bridge.close()
+
+        assertTrue(interrupted.get())
     }
 
     @Test

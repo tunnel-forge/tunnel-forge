@@ -198,6 +198,13 @@ class MainActivity : FlutterActivity() {
                         TAG,
                         "vpn_call connect start attempt=$attemptId server=$serverTrim userPresent=${user.isNotEmpty()} pskPresent=${psk.isNotEmpty()} dnsMode=${if (dnsAutomatic) "automatic" else "manual"} dns=${dnsServers.joinToString(",") { "${it.host}[${it.protocol.shortLabel}]" }} mtu=$mtu mode=$connectionMode splitTunnelEnabled=$splitTunnelEnabled splitTunnelMode=$splitTunnelMode inclusiveApps=${inclusivePackages.size} exclusiveApps=${exclusivePackages.size} http=$proxyHttpPort socks=$proxySocksPort lan=$proxyAllowLan",
                     )
+                    val cleanupTargets = VpnConnectModeSwitchPolicy.cleanupTargetsForStart(connectionMode)
+                    if (cleanupTargets.stopVpn) {
+                        TunnelVpnService.stopActiveSessionForModeSwitch("starting $connectionMode")
+                    }
+                    if (cleanupTargets.stopProxy) {
+                        ProxyTunnelService.stopActiveSessionForModeSwitch("starting $connectionMode")
+                    }
                     val intent =
                         if (connectionMode == VpnContract.MODE_PROXY_ONLY) {
                             Intent(this, ProxyTunnelService::class.java).apply {
@@ -660,11 +667,22 @@ internal data class VpnDisconnectTargets(
     val stopProxy: Boolean,
 )
 
+internal typealias VpnCleanupTargets = VpnDisconnectTargets
+
 internal object VpnDisconnectDispatchPolicy {
     fun targetsForConnectionMode(mode: String?): VpnDisconnectTargets =
         when (mode?.trim()) {
             VpnContract.MODE_PROXY_ONLY -> VpnDisconnectTargets(stopVpn = false, stopProxy = true)
             VpnContract.MODE_VPN_TUNNEL -> VpnDisconnectTargets(stopVpn = true, stopProxy = false)
             else -> VpnDisconnectTargets(stopVpn = true, stopProxy = true)
+        }
+}
+
+internal object VpnConnectModeSwitchPolicy {
+    fun cleanupTargetsForStart(mode: String?): VpnCleanupTargets =
+        when (mode?.trim()) {
+            VpnContract.MODE_PROXY_ONLY -> VpnCleanupTargets(stopVpn = true, stopProxy = false)
+            VpnContract.MODE_VPN_TUNNEL -> VpnCleanupTargets(stopVpn = false, stopProxy = true)
+            else -> VpnCleanupTargets(stopVpn = true, stopProxy = true)
         }
 }

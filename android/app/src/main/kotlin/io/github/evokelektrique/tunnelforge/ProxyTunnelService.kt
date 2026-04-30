@@ -27,6 +27,7 @@ class ProxyTunnelService : Service() {
     private var proxyRuntime: ProxyServerRuntime? = null
     private var proxyTransport: BridgeProxyTransport? = null
     private var userspaceStack: BridgeUserspaceTunnelStack? = null
+    private var proxyLoopThread: Thread? = null
     private var activeProxyConfig: ProxyRuntimeConfig? = null
     private var activeAttemptId: String = ""
     @Volatile
@@ -158,8 +159,11 @@ class ProxyTunnelService : Service() {
     ) {
         val label = profileName.ifEmpty { server }
         val currentWorker = Thread.currentThread()
+        val nativeOwner = NativeTunnelOwner(VpnContract.MODE_PROXY_ONLY, attemptId)
+        var nativeOwnerAcquired = false
         var localStack: BridgeUserspaceTunnelStack? = null
         var localRuntime: ProxyServerRuntime? = null
+        var localLoopThread: Thread? = null
         emitAttemptState(
             attemptId,
             VpnContract.TUNNEL_CONNECTING,
@@ -171,6 +175,15 @@ class ProxyTunnelService : Service() {
             "${prefixAttempt(attemptId)}Starting proxy negotiation",
         )
         try {
+            nativeOwnerAcquired =
+                NativeTunnelSessions.shared.acquire(
+                    nativeOwner,
+                    reason = "proxy negotiation start",
+                )
+            if (!nativeOwnerAcquired) {
+                emitAttemptTerminalState(attemptId, VpnContract.TUNNEL_FAILED, "Tunnel engine is still stopping; try again.")
+                return
+            }
             VpnBridge.nativeSetSocketProtectionEnabled(false)
             val negotiatedClientIp = IntArray(4)
             val negotiatedPrimaryDns = IntArray(4)
@@ -248,6 +261,12 @@ class ProxyTunnelService : Service() {
                 },
                 "proxy-loop",
             )
+            localLoopThread = loopThread
+            synchronized(sessionLock) {
+                if (worker === currentWorker) {
+                    proxyLoopThread = loopThread
+                }
+            }
             loopThread.start()
             val bridge = ProxyPacketBridge()
             val stack =
@@ -278,10 +297,7 @@ class ProxyTunnelService : Service() {
                 } else {
                     emitAttemptTerminalState(attemptId, VpnContract.TUNNEL_FAILED, "Local proxy bridge did not become ready")
                 }
-                try {
-                    VpnBridge.nativeStopTunnel()
-                } catch (_: Exception) {
-                }
+                NativeTunnelSessions.shared.stopOwner(nativeOwner, reason = "proxy bridge readiness failed")
                 loopThread.join(5000)
                 return
             }
@@ -318,6 +334,7 @@ class ProxyTunnelService : Service() {
                     userspaceStack = stack
                     proxyTransport = transport
                     proxyRuntime = runtime
+                    proxyLoopThread = loopThread
                 }
             }
             if (workerReplaced) {
@@ -379,6 +396,18 @@ class ProxyTunnelService : Service() {
         } finally {
             localStack?.stop()
             localRuntime?.stop()
+            if (nativeOwnerAcquired) {
+                NativeTunnelSessions.shared.stopOwner(nativeOwner, reason = "proxy worker cleanup")
+            }
+            localLoopThread?.let { loop ->
+                if (loop !== Thread.currentThread() && loop.isAlive) {
+                    try {
+                        loop.join(ProxyTunnelServiceStopper.LOOP_JOIN_TIMEOUT_MS)
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                    }
+                }
+            }
             VpnTunnelEvents.emitProxyExposureChanged(
                 ProxyExposureInfo.inactive(
                     httpPort = proxyConfig.httpPort,
@@ -395,6 +424,7 @@ class ProxyTunnelService : Service() {
                     proxyRuntime = null
                     proxyTransport = null
                     packetBridge = null
+                    proxyLoopThread = null
                     activeProxyConfig = null
                     if (activeAttemptId == attemptId) {
                         activeAttemptId = ""
@@ -406,6 +436,9 @@ class ProxyTunnelService : Service() {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
+            if (nativeOwnerAcquired) {
+                NativeTunnelSessions.shared.release(nativeOwner, reason = "proxy worker finalizing")
+            }
         }
     }
 
@@ -414,9 +447,11 @@ class ProxyTunnelService : Service() {
             synchronized(sessionLock) {
                 stopRequested = true
                 ActiveProxySession(
+                    attemptId = activeAttemptId,
                     worker = worker,
                     stack = userspaceStack,
                     runtime = proxyRuntime,
+                    loopThread = proxyLoopThread,
                     hasTransport = proxyTransport != null,
                     hasBridge = packetBridge != null,
                 ).also {
@@ -425,6 +460,7 @@ class ProxyTunnelService : Service() {
                     proxyRuntime = null
                     proxyTransport = null
                     packetBridge = null
+                    proxyLoopThread = null
                     activeAttemptId = ""
                 }
             }
@@ -456,17 +492,20 @@ class ProxyTunnelService : Service() {
         }
         ProxyTunnelServiceStopper.stopPreviousWorker(
             worker = active.worker,
+            loopThread = active.loopThread,
             onStopNativeTunnel = {
-                try {
-                    VpnBridge.nativeStopTunnel()
-                } catch (_: Exception) {
-                }
+                NativeTunnelSessions.shared.stopOwner(active.nativeOwner(), reason = "proxy service stop")
             },
             logger = { level, message ->
                 VpnTunnelEvents.emitEngineLog(level, TAG, message)
             },
             joinTimeoutMs = WORKER_JOIN_TIMEOUT_MS,
         )
+        if (active.worker == null) {
+            active.nativeOwner()?.let {
+                NativeTunnelSessions.shared.release(it, reason = "proxy service stopped")
+            }
+        }
         return true
     }
 
@@ -607,6 +646,25 @@ class ProxyTunnelService : Service() {
         private var instance: ProxyTunnelService? = null
 
         @JvmStatic
+        fun stopActiveSessionForModeSwitch(reason: String): Boolean {
+            val svc = instance ?: return false
+            val hadActiveSession = svc.shutdownActiveSession(reason = "mode switch: $reason")
+            if (!hadActiveSession) return false
+            VpnTunnelEvents.emitEngineLog(
+                Log.DEBUG,
+                TAG,
+                "Stopped proxy service before mode switch reason=$reason",
+            )
+            try {
+                svc.stopForeground(STOP_FOREGROUND_REMOVE)
+                svc.stopSelf()
+            } catch (e: Exception) {
+                AppLog.w(TAG, "stopActiveSessionForModeSwitch", e)
+            }
+            return true
+        }
+
+        @JvmStatic
         fun runtimeSnapshot(): Map<String, Any?>? {
             val svc = instance ?: return null
             val active =
@@ -615,6 +673,7 @@ class ProxyTunnelService : Service() {
                         svc.userspaceStack != null ||
                         svc.proxyRuntime != null ||
                         svc.proxyTransport != null ||
+                        svc.proxyLoopThread != null ||
                         svc.packetBridge != null
                 }
             if (!active) return null
@@ -642,35 +701,66 @@ class ProxyTunnelService : Service() {
 }
 
 private data class ActiveProxySession(
+    val attemptId: String,
     val worker: Thread?,
     val stack: BridgeUserspaceTunnelStack?,
     val runtime: ProxyServerRuntime?,
+    val loopThread: Thread?,
     val hasTransport: Boolean,
     val hasBridge: Boolean,
 ) {
-    fun hasState(): Boolean = worker != null || stack != null || runtime != null || hasTransport || hasBridge
+    fun hasState(): Boolean = worker != null || stack != null || runtime != null || loopThread != null || hasTransport || hasBridge
+
+    fun nativeOwner(): NativeTunnelOwner? =
+        attemptId.takeIf { it.isNotEmpty() }?.let {
+            NativeTunnelOwner(VpnContract.MODE_PROXY_ONLY, it)
+        }
 }
 
 internal object ProxyTunnelServiceStopper {
+    internal const val LOOP_JOIN_TIMEOUT_MS = 5_000L
+
     fun stopPreviousWorker(
         worker: Thread?,
+        loopThread: Thread? = null,
         onStopNativeTunnel: () -> Unit,
         logger: (Int, String) -> Unit,
         joinTimeoutMs: Long,
     ) {
         onStopNativeTunnel()
+        joinThread(
+            thread = loopThread,
+            threadLabel = "proxy loop",
+            logger = logger,
+            joinTimeoutMs = LOOP_JOIN_TIMEOUT_MS,
+        )
         if (worker == null) return
         worker.interrupt()
+        joinThread(
+            thread = worker,
+            threadLabel = "proxy worker",
+            logger = logger,
+            joinTimeoutMs = joinTimeoutMs,
+        )
+    }
+
+    private fun joinThread(
+        thread: Thread?,
+        threadLabel: String,
+        logger: (Int, String) -> Unit,
+        joinTimeoutMs: Long,
+    ) {
+        if (thread == null || thread === Thread.currentThread()) return
         try {
-            worker.join(joinTimeoutMs)
-            if (worker.isAlive) {
-                logger(Log.WARN, "Previous proxy worker did not exit within ${joinTimeoutMs}ms")
+            thread.join(joinTimeoutMs)
+            if (thread.isAlive) {
+                logger(Log.WARN, "Previous $threadLabel did not exit within ${joinTimeoutMs}ms")
             } else {
-                logger(Log.DEBUG, "Previous proxy worker joined")
+                logger(Log.DEBUG, "Previous $threadLabel joined")
             }
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
-            logger(Log.WARN, "Interrupted while waiting for previous proxy worker to stop")
+            logger(Log.WARN, "Interrupted while waiting for previous $threadLabel to stop")
         }
     }
 }

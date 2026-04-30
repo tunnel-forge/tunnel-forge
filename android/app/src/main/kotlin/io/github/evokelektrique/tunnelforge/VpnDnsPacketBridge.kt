@@ -44,7 +44,19 @@ internal class VpnDnsPacketBridge(
 
     override fun close() {
         running.set(false)
-        thread?.interrupt()
+        val capturedThread = thread
+        capturedThread?.interrupt()
+        if (capturedThread != null && capturedThread !== Thread.currentThread()) {
+            try {
+                capturedThread.join(CLOSE_JOIN_TIMEOUT_MS)
+                if (capturedThread.isAlive) {
+                    logger(Log.WARN, "vpn dns bridge reader did not exit within ${CLOSE_JOIN_TIMEOUT_MS}ms")
+                }
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                logger(Log.WARN, "interrupted while waiting for vpn dns bridge reader to stop")
+            }
+        }
         thread = null
         executor.shutdownNow()
     }
@@ -104,6 +116,7 @@ internal class VpnDnsPacketBridge(
     companion object {
         private const val MAX_PACKET_LEN = 65_535
         private const val IDLE_DELAY_MS = 50L
+        internal const val CLOSE_JOIN_TIMEOUT_MS = 1_000L
         private const val DEFAULT_WORKER_COUNT = 4
         private const val DEFAULT_QUEUE_CAPACITY = 64
         private const val DNS_PORT = 53

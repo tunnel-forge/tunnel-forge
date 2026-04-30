@@ -1103,6 +1103,65 @@ class ProxyServerRuntimeTest {
     }
 
     @Test
+    fun httpConnectPostSuccessPumpFailureIsLoggedAndContained() {
+        val logs = CopyOnWriteArrayList<String>()
+        val transport =
+            object : ProxyTransport {
+                override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession =
+                    object : ProxyTransportSession {
+                        override val descriptor = ProxySessionDescriptor(7, request, 0)
+
+                        override fun awaitConnected(timeoutMs: Long) = Unit
+
+                        override fun pumpBidirectional(client: ProxyClientConnection) {
+                            throw java.io.IOException("Proxy packet bridge stopped.")
+                        }
+
+                        override fun close() = Unit
+                    }
+            }
+        val port = findFreePort()
+        val runtime =
+            ProxyServerRuntime(
+                config = ProxyRuntimeConfig(httpEnabled = true, httpPort = port, socksEnabled = false, socksPort = 1080),
+                logger = { message -> logs.add(message) },
+                transport = transport,
+            )
+        runtime.start()
+        try {
+            Thread.sleep(50)
+            Socket("127.0.0.1", port).use { socket ->
+                val output = BufferedOutputStream(socket.getOutputStream())
+                val input = BufferedInputStream(socket.getInputStream())
+                output.write("CONNECT 93.184.216.34:443 HTTP/1.1\r\nHost: 93.184.216.34:443\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
+                output.flush()
+                val response = readResponse(input)
+                assertTrue(response.startsWith("HTTP/1.1 200 Connection Established"))
+            }
+            repeat(40) {
+                if (logs.any {
+                    it.contains("proxy fail proto=http-connect") &&
+                        it.contains("phase=post-success") &&
+                        it.contains("sid=7") &&
+                        it.contains("Proxy packet bridge stopped")
+                }) return@repeat
+                Thread.sleep(25)
+            }
+            assertTrue(
+                logs.joinToString("\n"),
+                logs.any {
+                    it.contains("proxy fail proto=http-connect") &&
+                        it.contains("phase=post-success") &&
+                        it.contains("sid=7") &&
+                        it.contains("Proxy packet bridge stopped")
+                },
+            )
+        } finally {
+            runtime.stop()
+        }
+    }
+
+    @Test
     fun httpConnectReturnsTransportFailureForHostnameResolutionErrors() {
         val requests = CopyOnWriteArrayList<ProxyConnectRequest>()
         val transport =

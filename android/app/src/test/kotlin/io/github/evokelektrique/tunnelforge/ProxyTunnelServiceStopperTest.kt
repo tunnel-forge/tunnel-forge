@@ -59,4 +59,31 @@ class ProxyTunnelServiceStopperTest {
 
         assertEquals(1, nativeStopCalls)
     }
+
+    @Test
+    fun stopPreviousWorkerAlsoWaitsForProxyLoop() {
+        val events = CopyOnWriteArrayList<String>()
+        val loopStarted = CountDownLatch(1)
+        val loopThread =
+            Thread {
+                loopStarted.countDown()
+            }
+        loopThread.start()
+        assertTrue(loopStarted.await(1, TimeUnit.SECONDS))
+
+        ProxyTunnelServiceStopper.stopPreviousWorker(
+            worker = null,
+            loopThread = loopThread,
+            onStopNativeTunnel = {
+                events += "native-stop"
+            },
+            logger = { level, message ->
+                events += "log:$level:$message"
+            },
+            joinTimeoutMs = 100,
+        )
+
+        assertEquals("native-stop", events.first())
+        assertTrue(events.any { it == "log:${Log.DEBUG}:Previous proxy loop joined" })
+    }
 }

@@ -312,6 +312,9 @@ class TunnelVpnService : VpnService() {
         proxyConfig: ProxyRuntimeConfig,
     ) {
         val currentSetupThread = Thread.currentThread()
+        val nativeOwner = nativeOwner(attemptId)
+        var nativeOwnerAcquired = false
+        var nativeLoopStarted = false
         try {
             cancelPendingStopSelf()
             if (running.getAndSet(true)) {
@@ -366,6 +369,17 @@ class TunnelVpnService : VpnService() {
                 TAG,
                 "${prefixAttempt(attemptId)}Starting native negotiation (IKE/L2TP/PPP)",
             )
+            nativeOwnerAcquired =
+                NativeTunnelSessions.shared.acquire(
+                    nativeOwner,
+                    reason = "vpn negotiation start",
+                )
+            if (!nativeOwnerAcquired) {
+                emitAttemptState(attemptId, VpnContract.TUNNEL_FAILED, "Tunnel engine is still stopping; try again.")
+                running.set(false)
+                stopServiceForAttempt(attemptId)
+                return
+            }
             VpnBridge.nativeSetSocketProtectionEnabled(true)
             // Phase 1: negotiate IKE+L2TP+PPP on the real network (no VPN tunnel yet).
             val negotiatedClientIp = IntArray(4)
@@ -599,6 +613,7 @@ class TunnelVpnService : VpnService() {
                 }
                 engineThread = loopThread
             }
+            nativeLoopStarted = true
             loopThread.start()
         } catch (e: Exception) {
             if (shouldHandleAttempt(attemptId, "startTunnel-exception")) {
@@ -626,6 +641,10 @@ class TunnelVpnService : VpnService() {
                 )
             }
         } finally {
+            if (nativeOwnerAcquired && !nativeLoopStarted) {
+                NativeTunnelSessions.shared.stopOwner(nativeOwner, reason = "vpn startup ended before loop")
+                NativeTunnelSessions.shared.release(nativeOwner, reason = "vpn startup ended before loop")
+            }
             clearSetupThreadIfCurrent(currentSetupThread)
         }
     }
@@ -636,11 +655,9 @@ class TunnelVpnService : VpnService() {
      */
     private fun stopTunnelInternal() {
         val capturedSetupThread = setupThread
-        try {
-            VpnBridge.nativeStopTunnel()
-        } catch (e: Exception) {
-            AppLog.w(TAG, "nativeStopTunnel", e)
-        }
+        val capturedAttemptId = synchronized(sessionLock) { activeAttemptId }
+        val owner = capturedAttemptId.takeIf { it.isNotEmpty() }?.let(::nativeOwner)
+        NativeTunnelSessions.shared.stopOwner(owner, reason = "vpn service stop")
         try {
             if (capturedSetupThread != null && capturedSetupThread !== Thread.currentThread()) {
                 capturedSetupThread.join(8_000)
@@ -684,6 +701,9 @@ class TunnelVpnService : VpnService() {
         activeProfileName = null
         connectedEmitted.set(false)
         running.set(false)
+        owner?.let {
+            NativeTunnelSessions.shared.release(it, reason = "vpn service stopped")
+        }
     }
 
     /** Main-thread cleanup after the native worker exits (or from [finally] on the worker). */
@@ -720,6 +740,7 @@ class TunnelVpnService : VpnService() {
         activeServer = ""
         activeProfileName = null
         connectedEmitted.set(false)
+        NativeTunnelSessions.shared.release(nativeOwner(attemptId), reason = "vpn loop finished")
         schedulePendingStopSelf()
     }
 
@@ -1057,6 +1078,26 @@ class TunnelVpnService : VpnService() {
         private var instance: TunnelVpnService? = null
 
         @JvmStatic
+        fun stopActiveSessionForModeSwitch(reason: String): Boolean {
+            val svc = instance ?: return false
+            if (!svc.hasActiveSession()) return false
+            VpnTunnelEvents.emitEngineLog(
+                Log.DEBUG,
+                TAG,
+                "${svc.prefixAttempt(svc.currentAttemptId())}Stopping VPN tunnel before mode switch reason=$reason",
+            )
+            svc.cancelPendingStopSelf()
+            svc.stopTunnelInternal()
+            try {
+                svc.stopForeground(STOP_FOREGROUND_REMOVE)
+                svc.stopSelf()
+            } catch (e: Exception) {
+                AppLog.w(TAG, "stopActiveSessionForModeSwitch", e)
+            }
+            return true
+        }
+
+        @JvmStatic
         fun protectSocketFd(fd: Int): Boolean {
             val svc = instance ?: return false
             return try {
@@ -1107,6 +1148,9 @@ class TunnelVpnService : VpnService() {
             )
         }
     }
+
+    private fun nativeOwner(attemptId: String): NativeTunnelOwner =
+        NativeTunnelOwner(VpnContract.MODE_VPN_TUNNEL, attemptId)
 
     private fun prefixAttempt(attemptId: String): String =
         if (attemptId.isEmpty()) "" else "attempt=$attemptId "

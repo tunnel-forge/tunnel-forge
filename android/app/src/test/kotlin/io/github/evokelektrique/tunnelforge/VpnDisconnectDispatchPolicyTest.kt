@@ -31,4 +31,28 @@ class VpnDisconnectDispatchPolicyTest {
         assertTrue(unknown.stopVpn)
         assertTrue(unknown.stopProxy)
     }
+
+    @Test
+    fun proxyOnlyStartCleansUpVpnServiceOnly() {
+        val targets = VpnConnectModeSwitchPolicy.cleanupTargetsForStart(VpnContract.MODE_PROXY_ONLY)
+
+        assertTrue(targets.stopVpn)
+        assertFalse(targets.stopProxy)
+    }
+
+    @Test
+    fun vpnTunnelStartCleansUpProxyServiceOnly() {
+        val targets = VpnConnectModeSwitchPolicy.cleanupTargetsForStart(VpnContract.MODE_VPN_TUNNEL)
+
+        assertFalse(targets.stopVpn)
+        assertTrue(targets.stopProxy)
+    }
+
+    @Test
+    fun unknownStartModeCleansUpBothServicesForCompatibility() {
+        val targets = VpnConnectModeSwitchPolicy.cleanupTargetsForStart("unexpected")
+
+        assertTrue(targets.stopVpn)
+        assertTrue(targets.stopProxy)
+    }
 }

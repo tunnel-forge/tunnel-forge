@@ -1442,6 +1442,47 @@ class UserspaceTunnelStackTest {
     }
 
     @Test
+    fun stoppingStackReleasesActiveSessionWaitingForSendWindow() {
+        val backend = CapturingBackend()
+        val stack = BridgeUserspaceTunnelStack(bridge = ProxyPacketBridge(backend = backend), clientIpv4 = "10.0.0.2", logger = { _, _ -> })
+        assertTrue(stack.waitUntilReady(timeoutMs = 50, pollIntervalMs = 5))
+
+        val session = stack.openTcpSession(ProxyConnectRequest(host = "93.184.216.34", port = 443, protocol = "http-connect"))
+        establishSession(stack, backend, windowSize = 0)
+
+        var failure: Throwable? = null
+        ServerSocket(0).use { server ->
+            val pumpThread =
+                Thread {
+                    try {
+                        server.accept().use { accepted ->
+                            session.pumpBidirectional(accepted.asProxyClientConnection())
+                        }
+                    } catch (t: Throwable) {
+                        failure = t
+                    }
+                }
+            pumpThread.start()
+            Socket("127.0.0.1", server.localPort).use { peer ->
+                peer.getOutputStream().write("hello".toByteArray())
+                peer.getOutputStream().flush()
+
+                Thread.sleep(100)
+                stack.stop()
+
+                pumpThread.join(1_000)
+                assertFalse(pumpThread.isAlive)
+            }
+        }
+
+        assertTrue(failure is IOException)
+        val message = (failure as IOException).message.orEmpty()
+        assertTrue(message.contains("Proxy packet bridge stopped"))
+        assertFalse(message.contains("Timed out waiting for remote TCP receive window"))
+        session.close()
+    }
+
+    @Test
     fun hostnameSessionResolvesThroughTunneledDnsBeforeQueuingSyn() {
         val backend = CapturingBackend()
         val stack =
