@@ -2,43 +2,54 @@ import 'package:flutter/material.dart';
 
 /// Neutral structural palette plus semantic state colors.
 abstract final class AppPalette {
-  static const Color lightConnectIdle = Color(0xFF1B1F24);
-  static const Color lightOnConnectIdle = Colors.white;
-  static const Color lightConnected = Color(0xFF1F8F5F);
-  static const Color lightOnConnected = Colors.white;
-  static const Color lightConnecting = Color(0xFFB87503);
-  static const Color lightOnConnecting = Colors.white;
-  static const Color lightDisconnect = Color(0xFFFF6961);
-  static const Color lightOnDisconnect = Colors.white;
-  static const Color lightInfo = Color(0xFF2D6A4F);
-  static const Color lightOnInfo = Colors.white;
+  static const Color lightPrimary = Color(0xFF1B1F24);
+  static const Color lightOnPrimary = Colors.white;
+  static const Color lightPrimaryContainer = Color(0xFFE7EAEC);
+  static const Color lightOnPrimaryContainer = Color(0xFF12161B);
+  static const Color lightSecondary = Color(0xFF2D6A4F);
+  static const Color lightOnSecondary = Colors.white;
+  static const Color lightSecondaryContainer = Color(0xFFDDEEE4);
+  static const Color lightOnSecondaryContainer = Color(0xFF163323);
+  static const Color lightTertiary = Color(0xFF16A34A);
+  static const Color lightOnTertiary = Colors.white;
+  static const Color lightTertiaryContainer = Color(0xFFD9F4E6);
+  static const Color lightOnTertiaryContainer = Color(0xFF0E3525);
+  static const Color lightError = Color(0xFFFF6961);
+  static const Color lightOnError = Colors.white;
   static const Color lightSurface = Color(0xFFF6F7F8);
   static const Color lightSurfaceDim = Color(0xFFF0F2F4);
-  static const Color lightSurfaceLow = Color(0xFFF8FAFB);
+  static const Color lightSurfaceBright = Colors.white;
+  static const Color lightSurfaceContainerLowest = Colors.white;
+  static const Color lightSurfaceContainerLow = Color(0xFFF8FAFB);
   static const Color lightSurfaceContainer = Color(0xFFFFFFFF);
-  static const Color lightSurfaceHigh = Color(0xFFF1F3F4);
-  static const Color lightSurfaceHighest = Color(0xFFE7EAEC);
+  static const Color lightSurfaceContainerHigh = Color(0xFFF1F3F4);
+  static const Color lightSurfaceContainerHighest = Color(0xFFE7EAEC);
   static const Color lightOnSurface = Color(0xFF12161B);
   static const Color lightOnSurfaceVariant = Color(0xFF5D6976);
   static const Color lightOutline = Color(0xFFC7CED6);
   static const Color lightOutlineVariant = Color(0xFFE1E6EB);
-  static const Color darkConnectIdle = Color(0xFFECEFF2);
-  static const Color darkOnConnectIdle = Color(0xFF12161B);
-  static const Color darkConnected = Color(0xFF6FD39A);
-  static const Color darkOnConnected = Color(0xFF0B2418);
-  static const Color darkConnecting = Color(0xFFF0BE62);
-  static const Color darkOnConnecting = Color(0xFF1B1B1F);
-  static const Color darkDisconnect = Color(0xFFFF6961);
-  static const Color darkOnDisconnect = Color(0xFF3A0A05);
-  static const Color darkInfo = Color(0xFFA6D8B8);
-  static const Color darkOnInfo = Color(0xFF102117);
+  static const Color darkPrimary = Color(0xFFECEFF2);
+  static const Color darkOnPrimary = Color(0xFF12161B);
+  static const Color darkPrimaryContainer = Color(0xFF222A32);
+  static const Color darkOnPrimaryContainer = Color(0xFFF3F5F7);
+  static const Color darkSecondary = Color(0xFFA6D8B8);
+  static const Color darkOnSecondary = Color(0xFF102117);
+  static const Color darkSecondaryContainer = Color(0xFF1A2B21);
+  static const Color darkOnSecondaryContainer = Color(0xFFD7F0E0);
+  static const Color darkTertiary = Color(0xFF6FD39A);
+  static const Color darkOnTertiary = Color(0xFF0B2418);
+  static const Color darkTertiaryContainer = Color(0xFF173225);
+  static const Color darkOnTertiaryContainer = Color(0xFFC9F2DA);
+  static const Color darkError = Color(0xFFFF6961);
+  static const Color darkOnError = Color(0xFF5C120C);
   static const Color darkSurface = Color(0xFF0E1114);
   static const Color darkSurfaceDim = Color(0xFF0A0D10);
   static const Color darkSurfaceBright = Color(0xFF191E24);
-  static const Color darkSurfaceLow = Color(0xFF12161B);
+  static const Color darkSurfaceContainerLowest = Color(0xFF0A0D10);
+  static const Color darkSurfaceContainerLow = Color(0xFF12161B);
   static const Color darkSurfaceContainer = Color(0xFF151A1F);
-  static const Color darkSurfaceHigh = Color(0xFF1B2127);
-  static const Color darkSurfaceHighest = Color(0xFF222A32);
+  static const Color darkSurfaceContainerHigh = Color(0xFF1B2127);
+  static const Color darkSurfaceContainerHighest = Color(0xFF222A32);
   static const Color darkOnSurface = Color(0xFFF3F5F7);
   static const Color darkOnSurfaceVariant = Color(0xFFA6B0BA);
   static const Color darkOutline = Color(0xFF3B4550);
@@ -73,30 +84,30 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
 
   const AppSemanticColors.light()
     : this(
-        connectIdle: AppPalette.lightConnectIdle,
-        onConnectIdle: AppPalette.lightOnConnectIdle,
-        connected: AppPalette.lightConnected,
-        onConnected: AppPalette.lightOnConnected,
-        connecting: AppPalette.lightConnecting,
-        onConnecting: AppPalette.lightOnConnecting,
-        disconnect: AppPalette.lightDisconnect,
-        onDisconnect: AppPalette.lightOnDisconnect,
-        info: AppPalette.lightInfo,
-        onInfo: AppPalette.lightOnInfo,
+        connectIdle: AppPalette.lightPrimary,
+        onConnectIdle: AppPalette.lightOnPrimary,
+        connected: AppPalette.lightTertiary,
+        onConnected: AppPalette.lightOnTertiary,
+        connecting: const Color(0xFFB87503),
+        onConnecting: Colors.white,
+        disconnect: AppPalette.lightError,
+        onDisconnect: AppPalette.lightOnError,
+        info: AppPalette.lightSecondary,
+        onInfo: AppPalette.lightOnSecondary,
       );
 
   const AppSemanticColors.dark()
     : this(
-        connectIdle: AppPalette.darkConnectIdle,
-        onConnectIdle: AppPalette.darkOnConnectIdle,
-        connected: AppPalette.darkConnected,
-        onConnected: AppPalette.darkOnConnected,
-        connecting: AppPalette.darkConnecting,
-        onConnecting: AppPalette.darkOnConnecting,
-        disconnect: AppPalette.darkDisconnect,
-        onDisconnect: AppPalette.darkOnDisconnect,
-        info: AppPalette.darkInfo,
-        onInfo: AppPalette.darkOnInfo,
+        connectIdle: AppPalette.darkPrimary,
+        onConnectIdle: AppPalette.darkOnPrimary,
+        connected: AppPalette.darkTertiary,
+        onConnected: AppPalette.darkOnTertiary,
+        connecting: const Color(0xFFF0BE62),
+        onConnecting: const Color(0xFF1B1B1F),
+        disconnect: AppPalette.darkError,
+        onDisconnect: AppPalette.darkOnError,
+        info: AppPalette.darkSecondary,
+        onInfo: AppPalette.darkOnSecondary,
       );
 
   static AppSemanticColors fallback(Brightness brightness) =>
@@ -155,7 +166,7 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
   }
 }
 
-const Color _kSeedColor = AppPalette.lightConnectIdle;
+const Color _kSeedColor = AppPalette.lightPrimary;
 
 /// Shared light/dark [ThemeData] for [MaterialApp] (Material 3, neutral base).
 ThemeData appTheme(Brightness brightness, {String fontFamily = 'Estedad'}) {
@@ -172,28 +183,28 @@ ThemeData appTheme(Brightness brightness, {String fontFamily = 'Estedad'}) {
   );
   final scheme = brightness == Brightness.light
       ? seedScheme.copyWith(
-          primary: AppPalette.lightConnectIdle,
-          onPrimary: Colors.white,
-          primaryContainer: AppPalette.lightSurfaceHighest,
-          onPrimaryContainer: AppPalette.lightOnSurface,
-          secondary: AppPalette.lightInfo,
-          onSecondary: Colors.white,
-          secondaryContainer: const Color(0xFFDDEEE4),
-          onSecondaryContainer: const Color(0xFF163323),
-          tertiary: AppPalette.lightConnected,
-          onTertiary: Colors.white,
-          tertiaryContainer: const Color(0xFFD9F4E6),
-          onTertiaryContainer: const Color(0xFF0E3525),
-          error: AppPalette.lightDisconnect,
-          onError: Colors.white,
+          primary: AppPalette.lightPrimary,
+          onPrimary: AppPalette.lightOnPrimary,
+          primaryContainer: AppPalette.lightPrimaryContainer,
+          onPrimaryContainer: AppPalette.lightOnPrimaryContainer,
+          secondary: AppPalette.lightSecondary,
+          onSecondary: AppPalette.lightOnSecondary,
+          secondaryContainer: AppPalette.lightSecondaryContainer,
+          onSecondaryContainer: AppPalette.lightOnSecondaryContainer,
+          tertiary: AppPalette.lightTertiary,
+          onTertiary: AppPalette.lightOnTertiary,
+          tertiaryContainer: AppPalette.lightTertiaryContainer,
+          onTertiaryContainer: AppPalette.lightOnTertiaryContainer,
+          error: AppPalette.lightError,
+          onError: AppPalette.lightOnError,
           surface: AppPalette.lightSurface,
           surfaceDim: AppPalette.lightSurfaceDim,
-          surfaceBright: Colors.white,
-          surfaceContainerLowest: Colors.white,
-          surfaceContainerLow: AppPalette.lightSurfaceLow,
+          surfaceBright: AppPalette.lightSurfaceBright,
+          surfaceContainerLowest: AppPalette.lightSurfaceContainerLowest,
+          surfaceContainerLow: AppPalette.lightSurfaceContainerLow,
           surfaceContainer: AppPalette.lightSurfaceContainer,
-          surfaceContainerHigh: AppPalette.lightSurfaceHigh,
-          surfaceContainerHighest: AppPalette.lightSurfaceHighest,
+          surfaceContainerHigh: AppPalette.lightSurfaceContainerHigh,
+          surfaceContainerHighest: AppPalette.lightSurfaceContainerHighest,
           onSurface: AppPalette.lightOnSurface,
           onSurfaceVariant: AppPalette.lightOnSurfaceVariant,
           outline: AppPalette.lightOutline,
@@ -201,28 +212,28 @@ ThemeData appTheme(Brightness brightness, {String fontFamily = 'Estedad'}) {
           shadow: Colors.black.withValues(alpha: 0.16),
         )
       : seedScheme.copyWith(
-          primary: AppPalette.darkConnectIdle,
-          onPrimary: AppPalette.darkOnConnectIdle,
-          primaryContainer: AppPalette.darkSurfaceHighest,
-          onPrimaryContainer: AppPalette.darkOnSurface,
-          secondary: AppPalette.darkInfo,
-          onSecondary: AppPalette.darkOnInfo,
-          secondaryContainer: const Color(0xFF1A2B21),
-          onSecondaryContainer: const Color(0xFFD7F0E0),
-          tertiary: AppPalette.darkConnected,
-          onTertiary: AppPalette.darkOnConnected,
-          tertiaryContainer: const Color(0xFF173225),
-          onTertiaryContainer: const Color(0xFFC9F2DA),
-          error: AppPalette.darkDisconnect,
-          onError: const Color(0xFF5C120C),
+          primary: AppPalette.darkPrimary,
+          onPrimary: AppPalette.darkOnPrimary,
+          primaryContainer: AppPalette.darkPrimaryContainer,
+          onPrimaryContainer: AppPalette.darkOnPrimaryContainer,
+          secondary: AppPalette.darkSecondary,
+          onSecondary: AppPalette.darkOnSecondary,
+          secondaryContainer: AppPalette.darkSecondaryContainer,
+          onSecondaryContainer: AppPalette.darkOnSecondaryContainer,
+          tertiary: AppPalette.darkTertiary,
+          onTertiary: AppPalette.darkOnTertiary,
+          tertiaryContainer: AppPalette.darkTertiaryContainer,
+          onTertiaryContainer: AppPalette.darkOnTertiaryContainer,
+          error: AppPalette.darkError,
+          onError: AppPalette.darkOnError,
           surface: AppPalette.darkSurface,
           surfaceDim: AppPalette.darkSurfaceDim,
           surfaceBright: AppPalette.darkSurfaceBright,
-          surfaceContainerLowest: AppPalette.darkSurfaceDim,
-          surfaceContainerLow: AppPalette.darkSurfaceLow,
+          surfaceContainerLowest: AppPalette.darkSurfaceContainerLowest,
+          surfaceContainerLow: AppPalette.darkSurfaceContainerLow,
           surfaceContainer: AppPalette.darkSurfaceContainer,
-          surfaceContainerHigh: AppPalette.darkSurfaceHigh,
-          surfaceContainerHighest: AppPalette.darkSurfaceHighest,
+          surfaceContainerHigh: AppPalette.darkSurfaceContainerHigh,
+          surfaceContainerHighest: AppPalette.darkSurfaceContainerHighest,
           onSurface: AppPalette.darkOnSurface,
           onSurfaceVariant: AppPalette.darkOnSurfaceVariant,
           outline: AppPalette.darkOutline,
@@ -271,7 +282,7 @@ ThemeData appTheme(Brightness brightness, {String fontFamily = 'Estedad'}) {
     ),
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: brightness == Brightness.light
-          ? AppPalette.lightSurfaceLow
+          ? AppPalette.lightSurfaceContainerLow
           : AppPalette.darkSurfaceContainer,
       surfaceTintColor: Colors.transparent,
       shape: const RoundedRectangleBorder(

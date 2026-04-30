@@ -72,6 +72,15 @@ final class TunnelAwaitTimedOut extends TunnelEvent {
   List<Object?> get props => [attemptId];
 }
 
+final class TunnelDisconnectTimedOut extends TunnelEvent {
+  const TunnelDisconnectTimedOut(this.attemptId);
+
+  final String attemptId;
+
+  @override
+  List<Object?> get props => [attemptId];
+}
+
 class TunnelState extends Equatable {
   const TunnelState({
     this.busy = false,
@@ -158,6 +167,7 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
     on<TunnelEngineLogReceived>(_onEngineLogReceived);
     on<TunnelProxyExposureReceived>(_onProxyExposureReceived);
     on<TunnelAwaitTimedOut>(_onAwaitTimedOut);
+    on<TunnelDisconnectTimedOut>(_onDisconnectTimedOut);
   }
 
   final TunnelRepository _tunnelRepository;
@@ -167,6 +177,7 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
   StreamSubscription<ProxyExposure>? _proxyExposureSub;
   Future<void>? _runtimeBootstrapFuture;
   Timer? _awaitTimer;
+  Timer? _disconnectTimer;
   int _messageId = 0;
 
   Future<void> _onStarted(
@@ -400,6 +411,7 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
   ) async {
     if (state.busy || state.stopRequested) return;
     final cancelPendingConnect = state.awaitingTunnel && !state.tunnelUp;
+    final disconnectAttemptId = state.activeAttemptId ?? '';
     emit(state.copyWith(busy: true, stopRequested: true, clearMessage: true));
     _logDebug(
       cancelPendingConnect
@@ -410,7 +422,7 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
     try {
       await _tunnelRepository.disconnect(
         connectionMode: state.connectionMode,
-        attemptId: state.activeAttemptId ?? '',
+        attemptId: disconnectAttemptId,
       );
       _logDebug(
         cancelPendingConnect
@@ -419,6 +431,10 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
         tag: 'tunnel',
       );
       _cancelAwaitTimer();
+      _scheduleDisconnectTimeout(
+        disconnectAttemptId,
+        cancelPendingConnect: cancelPendingConnect,
+      );
     } on PlatformException catch (error) {
       _logError(
         'Disconnect error: ${error.code} ${error.message ?? ''}',
@@ -426,6 +442,7 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
       );
       _toast(emit, error.message ?? error.code, error: true);
       emit(state.copyWith(stopRequested: false));
+      _cancelDisconnectTimer();
     } finally {
       emit(state.copyWith(busy: false));
     }
@@ -519,6 +536,7 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
         break;
       case VpnTunnelState.failed:
         _cancelAwaitTimer();
+        _cancelDisconnectTimer();
         if (state.stopRequested && _isShutdownFailure(update.detail)) {
           emit(
             state.copyWith(
@@ -567,6 +585,7 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
         break;
       case VpnTunnelState.stopped:
         _cancelAwaitTimer();
+        _cancelDisconnectTimer();
         emit(
           state.copyWith(
             awaitingTunnel: false,
@@ -650,11 +669,63 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
     _scheduleAwaitTimeout(event.attemptId);
   }
 
+  Future<void> _onDisconnectTimedOut(
+    TunnelDisconnectTimedOut event,
+    Emitter<TunnelState> emit,
+  ) async {
+    final currentAttemptId = state.activeAttemptId ?? '';
+    if (!state.stopRequested || currentAttemptId != event.attemptId) {
+      return;
+    }
+    final runtimeState = await _tunnelRepository.getRuntimeState();
+    if (runtimeState.state == VpnTunnelState.stopped) {
+      _logWarning(
+        'Android stop event did not arrive; runtime snapshot is idle${event.attemptId.isEmpty ? '' : ' attempt=${event.attemptId}'}',
+        tag: 'tunnel',
+      );
+      _cancelDisconnectTimer();
+      emit(
+        state.copyWith(
+          busy: false,
+          awaitingTunnel: false,
+          tunnelUp: false,
+          stopRequested: false,
+          timedOutThisAttempt: false,
+          clearActiveAttemptId: true,
+          clearConnectStartedAt: true,
+          clearProxyExposure: true,
+        ),
+      );
+      return;
+    }
+    _logWarning(
+      'Still waiting for Android stopped event; runtime state=${runtimeState.state} mode=${runtimeState.connectionMode.jsonValue}${event.attemptId.isEmpty ? '' : ' attempt=${event.attemptId}'}',
+      tag: 'tunnel',
+    );
+    _scheduleDisconnectTimeout(
+      event.attemptId,
+      cancelPendingConnect: state.awaitingTunnel && !state.tunnelUp,
+    );
+  }
+
   void _scheduleAwaitTimeout(String attemptId) {
     _cancelAwaitTimer();
     _awaitTimer = Timer(const Duration(seconds: 60), () {
       add(TunnelAwaitTimedOut(attemptId));
     });
+  }
+
+  void _scheduleDisconnectTimeout(
+    String attemptId, {
+    required bool cancelPendingConnect,
+  }) {
+    _cancelDisconnectTimer();
+    _disconnectTimer = Timer(
+      Duration(seconds: cancelPendingConnect ? 20 : 10),
+      () {
+        add(TunnelDisconnectTimedOut(attemptId));
+      },
+    );
   }
 
   Future<void> _bootstrapRuntimeState(Emitter<TunnelState> emit) async {
@@ -699,6 +770,11 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
   void _cancelAwaitTimer() {
     _awaitTimer?.cancel();
     _awaitTimer = null;
+  }
+
+  void _cancelDisconnectTimer() {
+    _disconnectTimer?.cancel();
+    _disconnectTimer = null;
   }
 
   String _newAttemptId() {
@@ -768,6 +844,7 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
   @override
   Future<void> close() async {
     _cancelAwaitTimer();
+    _cancelDisconnectTimer();
     await _tunnelStatesSub?.cancel();
     await _engineLogsSub?.cancel();
     await _proxyExposureSub?.cancel();

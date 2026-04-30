@@ -271,6 +271,48 @@ void main() {
       expect(bloc.state.timedOutThisAttempt, isFalse);
     },
   );
+
+  blocTest<TunnelBloc, TunnelState>(
+    'disconnect timeout clears stop-pending state when runtime is idle',
+    build: () => TunnelBloc(
+      _MutableRuntimeTunnelRepository(const TunnelRuntimeState.idle()),
+      _FakeLogsRepository(),
+    ),
+    seed: () => const TunnelState(
+      tunnelUp: true,
+      stopRequested: true,
+      activeAttemptId: 'attempt-current',
+    ),
+    act: (bloc) {
+      bloc.add(const TunnelDisconnectTimedOut('attempt-current'));
+    },
+    expect: () => const [TunnelState()],
+  );
+
+  blocTest<TunnelBloc, TunnelState>(
+    'disconnect timeout keeps waiting when runtime is still active',
+    build: () => TunnelBloc(
+      _MutableRuntimeTunnelRepository(
+        const TunnelRuntimeState(
+          state: VpnTunnelState.connected,
+          detail: 'Still active',
+          connectionMode: ConnectionMode.proxyOnly,
+          attemptId: 'attempt-current',
+        ),
+      ),
+      _FakeLogsRepository(),
+    ),
+    seed: () => const TunnelState(
+      tunnelUp: true,
+      stopRequested: true,
+      connectionMode: ConnectionMode.proxyOnly,
+      activeAttemptId: 'attempt-current',
+    ),
+    act: (bloc) {
+      bloc.add(const TunnelDisconnectTimedOut('attempt-current'));
+    },
+    expect: () => const <TunnelState>[],
+  );
 }
 
 late _CountingTunnelRepository _countingTunnelRepository;
@@ -344,6 +386,15 @@ class _CountingTunnelRepository extends _FakeTunnelRepository {
   Future<void> connect(TunnelConnectRequest request) async {
     connectCalls += 1;
   }
+}
+
+class _MutableRuntimeTunnelRepository extends _FakeTunnelRepository {
+  _MutableRuntimeTunnelRepository(this.currentRuntimeState);
+
+  TunnelRuntimeState currentRuntimeState;
+
+  @override
+  Future<TunnelRuntimeState> getRuntimeState() async => currentRuntimeState;
 }
 
 class _DeferredTunnelRepository extends _CountingTunnelRepository {

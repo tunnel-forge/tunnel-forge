@@ -75,6 +75,26 @@ class _FakeAppUpdateRepository implements AppUpdateRepository {
   }
 }
 
+Future<void> _openProfileActions(
+  WidgetTester tester,
+  String displayName,
+) async {
+  final profileTile = find.ancestor(
+    of: find.text(displayName),
+    matching: find.byType(ListTile),
+  );
+  expect(profileTile, findsOneWidget);
+
+  final actionButton = find.descendant(
+    of: profileTile,
+    matching: find.byTooltip('Profile actions'),
+  );
+  expect(actionButton, findsOneWidget);
+
+  await tester.tap(actionButton);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -168,24 +188,24 @@ void main() {
     expect(light.colorScheme.surface, AppPalette.lightSurface);
     expect(
       light.colorScheme.surfaceContainerHighest,
-      AppPalette.lightSurfaceHighest,
+      AppPalette.lightSurfaceContainerHighest,
     );
     expect(
       light.inputDecorationTheme.fillColor,
       AppPalette.lightSurfaceContainer,
     );
-    expect(light.colorScheme.primary, AppPalette.lightConnectIdle);
+    expect(light.colorScheme.primary, AppPalette.lightPrimary);
 
     expect(dark.colorScheme.surface, AppPalette.darkSurface);
     expect(
       dark.colorScheme.surfaceContainerHighest,
-      AppPalette.darkSurfaceHighest,
+      AppPalette.darkSurfaceContainerHighest,
     );
     expect(
       dark.inputDecorationTheme.fillColor,
       AppPalette.darkSurfaceContainer,
     );
-    expect(dark.colorScheme.primary, AppPalette.darkConnectIdle);
+    expect(dark.colorScheme.primary, AppPalette.darkPrimary);
   });
 
   testWidgets('ConnectionPanel tolerates zero and tiny heights', (
@@ -241,7 +261,7 @@ void main() {
       final lightStatus = tester.widget<Text>(
         find.byKey(const Key('vpn_status')),
       );
-      expect(buttonBackground(tester), AppPalette.lightConnectIdle);
+      expect(buttonBackground(tester), AppPalette.lightPrimary);
       expect(lightStatus.style?.color, AppPalette.lightOnSurfaceVariant);
       expect(find.text('Ready'), findsOneWidget);
 
@@ -250,14 +270,14 @@ void main() {
       final darkStatus = tester.widget<Text>(
         find.byKey(const Key('vpn_status')),
       );
-      expect(buttonBackground(tester), AppPalette.darkConnectIdle);
+      expect(buttonBackground(tester), AppPalette.darkPrimary);
       expect(darkStatus.style?.color, AppPalette.darkOnSurfaceVariant);
       expect(find.text('Ready'), findsOneWidget);
     },
   );
 
   testWidgets(
-    'ConnectionPanel uses amber progress and green connected status',
+    'ConnectionPanel uses amber progress and green connected colors',
     (WidgetTester tester) async {
       await pumpConnectionPanel(tester, busy: true, label: 'Connecting...');
 
@@ -269,10 +289,13 @@ void main() {
       );
       expect(
         buttonBackground(tester, disabled: true),
-        AppPalette.lightSurfaceHighest,
+        AppPalette.lightSurfaceContainerHighest,
       );
-      expect(progress.color, AppPalette.lightConnecting);
-      expect(connectingStatus.style?.color, AppPalette.lightConnecting);
+      expect(progress.color, const AppSemanticColors.light().connecting);
+      expect(
+        connectingStatus.style?.color,
+        const AppSemanticColors.light().connecting,
+      );
       expect(find.text('Connecting...'), findsOneWidget);
 
       await pumpConnectionPanel(tester, tunnelUp: true, label: 'Connected');
@@ -281,12 +304,15 @@ void main() {
       final connectedStatus = tester.widget<Text>(
         find.byKey(const Key('vpn_status')),
       );
-      expect(buttonBackground(tester), AppPalette.lightDisconnect);
+      expect(buttonBackground(tester), const AppSemanticColors.light().connected);
       expect(
         actionRingColor(tester),
-        AppPalette.lightDisconnect.withValues(alpha: 0.32),
+        const AppSemanticColors.light().connected.withValues(alpha: 0.32),
       );
-      expect(connectedStatus.style?.color, AppPalette.lightConnected);
+      expect(
+        connectedStatus.style?.color,
+        const AppSemanticColors.light().connected,
+      );
       expect(find.text('Connected'), findsOneWidget);
     },
   );
@@ -345,7 +371,7 @@ void main() {
     expect(button.onPressed, isNull);
     expect(
       buttonBackground(tester, disabled: true),
-      AppPalette.lightSurfaceHighest,
+      AppPalette.lightSurfaceContainerHighest,
     );
     expect(statusText(tester), 'Select profile');
 
@@ -849,7 +875,8 @@ void main() {
 
     await tester.tap(find.byKey(const Key('profile_picker_tile')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Edit profile').at(1));
+    await _openProfileActions(tester, 'Secondary');
+    await tester.tap(find.text('Edit profile'));
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.close).first);
     await tester.pumpAndSettle();
@@ -1302,7 +1329,8 @@ void main() {
     expect(find.text('Primary'), findsWidgets);
     expect(find.text('Secondary'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Delete profile').at(1));
+    await _openProfileActions(tester, 'Secondary');
+    await tester.tap(find.text('Delete profile'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Delete'));
     await tester.pumpAndSettle();
@@ -1365,7 +1393,8 @@ void main() {
     await tester.tap(find.byKey(const Key('profile_picker_tile')));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Delete profile').at(1));
+    await _openProfileActions(tester, 'Secondary');
+    await tester.tap(find.text('Delete profile'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();

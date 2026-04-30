@@ -297,15 +297,24 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
                 itemBuilder: (context) => [
                   PopupMenuItem<_AddProfileAction>(
                     value: _AddProfileAction.create,
-                    child: Text(t.createNewProfile),
+                    child: _PopupMenuIconLabel(
+                      icon: Icons.add_circle_outline,
+                      label: t.createNewProfile,
+                    ),
                   ),
                   PopupMenuItem<_AddProfileAction>(
                     value: _AddProfileAction.importFile,
-                    child: Text(t.importFromFile),
+                    child: _PopupMenuIconLabel(
+                      icon: Icons.file_upload_outlined,
+                      label: t.importFromFile,
+                    ),
                   ),
                   PopupMenuItem<_AddProfileAction>(
                     value: _AddProfileAction.importClipboard,
-                    child: Text(t.importFromClipboard),
+                    child: _PopupMenuIconLabel(
+                      icon: Icons.content_paste_outlined,
+                      label: t.importFromClipboard,
+                    ),
                   ),
                 ],
               ),
@@ -332,10 +341,7 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
                     final profile = state.profiles[i];
                     final selected = profile.id == state.activeProfileId;
                     return ListTile(
-                      leading: Icon(
-                        Icons.person_outline,
-                        color: selected ? cs.primary : cs.onSurfaceVariant,
-                      ),
+                      selected: selected,
                       title: Text(
                         profile.displayName,
                         style: tt.titleSmall?.copyWith(
@@ -356,8 +362,12 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
                         children: [
                           PopupMenuButton<_ProfileTileAction>(
                             tooltip: t.profileActions,
+                            enabled: !state.loading,
                             onSelected: (action) async {
                               switch (action) {
+                                case _ProfileTileAction.edit:
+                                  _openEditor(profileId: profile.id);
+                                  break;
                                 case _ProfileTileAction.copyShareLink:
                                   _profilesBloc.add(
                                     ProfilesCopyShareLinkRequested(profile.id),
@@ -368,36 +378,42 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
                                     ProfilesExportFileRequested(profile.id),
                                   );
                                   break;
+                                case _ProfileTileAction.delete:
+                                  await _confirmDeleteProfile(profile.id);
+                                  break;
                               }
                             },
                             itemBuilder: (context) => [
                               PopupMenuItem<_ProfileTileAction>(
+                                value: _ProfileTileAction.edit,
+                                child: _PopupMenuIconLabel(
+                                  icon: Icons.edit_outlined,
+                                  label: t.editProfile,
+                                ),
+                              ),
+                              PopupMenuItem<_ProfileTileAction>(
                                 value: _ProfileTileAction.copyShareLink,
-                                child: Text(t.copyShareLink),
+                                child: _PopupMenuIconLabel(
+                                  icon: Icons.link_outlined,
+                                  label: t.copyShareLink,
+                                ),
                               ),
                               PopupMenuItem<_ProfileTileAction>(
                                 value: _ProfileTileAction.exportFile,
-                                child: Text(t.exportTfp),
+                                child: _PopupMenuIconLabel(
+                                  icon: Icons.file_download_outlined,
+                                  label: t.exportTfp,
+                                ),
+                              ),
+                              PopupMenuItem<_ProfileTileAction>(
+                                value: _ProfileTileAction.delete,
+                                child: _PopupMenuIconLabel(
+                                  icon: Icons.delete_outline,
+                                  label: t.deleteProfile,
+                                  color: cs.error,
+                                ),
                               ),
                             ],
-                          ),
-                          IconButton(
-                            tooltip: t.editProfile,
-                            icon: const Icon(Icons.edit_outlined, size: 22),
-                            onPressed: state.loading
-                                ? null
-                                : () => _openEditor(profileId: profile.id),
-                          ),
-                          IconButton(
-                            tooltip: t.deleteProfile,
-                            icon: Icon(
-                              Icons.delete_outline,
-                              size: 22,
-                              color: cs.error,
-                            ),
-                            onPressed: state.loading
-                                ? null
-                                : () async => _confirmDeleteProfile(profile.id),
                           ),
                         ],
                       ),
@@ -491,8 +507,36 @@ class _ProfilePickerSheetState extends State<ProfilePickerSheet> {
   }
 }
 
+class _PopupMenuIconLabel extends StatelessWidget {
+  const _PopupMenuIconLabel({
+    required this.icon,
+    required this.label,
+    this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveColor =
+        color ?? Theme.of(context).colorScheme.onSurfaceVariant;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 20, color: effectiveColor),
+        const SizedBox(width: 12),
+        Flexible(
+          child: Text(label, style: TextStyle(color: color)),
+        ),
+      ],
+    );
+  }
+}
+
 enum _AddProfileAction { create, importFile, importClipboard }
 
-enum _ProfileTileAction { copyShareLink, exportFile }
+enum _ProfileTileAction { edit, copyShareLink, exportFile, delete }
 
 enum _ProfileSheetMode { list, editor }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'package:tunnel_forge/l10n/app_localizations.dart';
@@ -15,6 +17,114 @@ enum ConnectivityBadgeState { idle, checking, success, failure }
 
 const _kConnectionAnimationDuration = Duration(milliseconds: 520);
 const _kConnectionAnimationCurve = Curves.easeInOutCubic;
+
+class _ProfilePickerTile extends StatefulWidget {
+  const _ProfilePickerTile({
+    required this.enabled,
+    required this.title,
+    required this.subtitle,
+    required this.activeProfileLabel,
+    required this.onTap,
+    required this.colorScheme,
+    required this.textTheme,
+  });
+
+  final bool enabled;
+  final String title;
+  final String subtitle;
+  final String activeProfileLabel;
+  final FutureOr<void> Function() onTap;
+  final ColorScheme colorScheme;
+  final TextTheme textTheme;
+
+  @override
+  State<_ProfilePickerTile> createState() => _ProfilePickerTileState();
+}
+
+class _ProfilePickerTileState extends State<_ProfilePickerTile> {
+  bool _open = false;
+
+  Future<void> _handleTap() async {
+    if (!widget.enabled || _open) return;
+    setState(() => _open = true);
+    try {
+      await widget.onTap();
+    } finally {
+      if (mounted) setState(() => _open = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = widget.colorScheme;
+    final textTheme = widget.textTheme;
+    return Material(
+      color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        key: const Key('profile_picker_tile'),
+        onTap: widget.enabled ? _handleTap : null,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Icon(
+                Icons.folder_outlined,
+                color: colorScheme.onSurfaceVariant,
+                size: 26,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.activeProfileLabel,
+                      style: textTheme.labelMedium?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      widget.title,
+                      style: textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      widget.subtitle,
+                      style: textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 160),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                child: Icon(
+                  _open ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                  key: ValueKey<bool>(_open),
+                  color: widget.enabled
+                      ? colorScheme.onSurfaceVariant
+                      : colorScheme.outline,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 /// VPN tab: active profile summary and the large connect / disconnect control.
 class ConnectionPanel extends StatelessWidget {
@@ -42,7 +152,7 @@ class ConnectionPanel extends StatelessWidget {
   final bool profilesLoading;
   final String profileSummaryTitle;
   final String profileSummarySubtitle;
-  final VoidCallback onOpenProfilePicker;
+  final FutureOr<void> Function() onOpenProfilePicker;
   final bool busy;
   final bool tunnelUp;
   final bool awaitingTunnel;
@@ -96,69 +206,14 @@ class ConnectionPanel extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Material(
-                  color: colorScheme.surfaceContainerHighest.withValues(
-                    alpha: 0.45,
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                  child: InkWell(
-                    key: const Key('profile_picker_tile'),
-                    onTap: pickerEnabled ? onOpenProfilePicker : null,
-                    borderRadius: BorderRadius.circular(12),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 12,
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.folder_outlined,
-                            color: colorScheme.onSurfaceVariant,
-                            size: 26,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  t.activeProfile,
-                                  style: textTheme.labelMedium?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  profileSummaryTitle,
-                                  style: textTheme.titleSmall?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  profileSummarySubtitle,
-                                  style: textTheme.bodySmall?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ),
-                          ),
-                          Icon(
-                            Icons.keyboard_arrow_up,
-                            color: pickerEnabled
-                                ? colorScheme.onSurfaceVariant
-                                : colorScheme.outline,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                _ProfilePickerTile(
+                  enabled: pickerEnabled,
+                  title: profileSummaryTitle,
+                  subtitle: profileSummarySubtitle,
+                  activeProfileLabel: t.activeProfile,
+                  onTap: onOpenProfilePicker,
+                  colorScheme: colorScheme,
+                  textTheme: textTheme,
                 ),
                 SizedBox(height: centerGap),
                 Builder(
@@ -170,7 +225,7 @@ class ConnectionPanel extends StatelessWidget {
                       _ConnectionVisualState.connecting =>
                         colorScheme.surfaceContainerHighest,
                       _ConnectionVisualState.connected =>
-                        semanticColors.disconnect,
+                        semanticColors.connected,
                       _ConnectionVisualState.disconnecting =>
                         semanticColors.disconnect,
                     };
@@ -182,7 +237,7 @@ class ConnectionPanel extends StatelessWidget {
                       _ConnectionVisualState.connecting =>
                         colorScheme.onSurfaceVariant,
                       _ConnectionVisualState.connected =>
-                        semanticColors.onDisconnect,
+                        semanticColors.onConnected,
                       _ConnectionVisualState.disconnecting =>
                         semanticColors.onDisconnect,
                     };
@@ -206,7 +261,7 @@ class ConnectionPanel extends StatelessWidget {
                       _ConnectionVisualState.connecting =>
                         semanticColors.connecting.withValues(alpha: 0.30),
                       _ConnectionVisualState.connected =>
-                        semanticColors.disconnect.withValues(alpha: 0.32),
+                        semanticColors.connected.withValues(alpha: 0.32),
                       _ConnectionVisualState.disconnecting =>
                         semanticColors.disconnect.withValues(alpha: 0.32),
                     };
@@ -230,7 +285,7 @@ class ConnectionPanel extends StatelessWidget {
                         semanticColors.onDisconnect,
                       _ConnectionVisualState.idle => buttonFg,
                       _ConnectionVisualState.connected =>
-                        semanticColors.onDisconnect,
+                        semanticColors.onConnected,
                     };
                     final connectivityColor = switch (connectivityBadgeState) {
                       ConnectivityBadgeState.idle =>
