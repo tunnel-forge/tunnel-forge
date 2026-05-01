@@ -20,8 +20,8 @@ void proxy_lwip_close_tcp(int session_id);
 int proxy_lwip_open_udp(void);
 int proxy_lwip_send_udp(int session_id, const uint8_t remote_ipv4[4], uint16_t remote_port, const uint8_t *payload,
                         size_t len);
-ssize_t proxy_lwip_receive_udp(int session_id, uint8_t *buf, size_t len, uint8_t source_ipv4[4],
-                               uint16_t *source_port, int timeout_ms);
+ssize_t proxy_lwip_receive_udp(int session_id, uint8_t *buf, size_t len, uint8_t source_ipv4[4], uint16_t *source_port,
+                               int timeout_ms);
 void proxy_lwip_close_udp(int session_id);
 
 #endif

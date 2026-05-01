@@ -231,16 +231,19 @@ static jbyteArray native_lwip_udp_receive(JNIEnv *env, jclass clazz, jint sessio
     return NULL;
   uint8_t source_ipv4[4];
   uint16_t source_port = 0;
-  ssize_t n =
-      proxy_lwip_receive_udp((int)session_id, buf, (size_t)max_len, source_ipv4, &source_port, (int)timeout_ms);
+  ssize_t n = proxy_lwip_receive_udp((int)session_id, buf, (size_t)max_len, source_ipv4, &source_port, (int)timeout_ms);
   if (n <= 0) {
     free(buf);
     return NULL;
   }
   jbyteArray out = (*env)->NewByteArray(env, (jsize)n + 6);
   if (out != NULL) {
-    uint8_t header[6] = {source_ipv4[0], source_ipv4[1], source_ipv4[2], source_ipv4[3],
-                         (uint8_t)(source_port >> 8), (uint8_t)(source_port & 0xff)};
+    uint8_t header[6] = {source_ipv4[0],
+                         source_ipv4[1],
+                         source_ipv4[2],
+                         source_ipv4[3],
+                         (uint8_t)(source_port >> 8),
+                         (uint8_t)(source_port & 0xff)};
     (*env)->SetByteArrayRegion(env, out, 0, 6, (const jbyte *)header);
     (*env)->SetByteArrayRegion(env, out, 6, (jsize)n, (const jbyte *)buf);
   }

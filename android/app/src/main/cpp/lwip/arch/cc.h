@@ -7,9 +7,9 @@
 #define BYTE_ORDER LITTLE_ENDIAN
 
 #define LWIP_PLATFORM_ASSERT(x) abort()
-#define LWIP_PLATFORM_DIAG(x)   \
-  do {                          \
-    printf x;                   \
+#define LWIP_PLATFORM_DIAG(x)                                                                                          \
+  do {                                                                                                                 \
+    printf x;                                                                                                          \
   } while (0)
 
 #endif

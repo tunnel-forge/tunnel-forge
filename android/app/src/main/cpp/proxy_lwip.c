@@ -787,8 +787,8 @@ int proxy_lwip_send_udp(int session_id, const uint8_t remote_ipv4[4], uint16_t r
   return 0;
 }
 
-ssize_t proxy_lwip_receive_udp(int session_id, uint8_t *buf, size_t len, uint8_t source_ipv4[4],
-                               uint16_t *source_port, int timeout_ms) {
+ssize_t proxy_lwip_receive_udp(int session_id, uint8_t *buf, size_t len, uint8_t source_ipv4[4], uint16_t *source_port,
+                               int timeout_ms) {
   if (buf == NULL || len == 0 || source_ipv4 == NULL || source_port == NULL) {
     errno = EINVAL;
     return -1;
