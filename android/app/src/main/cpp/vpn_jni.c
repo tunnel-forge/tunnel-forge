@@ -3,6 +3,7 @@
  * Java_* symbol names. Every jstring is converted with GetStringUTFChars and released on all paths.
  */
 #include "engine.h"
+#include "proxy_lwip.h"
 
 #include <android/log.h>
 #include <stdlib.h>
@@ -116,10 +117,154 @@ static jint native_start_proxy_loop(JNIEnv *env, jclass clazz) {
   return (jint)tunnel_run_proxy_loop();
 }
 
+static jint native_start_lwip_proxy_loop(JNIEnv *env, jclass clazz, jintArray jclient_ipv4, jint mtu) {
+  (void)clazz;
+  if (jclient_ipv4 == NULL || (*env)->GetArrayLength(env, jclient_ipv4) < 4)
+    return (jint)TUNNEL_EXIT_BAD_ARGS;
+  jint tmp[4];
+  (*env)->GetIntArrayRegion(env, jclient_ipv4, 0, 4, tmp);
+  uint8_t client_ipv4[4];
+  for (int i = 0; i < 4; i++) {
+    if (tmp[i] < 0 || tmp[i] > 255)
+      return (jint)TUNNEL_EXIT_BAD_ARGS;
+    client_ipv4[i] = (uint8_t)tmp[i];
+  }
+  return (jint)tunnel_run_lwip_proxy_loop(client_ipv4, (int)mtu);
+}
+
+static jint native_lwip_tcp_open(JNIEnv *env, jclass clazz, jintArray jremote_ipv4, jint port, jint timeout_ms) {
+  (void)clazz;
+  if (jremote_ipv4 == NULL || (*env)->GetArrayLength(env, jremote_ipv4) < 4 || port <= 0 || port > 65535)
+    return -1;
+  jint tmp[4];
+  (*env)->GetIntArrayRegion(env, jremote_ipv4, 0, 4, tmp);
+  uint8_t remote_ipv4[4];
+  for (int i = 0; i < 4; i++) {
+    if (tmp[i] < 0 || tmp[i] > 255)
+      return -1;
+    remote_ipv4[i] = (uint8_t)tmp[i];
+  }
+  return (jint)proxy_lwip_open_tcp(remote_ipv4, (uint16_t)port, (int)timeout_ms);
+}
+
+static jbyteArray native_lwip_tcp_read(JNIEnv *env, jclass clazz, jint session_id, jint max_len, jint timeout_ms) {
+  (void)clazz;
+  if (session_id <= 0 || max_len <= 0)
+    return NULL;
+  uint8_t *buf = (uint8_t *)malloc((size_t)max_len);
+  if (buf == NULL)
+    return NULL;
+  ssize_t n = proxy_lwip_read_tcp((int)session_id, buf, (size_t)max_len, (int)timeout_ms);
+  if (n <= 0) {
+    free(buf);
+    if (n == 0)
+      return (*env)->NewByteArray(env, 0);
+    return NULL;
+  }
+  jbyteArray out = (*env)->NewByteArray(env, (jsize)n);
+  if (out != NULL) {
+    (*env)->SetByteArrayRegion(env, out, 0, (jsize)n, (const jbyte *)buf);
+  }
+  free(buf);
+  return out;
+}
+
+static jint native_lwip_tcp_write(JNIEnv *env, jclass clazz, jint session_id, jbyteArray jbytes, jint timeout_ms) {
+  (void)clazz;
+  if (session_id <= 0 || jbytes == NULL)
+    return -1;
+  jsize len = (*env)->GetArrayLength(env, jbytes);
+  if (len <= 0)
+    return 0;
+  jbyte *bytes = (*env)->GetByteArrayElements(env, jbytes, NULL);
+  if (bytes == NULL)
+    return -1;
+  ssize_t n = proxy_lwip_write_tcp((int)session_id, (const uint8_t *)bytes, (size_t)len, (int)timeout_ms);
+  (*env)->ReleaseByteArrayElements(env, jbytes, bytes, JNI_ABORT);
+  return (jint)n;
+}
+
+static void native_lwip_tcp_close(JNIEnv *env, jclass clazz, jint session_id) {
+  (void)env;
+  (void)clazz;
+  if (session_id > 0)
+    proxy_lwip_close_tcp((int)session_id);
+}
+
+static jint native_lwip_udp_open(JNIEnv *env, jclass clazz) {
+  (void)env;
+  (void)clazz;
+  return (jint)proxy_lwip_open_udp();
+}
+
+static jint native_lwip_udp_send(JNIEnv *env, jclass clazz, jint session_id, jintArray jremote_ipv4, jint port,
+                                 jbyteArray jpayload) {
+  (void)clazz;
+  if (session_id <= 0 || jremote_ipv4 == NULL || (*env)->GetArrayLength(env, jremote_ipv4) < 4 || port <= 0 ||
+      port > 65535 || jpayload == NULL)
+    return -1;
+  jint tmp[4];
+  (*env)->GetIntArrayRegion(env, jremote_ipv4, 0, 4, tmp);
+  uint8_t remote_ipv4[4];
+  for (int i = 0; i < 4; i++) {
+    if (tmp[i] < 0 || tmp[i] > 255)
+      return -1;
+    remote_ipv4[i] = (uint8_t)tmp[i];
+  }
+  jsize len = (*env)->GetArrayLength(env, jpayload);
+  if (len <= 0)
+    return -1;
+  jbyte *payload = (*env)->GetByteArrayElements(env, jpayload, NULL);
+  if (payload == NULL)
+    return -1;
+  int rc = proxy_lwip_send_udp((int)session_id, remote_ipv4, (uint16_t)port, (const uint8_t *)payload, (size_t)len);
+  (*env)->ReleaseByteArrayElements(env, jpayload, payload, JNI_ABORT);
+  return (jint)rc;
+}
+
+static jbyteArray native_lwip_udp_receive(JNIEnv *env, jclass clazz, jint session_id, jint max_len, jint timeout_ms) {
+  (void)clazz;
+  if (session_id <= 0 || max_len <= 0)
+    return NULL;
+  uint8_t *buf = (uint8_t *)malloc((size_t)max_len);
+  if (buf == NULL)
+    return NULL;
+  uint8_t source_ipv4[4];
+  uint16_t source_port = 0;
+  ssize_t n =
+      proxy_lwip_receive_udp((int)session_id, buf, (size_t)max_len, source_ipv4, &source_port, (int)timeout_ms);
+  if (n <= 0) {
+    free(buf);
+    return NULL;
+  }
+  jbyteArray out = (*env)->NewByteArray(env, (jsize)n + 6);
+  if (out != NULL) {
+    uint8_t header[6] = {source_ipv4[0], source_ipv4[1], source_ipv4[2], source_ipv4[3],
+                         (uint8_t)(source_port >> 8), (uint8_t)(source_port & 0xff)};
+    (*env)->SetByteArrayRegion(env, out, 0, 6, (const jbyte *)header);
+    (*env)->SetByteArrayRegion(env, out, 6, (jsize)n, (const jbyte *)buf);
+  }
+  free(buf);
+  return out;
+}
+
+static void native_lwip_udp_close(JNIEnv *env, jclass clazz, jint session_id) {
+  (void)env;
+  (void)clazz;
+  if (session_id > 0)
+    proxy_lwip_close_udp((int)session_id);
+}
+
 static jboolean native_is_proxy_packet_bridge_active(JNIEnv *env, jclass clazz) {
   (void)env;
   (void)clazz;
   return tunnel_proxy_is_bridge_active() ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean native_is_lwip_proxy_active(JNIEnv *env, jclass clazz) {
+  (void)env;
+  (void)clazz;
+  return proxy_lwip_is_running() ? JNI_TRUE : JNI_FALSE;
 }
 
 static jint native_queue_proxy_outbound_packet(JNIEnv *env, jclass clazz, jbyteArray jpacket) {
@@ -219,7 +364,17 @@ static int register_vpn_bridge(JNIEnv *env) {
       {"nativeSetSocketProtectionEnabled", "(Z)V", (void *)native_set_socket_protection_enabled},
       {"nativeStartLoop", "(I)I", (void *)native_start_loop},
       {"nativeStartProxyLoop", "()I", (void *)native_start_proxy_loop},
+      {"nativeStartLwipProxyLoop", "([II)I", (void *)native_start_lwip_proxy_loop},
+      {"nativeLwipTcpOpen", "([III)I", (void *)native_lwip_tcp_open},
+      {"nativeLwipTcpRead", "(III)[B", (void *)native_lwip_tcp_read},
+      {"nativeLwipTcpWrite", "(I[BI)I", (void *)native_lwip_tcp_write},
+      {"nativeLwipTcpClose", "(I)V", (void *)native_lwip_tcp_close},
+      {"nativeLwipUdpOpen", "()I", (void *)native_lwip_udp_open},
+      {"nativeLwipUdpSend", "(I[II[B)I", (void *)native_lwip_udp_send},
+      {"nativeLwipUdpReceive", "(III)[B", (void *)native_lwip_udp_receive},
+      {"nativeLwipUdpClose", "(I)V", (void *)native_lwip_udp_close},
       {"nativeIsProxyPacketBridgeActive", "()Z", (void *)native_is_proxy_packet_bridge_active},
+      {"nativeIsLwipProxyActive", "()Z", (void *)native_is_lwip_proxy_active},
       {"nativeQueueProxyOutboundPacket", "([B)I", (void *)native_queue_proxy_outbound_packet},
       {"nativeReadProxyInboundPacket", "(I)[B", (void *)native_read_proxy_inbound_packet},
       {"nativeSetVpnDnsInterceptIpv4", "(Ljava/lang/String;)I", (void *)native_set_vpn_dns_intercept_ipv4},

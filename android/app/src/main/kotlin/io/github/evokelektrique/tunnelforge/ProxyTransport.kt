@@ -175,6 +175,268 @@ class DirectSocketProxyTransport(
         )
 }
 
+interface NativeLwipTcpBackend {
+    fun open(remoteIpv4: IntArray, port: Int, timeoutMs: Int): Int
+
+    fun read(sessionId: Int, maxLen: Int, timeoutMs: Int): ByteArray?
+
+    fun write(sessionId: Int, bytes: ByteArray, timeoutMs: Int): Int
+
+    fun close(sessionId: Int)
+
+    fun openUdp(): Int
+
+    fun sendUdp(sessionId: Int, remoteIpv4: IntArray, port: Int, payload: ByteArray): Int
+
+    fun receiveUdp(sessionId: Int, maxLen: Int, timeoutMs: Int): ByteArray?
+
+    fun closeUdp(sessionId: Int)
+}
+
+object VpnBridgeNativeLwipTcpBackend : NativeLwipTcpBackend {
+    override fun open(remoteIpv4: IntArray, port: Int, timeoutMs: Int): Int =
+        VpnBridge.nativeLwipTcpOpen(remoteIpv4, port, timeoutMs)
+
+    override fun read(sessionId: Int, maxLen: Int, timeoutMs: Int): ByteArray? =
+        VpnBridge.nativeLwipTcpRead(sessionId, maxLen, timeoutMs)
+
+    override fun write(sessionId: Int, bytes: ByteArray, timeoutMs: Int): Int =
+        VpnBridge.nativeLwipTcpWrite(sessionId, bytes, timeoutMs)
+
+    override fun close(sessionId: Int) {
+        VpnBridge.nativeLwipTcpClose(sessionId)
+    }
+
+    override fun openUdp(): Int = VpnBridge.nativeLwipUdpOpen()
+
+    override fun sendUdp(sessionId: Int, remoteIpv4: IntArray, port: Int, payload: ByteArray): Int =
+        VpnBridge.nativeLwipUdpSend(sessionId, remoteIpv4, port, payload)
+
+    override fun receiveUdp(sessionId: Int, maxLen: Int, timeoutMs: Int): ByteArray? =
+        VpnBridge.nativeLwipUdpReceive(sessionId, maxLen, timeoutMs)
+
+    override fun closeUdp(sessionId: Int) {
+        VpnBridge.nativeLwipUdpClose(sessionId)
+    }
+}
+
+class NativeLwipProxyTransport(
+    private val resolver: (String) -> List<InetAddress> = { host -> InetAddress.getAllByName(host).toList() },
+    private val backend: NativeLwipTcpBackend = VpnBridgeNativeLwipTcpBackend,
+    private val threadFactory: (String, Runnable) -> Thread = { name, task -> Thread(task, name) },
+    private val logger: (Int, String) -> Unit = { _, _ -> },
+) : ProxyTransport {
+    private val nextSessionId = AtomicInteger(1)
+
+    override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession =
+        NativeLwipProxyTransportSession(
+            descriptor = ProxySessionDescriptor(nextSessionId.getAndIncrement(), request, System.currentTimeMillis()),
+            resolver = resolver,
+            backend = backend,
+            threadFactory = threadFactory,
+            logger = logger,
+        )
+
+    override fun openUdpAssociation(request: ProxyConnectRequest): ProxyUdpAssociation =
+        NativeLwipProxyUdpAssociation(
+            descriptor = ProxySessionDescriptor(nextSessionId.getAndIncrement(), request, System.currentTimeMillis()),
+            resolver = resolver,
+            backend = backend,
+            logger = logger,
+        )
+}
+
+private class NativeLwipProxyUdpAssociation(
+    override val descriptor: ProxySessionDescriptor,
+    private val resolver: (String) -> List<InetAddress>,
+    private val backend: NativeLwipTcpBackend,
+    private val logger: (Int, String) -> Unit,
+) : ProxyUdpAssociation {
+    private val closed = AtomicBoolean(false)
+    private val nativeSessionId: Int =
+        backend.openUdp().also { id ->
+            if (id <= 0) {
+                throw ProxyTransportException(ProxyTransportFailureReason.localServiceUnavailable, "Native lwIP UDP association failed.")
+            }
+            logger(Log.DEBUG, "proxy lwip udp open sid=${descriptor.sessionId} native=$id")
+        }
+
+    override fun send(datagram: ProxyUdpDatagram) {
+        if (closed.get()) throw IOException("UDP association is already closed.")
+        val remoteAddress = resolveIpv4Target(datagram.host)
+        val octets = remoteAddress.address.map { it.toInt() and 0xff }.toIntArray()
+        val rc = backend.sendUdp(nativeSessionId, octets, datagram.port, datagram.payload)
+        if (rc != 0) {
+            throw ProxyTransportException(ProxyTransportFailureReason.upstreamConnectFailed, "Native lwIP UDP send failed.")
+        }
+        logger(
+            Log.DEBUG,
+            "proxy lwip udp out sid=${descriptor.sessionId} target=${datagram.host}:${datagram.port} ip=${remoteAddress.hostAddress} bytes=${datagram.payload.size}",
+        )
+    }
+
+    override fun receive(timeoutMs: Long): ProxyUdpDatagram? {
+        if (closed.get()) return null
+        val timeout = timeoutMs.coerceIn(1L, Int.MAX_VALUE.toLong()).toInt()
+        val packet = backend.receiveUdp(nativeSessionId, MAX_UDP_PACKET_BYTES + UDP_HEADER_BYTES, timeout) ?: return null
+        if (packet.size < UDP_HEADER_BYTES) return null
+        val host =
+            listOf(
+                packet[0].toInt() and 0xff,
+                packet[1].toInt() and 0xff,
+                packet[2].toInt() and 0xff,
+                packet[3].toInt() and 0xff,
+            ).joinToString(".")
+        val port = ((packet[4].toInt() and 0xff) shl 8) or (packet[5].toInt() and 0xff)
+        if (port !in 1..65535) return null
+        return ProxyUdpDatagram(
+            host = host,
+            port = port,
+            payload = packet.copyOfRange(UDP_HEADER_BYTES, packet.size),
+        )
+    }
+
+    override fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        backend.closeUdp(nativeSessionId)
+    }
+
+    private fun resolveIpv4Target(host: String): InetAddress {
+        host.toIpv4LiteralOrNull()?.let { literal ->
+            return InetAddress.getByName(literal)
+        }
+        val resolved =
+            resolver(host).firstOrNull { it is Inet4Address }
+                ?: throw ProxyTransportException(ProxyTransportFailureReason.networkUnreachable, "IPv6 destinations are not supported in proxy mode.")
+        logger(Log.DEBUG, "proxy lwip udp resolve sid=${descriptor.sessionId} host=$host ip=${resolved.hostAddress}")
+        return resolved
+    }
+
+    private companion object {
+        private const val UDP_HEADER_BYTES = 6
+        private const val MAX_UDP_PACKET_BYTES = 65535
+    }
+}
+
+private class NativeLwipProxyTransportSession(
+    override val descriptor: ProxySessionDescriptor,
+    private val resolver: (String) -> List<InetAddress>,
+    private val backend: NativeLwipTcpBackend,
+    private val threadFactory: (String, Runnable) -> Thread,
+    private val logger: (Int, String) -> Unit,
+) : ProxyTransportSession {
+    private val connected = AtomicBoolean(false)
+    private val closed = AtomicBoolean(false)
+    private val tearingDown = AtomicBoolean(false)
+    private val nativeSessionId = AtomicInteger(0)
+
+    override fun awaitConnected(timeoutMs: Long) {
+        if (closed.get()) throw IOException("Proxy transport session is already closed.")
+        if (connected.get()) return
+        val remoteAddress = resolveIpv4Target()
+        val octets = remoteAddress.address.map { it.toInt() and 0xff }.toIntArray()
+        val timeout = timeoutMs.coerceIn(1L, Int.MAX_VALUE.toLong()).toInt()
+        logger(
+            Log.DEBUG,
+            "proxy lwip connect sid=${descriptor.sessionId} target=${descriptor.request.host}:${descriptor.request.port} ip=${remoteAddress.hostAddress} timeoutMs=$timeout",
+        )
+        val id = backend.open(octets, descriptor.request.port, timeout)
+        if (id <= 0) {
+            throw ProxyTransportException(ProxyTransportFailureReason.upstreamConnectFailed, "Native lwIP TCP connect failed.")
+        }
+        nativeSessionId.set(id)
+        connected.set(true)
+    }
+
+    override fun pumpBidirectional(client: ProxyClientConnection) {
+        if (!connected.get()) throw IOException("TCP session is not connected.")
+        val failure = AtomicReference<IOException?>(null)
+        val remoteToClient =
+            threadFactory(
+                "proxy-lwip-remote-${descriptor.sessionId}",
+                Runnable {
+                    try {
+                        while (!tearingDown.get()) {
+                            val chunk = backend.read(nativeSessionId.get(), RELAY_BUFFER_BYTES, READ_TIMEOUT_MS)
+                            if (chunk == null) continue
+                            if (chunk.isEmpty()) break
+                            client.output.write(chunk)
+                            client.output.flush()
+                        }
+                    } catch (e: IOException) {
+                        if (!tearingDown.get()) failure.compareAndSet(null, e)
+                    } finally {
+                        shutdownSocketOutput(client.socket)
+                    }
+                },
+            )
+        remoteToClient.start()
+        val buffer = ByteArray(RELAY_BUFFER_BYTES)
+        try {
+            while (!tearingDown.get()) {
+                val read = client.input.read(buffer)
+                if (read < 0) break
+                if (read == 0) continue
+                var offset = 0
+                while (offset < read) {
+                    val chunk = buffer.copyOfRange(offset, read)
+                    val written = backend.write(nativeSessionId.get(), chunk, WRITE_TIMEOUT_MS)
+                    if (written <= 0) throw IOException("Native lwIP TCP write failed.")
+                    offset += written
+                }
+            }
+        } catch (e: IOException) {
+            if (!tearingDown.get()) failure.compareAndSet(null, e)
+        } finally {
+            tearingDown.set(true)
+            shutdownSocketOutput(client.socket)
+        }
+        try {
+            remoteToClient.join()
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw IOException("Interrupted while relaying proxy traffic.")
+        } finally {
+            close()
+        }
+        failure.get()?.let { throw it }
+    }
+
+    override fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        tearingDown.set(true)
+        val id = nativeSessionId.getAndSet(0)
+        if (id > 0) backend.close(id)
+    }
+
+    private fun resolveIpv4Target(): InetAddress {
+        descriptor.request.host.toIpv4LiteralOrNull()?.let { literal ->
+            return InetAddress.getByName(literal)
+        }
+        val resolved =
+            resolver(descriptor.request.host).firstOrNull { it is Inet4Address }
+                ?: throw ProxyTransportException(ProxyTransportFailureReason.networkUnreachable, "IPv6 destinations are not supported in proxy mode.")
+        logger(
+            Log.DEBUG,
+            "proxy lwip resolve sid=${descriptor.sessionId} host=${descriptor.request.host} ip=${resolved.hostAddress}",
+        )
+        return resolved
+    }
+
+    private fun shutdownSocketOutput(socket: Socket) {
+        try {
+            socket.shutdownOutput()
+        } catch (_: IOException) {
+        }
+    }
+
+    private companion object {
+        private const val RELAY_BUFFER_BYTES = 8192
+        private const val READ_TIMEOUT_MS = 1000
+        private const val WRITE_TIMEOUT_MS = 30000
+    }
+}
+
 private class DirectSocketProxyUdpAssociation(
     override val descriptor: ProxySessionDescriptor,
     private val resolver: (String) -> List<InetAddress>,

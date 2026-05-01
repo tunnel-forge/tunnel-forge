@@ -51,6 +51,8 @@ int tunnel_run_loop(int tun_fd);
 
 /** Proxy-only placeholder until a userspace TCP/IP stack is integrated. Requires prior tunnel_negotiate(). */
 int tunnel_run_proxy_loop(void);
+/** Proxy-only lwIP dataplane. Requires prior tunnel_negotiate(). */
+int tunnel_run_lwip_proxy_loop(const uint8_t client_ipv4[4], int mtu);
 int tunnel_proxy_is_bridge_active(void);
 int tunnel_proxy_enqueue_outbound_packet(const uint8_t *packet, size_t len);
 ssize_t tunnel_proxy_dequeue_inbound_packet(uint8_t *packet, size_t len);

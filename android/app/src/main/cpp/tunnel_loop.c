@@ -23,6 +23,7 @@
 #include "l2tp.h"
 #include "nat_t_keepalive.h"
 #include "ppp.h"
+#include "proxy_lwip.h"
 #include "util_endian.h"
 
 #define LOG_TAG "tunnel_engine"
@@ -414,6 +415,9 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
     }
     if (pr == 0) {
       /* Idle tick: emit periodic counters and send NAT-T keepalive when due. */
+      if (endpoint != NULL && endpoint->name != NULL && strcmp(endpoint->name, "lwip-proxy") == 0) {
+        proxy_lwip_tick();
+      }
       engine_dp_maybe_log_summary(time(NULL));
       if (g_state.esp.udp_encap && g_state.esp.enc_key_len) {
         time_t now = time(NULL);
@@ -496,6 +500,9 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
         }
       }
     }
+    if (endpoint != NULL && endpoint->name != NULL && strcmp(endpoint->name, "lwip-proxy") == 0) {
+      proxy_lwip_tick();
+    }
     engine_dp_maybe_log_summary(time(NULL));
   }
 
@@ -534,6 +541,23 @@ int tunnel_run_proxy_loop(void) {
   const int rc = tunnel_run_loop_with_endpoint(-1, &endpoint);
   packet_endpoint_destroy_proxy_queue(&g_proxy_queue);
   atomic_store(&g_proxy_bridge_active, 0);
+  return rc;
+}
+
+int tunnel_run_lwip_proxy_loop(const uint8_t client_ipv4[4], int mtu) {
+  if (!g_state.ready) {
+    tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "tunnel_run_lwip_proxy_loop: not negotiated");
+    return TUNNEL_EXIT_BAD_ARGS;
+  }
+  packet_endpoint_t endpoint;
+  if (proxy_lwip_start(&endpoint, client_ipv4, mtu) != 0) {
+    tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "lwIP proxy endpoint init failed errno=%d", errno);
+    tunnel_close_active_session("lwIP proxy init failed", 1);
+    return TUNNEL_EXIT_PROXY_NOT_IMPLEMENTED;
+  }
+  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "proxy-only mode negotiated; native lwIP endpoint active");
+  const int rc = tunnel_run_loop_with_endpoint(-1, &endpoint);
+  proxy_lwip_stop();
   return rc;
 }
 

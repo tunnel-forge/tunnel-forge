@@ -1,0 +1,56 @@
+#ifndef TUNNEL_FORGE_LWIPOPTS_H
+#define TUNNEL_FORGE_LWIPOPTS_H
+
+#define NO_SYS 1
+#define LWIP_IPV4 1
+#define LWIP_IPV6 0
+#define LWIP_TCP 1
+#define LWIP_UDP 1
+#define LWIP_ICMP 1
+#define LWIP_RAW 0
+#define LWIP_DNS 0
+#define LWIP_DHCP 0
+#define LWIP_AUTOIP 0
+#define LWIP_NETCONN 0
+#define LWIP_SOCKET 0
+#define LWIP_NETIF_API 0
+#define LWIP_STATS 0
+#define LWIP_TIMERS 1
+#define LWIP_TIMERS_CUSTOM 0
+#define SYS_LIGHTWEIGHT_PROT 0
+
+#define MEM_LIBC_MALLOC 1
+#define MEMP_MEM_MALLOC 1
+#define MEM_ALIGNMENT 8
+#define MEM_SIZE (1024 * 1024)
+#define MEMP_NUM_TCP_PCB 256
+#define MEMP_NUM_UDP_PCB 128
+#define MEMP_NUM_TCP_SEG 2048
+#define PBUF_POOL_SIZE 1024
+#define PBUF_POOL_BUFSIZE 1700
+
+#define TCP_MSS 1360
+#define TCP_WND (60 * 1024)
+#define TCP_SND_BUF (60 * 1024)
+#define TCP_SND_QUEUELEN 2048
+#define TCP_QUEUE_OOSEQ 1
+#define TCP_OVERSIZE TCP_MSS
+
+#define IP_FORWARD 0
+#define IP_REASSEMBLY 1
+#define IP_FRAG 1
+#define IP_DEFAULT_TTL 64
+
+#define LWIP_NETIF_HOSTNAME 0
+#define LWIP_HAVE_LOOPIF 0
+#define LWIP_SINGLE_NETIF 1
+#define LWIP_CHECKSUM_CTRL_PER_NETIF 0
+
+#define CHECKSUM_GEN_IP 1
+#define CHECKSUM_GEN_TCP 1
+#define CHECKSUM_CHECK_IP 1
+#define CHECKSUM_CHECK_TCP 1
+
+#define LWIP_RAND() ((u32_t)rand())
+
+#endif

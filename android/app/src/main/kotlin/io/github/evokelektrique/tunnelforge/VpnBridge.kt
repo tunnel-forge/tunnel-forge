@@ -37,7 +37,37 @@ object VpnBridge {
     external fun nativeStartProxyLoop(): Int
 
     @JvmStatic
+    external fun nativeStartLwipProxyLoop(clientIpv4: IntArray, mtu: Int): Int
+
+    @JvmStatic
+    external fun nativeLwipTcpOpen(remoteIpv4: IntArray, port: Int, timeoutMs: Int): Int
+
+    @JvmStatic
+    external fun nativeLwipTcpRead(sessionId: Int, maxLen: Int, timeoutMs: Int): ByteArray?
+
+    @JvmStatic
+    external fun nativeLwipTcpWrite(sessionId: Int, bytes: ByteArray, timeoutMs: Int): Int
+
+    @JvmStatic
+    external fun nativeLwipTcpClose(sessionId: Int)
+
+    @JvmStatic
+    external fun nativeLwipUdpOpen(): Int
+
+    @JvmStatic
+    external fun nativeLwipUdpSend(sessionId: Int, remoteIpv4: IntArray, port: Int, payload: ByteArray): Int
+
+    @JvmStatic
+    external fun nativeLwipUdpReceive(sessionId: Int, maxLen: Int, timeoutMs: Int): ByteArray?
+
+    @JvmStatic
+    external fun nativeLwipUdpClose(sessionId: Int)
+
+    @JvmStatic
     external fun nativeIsProxyPacketBridgeActive(): Boolean
+
+    @JvmStatic
+    external fun nativeIsLwipProxyActive(): Boolean
 
     @JvmStatic
     external fun nativeQueueProxyOutboundPacket(packet: ByteArray): Int

@@ -16,17 +16,15 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Foreground service for proxy-only mode.
  *
- * This reuses the real native negotiation path without VpnService socket protection. The userspace
- * TCP/IP proxy dataplane is still pending, so this service keeps only the native packet bridge
- * alive for now.
+ * This reuses the real native negotiation path without VpnService socket protection. TCP proxy
+ * sessions are carried by the native lwIP dataplane so this mode can coexist with another app's
+ * Android VPN/TUN.
  */
 class ProxyTunnelService : Service() {
     private val sessionLock = Any()
     private var worker: Thread? = null
-    private var packetBridge: ProxyPacketBridge? = null
     private var proxyRuntime: ProxyServerRuntime? = null
-    private var proxyTransport: BridgeProxyTransport? = null
-    private var userspaceStack: BridgeUserspaceTunnelStack? = null
+    private var proxyTransport: ProxyTransport? = null
     private var proxyLoopThread: Thread? = null
     private var activeProxyConfig: ProxyRuntimeConfig? = null
     private var activeAttemptId: String = ""
@@ -161,7 +159,6 @@ class ProxyTunnelService : Service() {
         val currentWorker = Thread.currentThread()
         val nativeOwner = NativeTunnelOwner(VpnContract.MODE_PROXY_ONLY, attemptId)
         var nativeOwnerAcquired = false
-        var localStack: BridgeUserspaceTunnelStack? = null
         var localRuntime: ProxyServerRuntime? = null
         var localLoopThread: Thread? = null
         emitAttemptState(
@@ -233,12 +230,12 @@ class ProxyTunnelService : Service() {
             VpnTunnelEvents.emitEngineLog(
                 Log.DEBUG,
                 TAG,
-                "${prefixAttempt(attemptId)}Negotiated tunnel clientIpv4=${negotiatedClientIp.joinToString(".")}; awaiting proxy dataplane",
+                "${prefixAttempt(attemptId)}Negotiated tunnel clientIpv4=${negotiatedClientIp.joinToString(".")}; awaiting native lwIP proxy dataplane",
             )
             emitAttemptState(
                 attemptId,
                 VpnContract.TUNNEL_CONNECTING,
-                "Tunnel negotiated. Starting native local-proxy bridge...",
+                "Tunnel negotiated. Starting native local-proxy TCP stack...",
             )
             val loopThread = Thread(
                 {
@@ -247,7 +244,7 @@ class ProxyTunnelService : Service() {
                         emitEngineLog = { level, message ->
                             VpnTunnelEvents.emitEngineLog(level, TAG, message)
                         },
-                        startLoop = { VpnBridge.nativeStartProxyLoop() },
+                        startLoop = { VpnBridge.nativeStartLwipProxyLoop(negotiatedClientIp, proxyMtu) },
                         detailForCode = ::tunnelExitDetail,
                         isStopRequested = { stopRequested },
                         isConnected = { connectedEmitted },
@@ -255,7 +252,7 @@ class ProxyTunnelService : Service() {
                             emitAttemptTerminalState(terminalAttemptId, state, detail)
                         },
                         onLoopCrash = { throwable ->
-                            AppLog.e(TAG, "${prefixAttempt(attemptId)}nativeStartProxyLoop failed", throwable)
+                            AppLog.e(TAG, "${prefixAttempt(attemptId)}nativeStartLwipProxyLoop failed", throwable)
                         },
                     )
                 },
@@ -268,41 +265,28 @@ class ProxyTunnelService : Service() {
                 }
             }
             loopThread.start()
-            val bridge = ProxyPacketBridge()
-            val stack =
-                BridgeUserspaceTunnelStack(
-                    bridge = bridge,
-                    clientIpv4 = negotiatedClientIp.joinToString("."),
-                    dnsServers = effectiveDnsServers,
-                    linkMtu = proxyMtu,
-                    connectTimeoutMs = PROXY_ONLY_CONNECT_TIMEOUT_MS,
-                    synRetransmitDelaysMs = PROXY_ONLY_SYN_RETRANSMIT_DELAYS_MS,
-                    maxTcpSessions = PROXY_ONLY_MAX_TCP_SESSIONS,
-                    maxPendingTcpConnects = PROXY_ONLY_MAX_PENDING_TCP_CONNECTS,
-                    synPacingIntervalMs = PROXY_ONLY_SYN_PACING_INTERVAL_MS,
-                    tcpFinDrainTimeoutMs = PROXY_ONLY_TCP_FIN_DRAIN_TIMEOUT_MS,
-                    logger = { level, message ->
-                        VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
-                    },
-                )
-            VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}waiting for proxy packet bridge readiness")
-            localStack = stack
-            if (!stack.waitUntilReady()) {
+            VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}waiting for native lwIP proxy readiness")
+            if (!waitUntilLwipProxyActive()) {
                 if (!ProxyTunnelServiceStopPolicy.shouldFailBridgeReadiness(stopRequested)) {
                     VpnTunnelEvents.emitEngineLog(
                         Log.DEBUG,
                         TAG,
-                        "${prefixAttempt(attemptId)}proxy bridge readiness wait ended after stop request",
+                        "${prefixAttempt(attemptId)}lwIP proxy readiness wait ended after stop request",
                     )
                 } else {
-                    emitAttemptTerminalState(attemptId, VpnContract.TUNNEL_FAILED, "Local proxy bridge did not become ready")
+                    emitAttemptTerminalState(attemptId, VpnContract.TUNNEL_FAILED, "Native local proxy TCP stack did not become ready")
                 }
-                NativeTunnelSessions.shared.stopOwner(nativeOwner, reason = "proxy bridge readiness failed")
+                NativeTunnelSessions.shared.stopOwner(nativeOwner, reason = "lwIP proxy readiness failed")
                 loopThread.join(5000)
                 return
             }
-            VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}Proxy packet bridge ready")
-            val transport = BridgeProxyTransport(stack)
+            VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}Native lwIP proxy dataplane ready")
+            val transport =
+                NativeLwipProxyTransport(
+                    logger = { level, message ->
+                        VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
+                    },
+                )
             val exposure =
                 LanProxyAddressResolver(this).resolve(
                     httpPort = proxyConfig.httpPort,
@@ -330,8 +314,6 @@ class ProxyTunnelService : Service() {
                 if (worker !== currentWorker) {
                     workerReplaced = true
                 } else {
-                    packetBridge = bridge
-                    userspaceStack = stack
                     proxyTransport = transport
                     proxyRuntime = runtime
                     proxyLoopThread = loopThread
@@ -367,7 +349,7 @@ class ProxyTunnelService : Service() {
             emitAttemptState(
                 attemptId,
                 VpnContract.TUNNEL_CONNECTED,
-                "Tunnel bridge active. ${runtime.endpointSummary()}. Hostnames resolve through tunneled DNS; IPv6 destinations are still unsupported.",
+                "Native TCP stack active. ${runtime.endpointSummary()}. Hostnames resolve before tunneled connect; IPv6 destinations are still unsupported.",
             )
             loopThread.join()
         } catch (e: InterruptedException) {
@@ -394,7 +376,6 @@ class ProxyTunnelService : Service() {
                 emitAttemptTerminalState(attemptId, VpnContract.TUNNEL_FAILED, t.message ?: "proxy startup failed")
             }
         } finally {
-            localStack?.stop()
             localRuntime?.stop()
             if (nativeOwnerAcquired) {
                 NativeTunnelSessions.shared.stopOwner(nativeOwner, reason = "proxy worker cleanup")
@@ -420,10 +401,8 @@ class ProxyTunnelService : Service() {
             synchronized(sessionLock) {
                 if (worker === currentWorker) {
                     worker = null
-                    userspaceStack = null
                     proxyRuntime = null
                     proxyTransport = null
-                    packetBridge = null
                     proxyLoopThread = null
                     activeProxyConfig = null
                     if (activeAttemptId == attemptId) {
@@ -449,17 +428,13 @@ class ProxyTunnelService : Service() {
                 ActiveProxySession(
                     attemptId = activeAttemptId,
                     worker = worker,
-                    stack = userspaceStack,
                     runtime = proxyRuntime,
                     loopThread = proxyLoopThread,
                     hasTransport = proxyTransport != null,
-                    hasBridge = packetBridge != null,
                 ).also {
                     worker = null
-                    userspaceStack = null
                     proxyRuntime = null
                     proxyTransport = null
-                    packetBridge = null
                     proxyLoopThread = null
                     activeAttemptId = ""
                 }
@@ -479,7 +454,6 @@ class ProxyTunnelService : Service() {
             return false
         }
         VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "Stopping previous proxy session reason=$reason")
-        active.stack?.stop()
         active.runtime?.stop()
         if (config != null) {
             VpnTunnelEvents.emitProxyExposureChanged(
@@ -511,6 +485,20 @@ class ProxyTunnelService : Service() {
 
     private fun currentAttemptId(): String =
         synchronized(sessionLock) { activeAttemptId }
+
+    private fun waitUntilLwipProxyActive(timeoutMs: Long = 4000, pollIntervalMs: Long = 100): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (VpnBridge.nativeIsLwipProxyActive()) return true
+            try {
+                Thread.sleep(pollIntervalMs)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return false
+            }
+        }
+        return VpnBridge.nativeIsLwipProxyActive()
+    }
 
     private fun shouldHandleAttempt(attemptId: String, stage: String): Boolean {
         val currentAttemptId = currentAttemptId()
@@ -670,11 +658,9 @@ class ProxyTunnelService : Service() {
             val active =
                 synchronized(svc.sessionLock) {
                     svc.worker != null ||
-                        svc.userspaceStack != null ||
                         svc.proxyRuntime != null ||
                         svc.proxyTransport != null ||
-                        svc.proxyLoopThread != null ||
-                        svc.packetBridge != null
+                        svc.proxyLoopThread != null
                 }
             if (!active) return null
             val attemptId = svc.currentAttemptId()
@@ -703,13 +689,11 @@ class ProxyTunnelService : Service() {
 private data class ActiveProxySession(
     val attemptId: String,
     val worker: Thread?,
-    val stack: BridgeUserspaceTunnelStack?,
     val runtime: ProxyServerRuntime?,
     val loopThread: Thread?,
     val hasTransport: Boolean,
-    val hasBridge: Boolean,
 ) {
-    fun hasState(): Boolean = worker != null || stack != null || runtime != null || loopThread != null || hasTransport || hasBridge
+    fun hasState(): Boolean = worker != null || runtime != null || loopThread != null || hasTransport
 
     fun nativeOwner(): NativeTunnelOwner? =
         attemptId.takeIf { it.isNotEmpty() }?.let {
@@ -801,7 +785,7 @@ internal object ProxyTunnelLoopRunner {
             } else if (isConnected()) {
                 emitTerminal(attemptId, VpnContract.TUNNEL_FAILED, "Local proxy connection was lost.")
             } else {
-                emitTerminal(attemptId, VpnContract.TUNNEL_FAILED, "Local proxy bridge stopped before becoming ready")
+                emitTerminal(attemptId, VpnContract.TUNNEL_FAILED, "Native local proxy TCP stack stopped before becoming ready")
             }
         } catch (t: Throwable) {
             onLoopCrash(t)
