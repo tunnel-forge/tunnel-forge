@@ -130,6 +130,11 @@ class SettingsRepositoryImpl implements SettingsRepository {
   }
 
   @override
+  Future<bool> loadBatteryOptimizationConnectPromptShown() {
+    return _profileStore.loadBatteryOptimizationConnectPromptShown();
+  }
+
+  @override
   Future<ProxySettings> loadProxySettings() {
     return _profileStore.loadProxySettings();
   }
@@ -154,6 +159,11 @@ class SettingsRepositoryImpl implements SettingsRepository {
   @override
   Future<void> saveLogDisplayLevel(LogDisplayLevel level) {
     return _profileStore.saveLogDisplayLevel(level);
+  }
+
+  @override
+  Future<void> saveBatteryOptimizationConnectPromptShown(bool shown) {
+    return _profileStore.saveBatteryOptimizationConnectPromptShown(shown);
   }
 
   @override
@@ -435,6 +445,11 @@ class TunnelRepositoryImpl implements TunnelRepository {
   Future<TunnelRuntimeState> getRuntimeState() => _client.getRuntimeState();
 
   @override
+  Future<BatteryOptimizationStatus> getBatteryOptimizationStatus() {
+    return _client.getBatteryOptimizationStatus();
+  }
+
+  @override
   Future<void> connect(TunnelConnectRequest request) {
     return _client.connect(
       attemptId: request.attemptId,
@@ -482,7 +497,23 @@ class TunnelRepositoryImpl implements TunnelRepository {
   }
 
   @override
+  Future<BatteryOptimizationRequestResult> openBatteryOptimizationSettings() {
+    return _client.openBatteryOptimizationSettings();
+  }
+
+  @override
+  Future<BatteryOptimizationRequestResult>
+  openManufacturerBackgroundSettings() {
+    return _client.openManufacturerBackgroundSettings();
+  }
+
+  @override
   Future<bool> prepareVpn() => _client.prepareVpn();
+
+  @override
+  Future<BatteryOptimizationRequestResult> requestIgnoreBatteryOptimizations() {
+    return _client.requestIgnoreBatteryOptimizations();
+  }
 
   @override
   Future<void> setLogLevel(LogDisplayLevel level) {

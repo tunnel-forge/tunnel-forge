@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tunnel_forge/features/home/domain/home_models.dart';
@@ -5,6 +8,7 @@ import 'package:tunnel_forge/features/home/domain/home_repositories.dart';
 import 'package:tunnel_forge/features/home/presentation/bloc/settings_bloc.dart';
 import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
 import 'package:tunnel_forge/core/logging/log_entry.dart';
+import 'package:tunnel_forge/features/tunnel/domain/tunnel_runtime_state.dart';
 
 class _FakeSettingsRepository implements SettingsRepository {
   ConnectionMode connectionMode = ConnectionMode.proxyOnly;
@@ -15,6 +19,7 @@ class _FakeSettingsRepository implements SettingsRepository {
         url: 'https://example.com/ping',
         timeoutMs: 3200,
       );
+  bool batteryOptimizationConnectPromptShown = false;
 
   @override
   Future<ConnectionMode> loadConnectionMode() async => connectionMode;
@@ -27,6 +32,11 @@ class _FakeSettingsRepository implements SettingsRepository {
   @override
   Future<LogDisplayLevel> loadLogDisplayLevel() async {
     return LogDisplayLevel.error;
+  }
+
+  @override
+  Future<bool> loadBatteryOptimizationConnectPromptShown() async {
+    return batteryOptimizationConnectPromptShown;
   }
 
   @override
@@ -51,6 +61,11 @@ class _FakeSettingsRepository implements SettingsRepository {
 
   @override
   Future<void> saveLogDisplayLevel(LogDisplayLevel level) async {}
+
+  @override
+  Future<void> saveBatteryOptimizationConnectPromptShown(bool shown) async {
+    batteryOptimizationConnectPromptShown = shown;
+  }
 
   @override
   Future<void> saveProxySettings(ProxySettings settings) async {
@@ -103,8 +118,89 @@ class _FakeLogsRepository implements LogsRepository {
   Stream<List<LogEntry>> get entriesStream => Stream<List<LogEntry>>.empty();
 }
 
+class _FakeTunnelRepository implements TunnelRepository {
+  BatteryOptimizationStatus batteryOptimizationStatus =
+      const BatteryOptimizationStatus.unknown();
+  BatteryOptimizationRequestResult requestResult =
+      const BatteryOptimizationRequestResult(
+        outcome: BatteryOptimizationRequestOutcome.requested,
+      );
+  int batteryOptimizationRequestCount = 0;
+
+  @override
+  Stream<EngineLogMessage> get engineLogs => const Stream.empty();
+
+  @override
+  Stream<ProxyExposure> get proxyExposures => const Stream.empty();
+
+  @override
+  Stream<TunnelHostUpdate> get tunnelStates => const Stream.empty();
+
+  @override
+  Future<void> connect(TunnelConnectRequest request) async {}
+
+  @override
+  Future<void> disconnect({
+    required ConnectionMode connectionMode,
+    String attemptId = '',
+  }) async {}
+
+  @override
+  void dispose() {}
+
+  @override
+  Future<Uint8List?> getAppIcon(String packageName) async => null;
+
+  @override
+  Future<BatteryOptimizationStatus> getBatteryOptimizationStatus() async {
+    return batteryOptimizationStatus;
+  }
+
+  @override
+  Future<TunnelRuntimeState> getRuntimeState() async {
+    return const TunnelRuntimeState.idle();
+  }
+
+  @override
+  Future<List<CandidateApp>> listVpnCandidateApps() async => const [];
+
+  @override
+  Future<BatteryOptimizationRequestResult> openBatteryOptimizationSettings() {
+    return Future.value(
+      const BatteryOptimizationRequestResult(
+        outcome: BatteryOptimizationRequestOutcome.settingsOpened,
+      ),
+    );
+  }
+
+  @override
+  Future<BatteryOptimizationRequestResult>
+  openManufacturerBackgroundSettings() {
+    return Future.value(
+      const BatteryOptimizationRequestResult(
+        outcome: BatteryOptimizationRequestOutcome.settingsOpened,
+      ),
+    );
+  }
+
+  @override
+  Future<bool> prepareVpn() async => true;
+
+  @override
+  Future<BatteryOptimizationRequestResult> requestIgnoreBatteryOptimizations() {
+    batteryOptimizationRequestCount += 1;
+    return Future.value(requestResult);
+  }
+
+  @override
+  Future<void> setLogLevel(LogDisplayLevel level) async {}
+}
+
 void main() {
   group('SettingsBloc', () {
+    late _FakeSettingsRepository settingsRepository;
+    late _FakeTunnelRepository tunnelRepository;
+
     blocTest<SettingsBloc, SettingsState>(
       'loads persisted settings and installed version on start',
       build: () => SettingsBloc(
@@ -124,6 +220,7 @@ void main() {
           ),
         ),
         _FakeLogsRepository(),
+        _FakeTunnelRepository(),
       ),
       act: (bloc) => bloc.add(const SettingsStarted()),
       expect: () => [
@@ -175,6 +272,7 @@ void main() {
           ),
         ),
         _FakeLogsRepository(),
+        _FakeTunnelRepository(),
       ),
       act: (bloc) async {
         bloc.add(const SettingsStarted());
@@ -264,6 +362,7 @@ void main() {
           ),
         ),
         _FakeLogsRepository(),
+        _FakeTunnelRepository(),
       ),
       act: (bloc) async {
         bloc.add(const SettingsStarted());
@@ -354,6 +453,7 @@ void main() {
           ),
         ),
         _FakeLogsRepository(),
+        _FakeTunnelRepository(),
       ),
       act: (bloc) async {
         bloc.add(const SettingsStarted());
@@ -410,6 +510,115 @@ void main() {
           updateErrorMessage: 'Installed version unavailable.',
         ),
       ],
+    );
+
+    blocTest<SettingsBloc, SettingsState>(
+      'requests battery optimization exemption and refreshes status',
+      build: () {
+        final tunnel = _FakeTunnelRepository()
+          ..batteryOptimizationStatus = const BatteryOptimizationStatus(
+            state: BatteryOptimizationState.restricted,
+          );
+        return SettingsBloc(
+          _FakeSettingsRepository(),
+          _FakeAppVersionRepository(
+            const AppVersionInfo(
+              displayVersion: '0.3.0+11',
+              semanticVersion: SemanticVersion(major: 0, minor: 3, patch: 0),
+            ),
+          ),
+          _FakeAppUpdateRepository(
+            release: AppReleaseInfo(
+              version: const SemanticVersion(major: 0, minor: 3, patch: 0),
+              htmlUrl:
+                  'https://github.com/evokelektrique/tunnel-forge/releases',
+              publishedAt: DateTime.utc(2026, 4, 19),
+              prerelease: true,
+            ),
+          ),
+          _FakeLogsRepository(),
+          tunnel,
+        );
+      },
+      act: (bloc) =>
+          bloc.add(const SettingsBatteryOptimizationRequestPressed()),
+      expect: () => [
+        const SettingsState(batteryOptimizationBusy: true),
+        isA<SettingsState>()
+            .having((s) => s.batteryOptimizationBusy, 'busy', isFalse)
+            .having(
+              (s) => s.batteryOptimizationStatus.state,
+              'battery state',
+              BatteryOptimizationState.restricted,
+            )
+            .having((s) => s.message?.error, 'message error', isFalse),
+      ],
+    );
+
+    blocTest<SettingsBloc, SettingsState>(
+      'prompts for battery optimization once on VPN connect attempt',
+      build: () {
+        return SettingsBloc(
+          settingsRepository,
+          _FakeAppVersionRepository(
+            const AppVersionInfo(
+              displayVersion: '0.3.0+11',
+              semanticVersion: SemanticVersion(major: 0, minor: 3, patch: 0),
+            ),
+          ),
+          _FakeAppUpdateRepository(
+            release: AppReleaseInfo(
+              version: const SemanticVersion(major: 0, minor: 3, patch: 0),
+              htmlUrl:
+                  'https://github.com/evokelektrique/tunnel-forge/releases',
+              publishedAt: DateTime.utc(2026, 4, 19),
+              prerelease: true,
+            ),
+          ),
+          _FakeLogsRepository(),
+          tunnelRepository,
+        );
+      },
+      setUp: () {
+        settingsRepository = _FakeSettingsRepository();
+        tunnelRepository = _FakeTunnelRepository()
+          ..batteryOptimizationStatus = const BatteryOptimizationStatus(
+            state: BatteryOptimizationState.restricted,
+          );
+      },
+      seed: () => const SettingsState(
+        batteryOptimizationStatus: BatteryOptimizationStatus(
+          state: BatteryOptimizationState.restricted,
+        ),
+      ),
+      act: (bloc) {
+        bloc
+          ..add(const SettingsBatteryOptimizationVpnConnectAttempted())
+          ..add(const SettingsBatteryOptimizationVpnConnectAttempted());
+      },
+      expect: () => [
+        const SettingsState(
+          batteryOptimizationStatus: BatteryOptimizationStatus(
+            state: BatteryOptimizationState.restricted,
+          ),
+          batteryOptimizationBusy: true,
+        ),
+        isA<SettingsState>()
+            .having((s) => s.batteryOptimizationBusy, 'busy', isFalse)
+            .having(
+              (s) => s.batteryOptimizationStatus.state,
+              'battery state',
+              BatteryOptimizationState.restricted,
+            )
+            .having((s) => s.message?.error, 'message error', isFalse),
+      ],
+      verify: (bloc) {
+        expect(
+          settingsRepository.batteryOptimizationConnectPromptShown,
+          isTrue,
+        );
+        expect(tunnelRepository.batteryOptimizationRequestCount, 1);
+      },
     );
   });
 }

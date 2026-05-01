@@ -292,6 +292,19 @@ extension AppStrings on AppLocalizations {
       AppText.pick('LAN access is disabled.', 'دسترسی شبکه محلی غیرفعال است.');
   String get connectivityCheck =>
       AppText.pick('Connectivity check', 'بررسی اتصال');
+  String get batteryOptimization =>
+      AppText.pick('Battery optimization', 'بهینه‌سازی باتری');
+  String get batteryOptimizationAllowed => AppText.pick(
+    'Allowed for background use.',
+    'برای استفاده در پس‌زمینه مجاز است.',
+  );
+  String get batteryOptimizationRestricted =>
+      AppText.pick('Restricted in the background.', 'در پس‌زمینه محدود است.');
+  String get batteryOptimizationUnsupported =>
+      AppText.pick('Not required on this device.', 'در این دستگاه لازم نیست.');
+  String get batteryOptimizationUnknown =>
+      AppText.pick('Status unavailable.', 'وضعیت در دسترس نیست.');
+  String get allowBackgroundVpn => AppText.pick('Allow', 'اجازه');
   String get statusCheckUrl =>
       AppText.pick('Status check URL', 'نشانی بررسی وضعیت');
   String get statusCheckHelp => AppText.pick(

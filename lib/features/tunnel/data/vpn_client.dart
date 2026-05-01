@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
 import 'package:tunnel_forge/core/logging/log_entry.dart';
+import 'package:tunnel_forge/features/home/domain/home_models.dart';
 import 'package:tunnel_forge/features/tunnel/data/vpn_contract.dart';
 import 'package:tunnel_forge/features/tunnel/domain/tunnel_runtime_state.dart';
 
@@ -131,6 +132,67 @@ class VpnClient {
       return const TunnelRuntimeState.idle();
     } on MissingPluginException {
       return const TunnelRuntimeState.idle();
+    }
+  }
+
+  Future<BatteryOptimizationStatus> getBatteryOptimizationStatus() async {
+    try {
+      final raw = await _channel.invokeMethod<Object>(
+        VpnContract.getBatteryOptimizationStatus,
+      );
+      return BatteryOptimizationStatus.fromMap(raw);
+    } on PlatformException {
+      return const BatteryOptimizationStatus.unknown();
+    } on MissingPluginException {
+      return const BatteryOptimizationStatus.unknown();
+    }
+  }
+
+  Future<BatteryOptimizationRequestResult>
+  requestIgnoreBatteryOptimizations() async {
+    try {
+      final raw = await _channel.invokeMethod<Object>(
+        VpnContract.requestIgnoreBatteryOptimizations,
+      );
+      return BatteryOptimizationRequestResult.fromMap(raw);
+    } on PlatformException catch (error) {
+      return BatteryOptimizationRequestResult.failed(error.message);
+    } on MissingPluginException {
+      return const BatteryOptimizationRequestResult(
+        outcome: BatteryOptimizationRequestOutcome.unsupported,
+      );
+    }
+  }
+
+  Future<BatteryOptimizationRequestResult>
+  openBatteryOptimizationSettings() async {
+    try {
+      final raw = await _channel.invokeMethod<Object>(
+        VpnContract.openBatteryOptimizationSettings,
+      );
+      return BatteryOptimizationRequestResult.fromMap(raw);
+    } on PlatformException catch (error) {
+      return BatteryOptimizationRequestResult.failed(error.message);
+    } on MissingPluginException {
+      return const BatteryOptimizationRequestResult(
+        outcome: BatteryOptimizationRequestOutcome.unsupported,
+      );
+    }
+  }
+
+  Future<BatteryOptimizationRequestResult>
+  openManufacturerBackgroundSettings() async {
+    try {
+      final raw = await _channel.invokeMethod<Object>(
+        VpnContract.openManufacturerBackgroundSettings,
+      );
+      return BatteryOptimizationRequestResult.fromMap(raw);
+    } on PlatformException catch (error) {
+      return BatteryOptimizationRequestResult.failed(error.message);
+    } on MissingPluginException {
+      return const BatteryOptimizationRequestResult(
+        outcome: BatteryOptimizationRequestOutcome.unsupported,
+      );
     }
   }
 

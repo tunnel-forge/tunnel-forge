@@ -222,6 +222,89 @@ class AppUpdateException with EquatableMixin implements Exception {
   List<Object?> get props => [kind, userMessage, statusCode, details];
 }
 
+enum BatteryOptimizationState { unknown, unsupported, allowed, restricted }
+
+class BatteryOptimizationStatus extends Equatable {
+  const BatteryOptimizationStatus({
+    required this.state,
+    this.powerSaveMode = false,
+    this.manufacturer,
+    this.androidSdkInt,
+  });
+
+  const BatteryOptimizationStatus.unknown()
+    : this(state: BatteryOptimizationState.unknown);
+
+  final BatteryOptimizationState state;
+  final bool powerSaveMode;
+  final String? manufacturer;
+  final int? androidSdkInt;
+
+  bool get canRequestExemption => state == BatteryOptimizationState.restricted;
+
+  static BatteryOptimizationStatus fromMap(Object? raw) {
+    if (raw is! Map) return const BatteryOptimizationStatus.unknown();
+    return BatteryOptimizationStatus(
+      state: switch (raw['state']?.toString()) {
+        'unsupported' => BatteryOptimizationState.unsupported,
+        'allowed' => BatteryOptimizationState.allowed,
+        'restricted' => BatteryOptimizationState.restricted,
+        _ => BatteryOptimizationState.unknown,
+      },
+      powerSaveMode: raw['powerSaveMode'] == true,
+      manufacturer: raw['manufacturer']?.toString(),
+      androidSdkInt: switch (raw['androidSdkInt']) {
+        int v => v,
+        num v => v.toInt(),
+        final v => int.tryParse(v?.toString() ?? ''),
+      },
+    );
+  }
+
+  @override
+  List<Object?> get props => [
+    state,
+    powerSaveMode,
+    manufacturer,
+    androidSdkInt,
+  ];
+}
+
+enum BatteryOptimizationRequestOutcome {
+  unsupported,
+  alreadyAllowed,
+  requested,
+  settingsOpened,
+  failed,
+}
+
+class BatteryOptimizationRequestResult extends Equatable {
+  const BatteryOptimizationRequestResult({required this.outcome, this.message});
+
+  const BatteryOptimizationRequestResult.failed([String? message])
+    : this(outcome: BatteryOptimizationRequestOutcome.failed, message: message);
+
+  final BatteryOptimizationRequestOutcome outcome;
+  final String? message;
+
+  static BatteryOptimizationRequestResult fromMap(Object? raw) {
+    if (raw is! Map) return const BatteryOptimizationRequestResult.failed();
+    return BatteryOptimizationRequestResult(
+      outcome: switch (raw['outcome']?.toString()) {
+        'unsupported' => BatteryOptimizationRequestOutcome.unsupported,
+        'alreadyAllowed' => BatteryOptimizationRequestOutcome.alreadyAllowed,
+        'requested' => BatteryOptimizationRequestOutcome.requested,
+        'settingsOpened' => BatteryOptimizationRequestOutcome.settingsOpened,
+        _ => BatteryOptimizationRequestOutcome.failed,
+      },
+      message: raw['message']?.toString(),
+    );
+  }
+
+  @override
+  List<Object?> get props => [outcome, message];
+}
+
 class AppReleaseInfo extends Equatable {
   const AppReleaseInfo({
     required this.version,

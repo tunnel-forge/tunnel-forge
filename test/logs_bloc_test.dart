@@ -71,9 +71,15 @@ class _FakeSettingsRepository implements SettingsRepository {
   Future<LogDisplayLevel> loadLogDisplayLevel() async => initialLevel;
 
   @override
+  Future<bool> loadBatteryOptimizationConnectPromptShown() async => false;
+
+  @override
   Future<void> saveLogDisplayLevel(LogDisplayLevel level) async {
     savedLevels.add(level);
   }
+
+  @override
+  Future<void> saveBatteryOptimizationConnectPromptShown(bool shown) async {}
 
   @override
   Future<ConnectionMode> loadConnectionMode() async => ConnectionMode.vpnTunnel;
@@ -127,6 +133,39 @@ class _RecordingTunnelRepository implements TunnelRepository {
   @override
   Future<TunnelRuntimeState> getRuntimeState() async =>
       const TunnelRuntimeState.idle();
+
+  @override
+  Future<BatteryOptimizationStatus> getBatteryOptimizationStatus() async {
+    return const BatteryOptimizationStatus.unknown();
+  }
+
+  @override
+  Future<BatteryOptimizationRequestResult> openBatteryOptimizationSettings() {
+    return Future.value(
+      const BatteryOptimizationRequestResult(
+        outcome: BatteryOptimizationRequestOutcome.settingsOpened,
+      ),
+    );
+  }
+
+  @override
+  Future<BatteryOptimizationRequestResult>
+  openManufacturerBackgroundSettings() {
+    return Future.value(
+      const BatteryOptimizationRequestResult(
+        outcome: BatteryOptimizationRequestOutcome.settingsOpened,
+      ),
+    );
+  }
+
+  @override
+  Future<BatteryOptimizationRequestResult> requestIgnoreBatteryOptimizations() {
+    return Future.value(
+      const BatteryOptimizationRequestResult(
+        outcome: BatteryOptimizationRequestOutcome.requested,
+      ),
+    );
+  }
 
   @override
   Future<void> connect(TunnelConnectRequest request) async {}

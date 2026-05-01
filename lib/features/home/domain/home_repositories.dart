@@ -40,6 +40,8 @@ abstract class SettingsRepository {
   );
   Future<LogDisplayLevel> loadLogDisplayLevel();
   Future<void> saveLogDisplayLevel(LogDisplayLevel level);
+  Future<bool> loadBatteryOptimizationConnectPromptShown();
+  Future<void> saveBatteryOptimizationConnectPromptShown(bool shown);
 }
 
 abstract class AppVersionRepository {
@@ -63,6 +65,10 @@ abstract class TunnelRepository {
     String attemptId = '',
   });
   Future<void> setLogLevel(LogDisplayLevel level);
+  Future<BatteryOptimizationStatus> getBatteryOptimizationStatus();
+  Future<BatteryOptimizationRequestResult> requestIgnoreBatteryOptimizations();
+  Future<BatteryOptimizationRequestResult> openBatteryOptimizationSettings();
+  Future<BatteryOptimizationRequestResult> openManufacturerBackgroundSettings();
   Future<List<CandidateApp>> listVpnCandidateApps();
   Future<Uint8List?> getAppIcon(String packageName);
   void dispose();

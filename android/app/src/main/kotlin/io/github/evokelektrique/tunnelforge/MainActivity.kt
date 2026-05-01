@@ -3,6 +3,9 @@ package io.github.evokelektrique.tunnelforge
 import android.Manifest
 import android.app.Activity
 import android.app.ForegroundServiceStartNotAllowedException
+import android.content.ActivityNotFoundException
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -13,6 +16,8 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.net.VpnService
 import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import androidx.core.content.IntentCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -274,6 +279,18 @@ class MainActivity : FlutterActivity() {
                 VpnContract.GET_RUNTIME_STATE -> {
                     result.success(currentRuntimeState())
                 }
+                VpnContract.GET_BATTERY_OPTIMIZATION_STATUS -> {
+                    result.success(batteryOptimizationStatus())
+                }
+                VpnContract.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS -> {
+                    result.success(requestIgnoreBatteryOptimizations())
+                }
+                VpnContract.OPEN_BATTERY_OPTIMIZATION_SETTINGS -> {
+                    result.success(openBatteryOptimizationSettings())
+                }
+                VpnContract.OPEN_MANUFACTURER_BACKGROUND_SETTINGS -> {
+                    result.success(openManufacturerBackgroundSettings())
+                }
                 VpnContract.DISCONNECT -> {
                     val args = call.arguments as? Map<*, *>
                     val rawMode = args?.get(VpnContract.ARG_CONNECTION_MODE)?.toString()
@@ -504,6 +521,167 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    private fun batteryOptimizationStatus(): Map<String, Any?> {
+        val status =
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                BATTERY_STATE_UNSUPPORTED
+            } else if (isIgnoringBatteryOptimizations()) {
+                BATTERY_STATE_ALLOWED
+            } else {
+                BATTERY_STATE_RESTRICTED
+            }
+        return mapOf(
+            VpnContract.ARG_BATTERY_OPTIMIZATION_STATE to status,
+            VpnContract.ARG_BATTERY_OPTIMIZATION_POWER_SAVE_MODE to isPowerSaveMode(),
+            VpnContract.ARG_BATTERY_OPTIMIZATION_MANUFACTURER to Build.MANUFACTURER.orEmpty(),
+            VpnContract.ARG_BATTERY_OPTIMIZATION_ANDROID_SDK_INT to Build.VERSION.SDK_INT,
+        )
+    }
+
+    private fun requestIgnoreBatteryOptimizations(): Map<String, Any?> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return batteryOptimizationResult(BATTERY_OUTCOME_UNSUPPORTED)
+        }
+        if (isIgnoringBatteryOptimizations()) {
+            return batteryOptimizationResult(BATTERY_OUTCOME_ALREADY_ALLOWED)
+        }
+        val requestIntent =
+            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+        return if (launchSafely(requestIntent)) {
+            AppLog.d(TAG, "battery_optimization request dialog opened")
+            batteryOptimizationResult(BATTERY_OUTCOME_REQUESTED)
+        } else {
+            AppLog.w(TAG, "battery_optimization request unavailable; opening app settings fallback")
+            openAppDetailsSettings(
+                fallbackOutcome = BATTERY_OUTCOME_SETTINGS_OPENED,
+                failureMessage = "Could not open battery optimization request or app settings.",
+            )
+        }
+    }
+
+    private fun openBatteryOptimizationSettings(): Map<String, Any?> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return batteryOptimizationResult(BATTERY_OUTCOME_UNSUPPORTED)
+        }
+        val settingsIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        return if (launchSafely(settingsIntent)) {
+            batteryOptimizationResult(BATTERY_OUTCOME_SETTINGS_OPENED)
+        } else {
+            openAppDetailsSettings(
+                fallbackOutcome = BATTERY_OUTCOME_SETTINGS_OPENED,
+                failureMessage = "Could not open battery optimization settings.",
+            )
+        }
+    }
+
+    private fun openManufacturerBackgroundSettings(): Map<String, Any?> {
+        val manufacturer = Build.MANUFACTURER.lowercase()
+        val intents =
+            manufacturerBackgroundSettingsIntents(manufacturer) +
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+        for (intent in intents) {
+            if (launchSafely(intent)) {
+                return batteryOptimizationResult(BATTERY_OUTCOME_SETTINGS_OPENED)
+            }
+        }
+        return batteryOptimizationResult(
+            BATTERY_OUTCOME_FAILED,
+            "Could not open manufacturer background settings.",
+        )
+    }
+
+    private fun manufacturerBackgroundSettingsIntents(manufacturer: String): List<Intent> {
+        val components =
+            when {
+                manufacturer.contains("xiaomi") ->
+                    listOf(
+                        "com.miui.securitycenter/com.miui.permcenter.autostart.AutoStartManagementActivity",
+                        "com.miui.securitycenter/com.miui.powercenter.PowerSettings",
+                    )
+                manufacturer.contains("huawei") || manufacturer.contains("honor") ->
+                    listOf(
+                        "com.huawei.systemmanager/com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity",
+                        "com.huawei.systemmanager/com.huawei.systemmanager.optimize.process.ProtectActivity",
+                    )
+                manufacturer.contains("oppo") ->
+                    listOf(
+                        "com.coloros.safecenter/com.coloros.safecenter.permission.startup.StartupAppListActivity",
+                        "com.oppo.safe/com.oppo.safe.permission.startup.StartupAppListActivity",
+                    )
+                manufacturer.contains("vivo") ->
+                    listOf(
+                        "com.vivo.permissionmanager/com.vivo.permissionmanager.activity.BgStartUpManagerActivity",
+                        "com.iqoo.secure/com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity",
+                    )
+                manufacturer.contains("asus") ->
+                    listOf("com.asus.mobilemanager/com.asus.mobilemanager.entry.FunctionActivity")
+                manufacturer.contains("samsung") ->
+                    listOf("com.samsung.android.lool/com.samsung.android.sm.ui.battery.BatteryActivity")
+                manufacturer.contains("oneplus") ->
+                    listOf("com.oneplus.security/com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity")
+                else -> emptyList()
+            }
+        return components.mapNotNull { raw ->
+            val component = ComponentName.unflattenFromString(raw) ?: return@mapNotNull null
+            Intent().apply { this.component = component }
+        }
+    }
+
+    private fun openAppDetailsSettings(
+        fallbackOutcome: String,
+        failureMessage: String,
+    ): Map<String, Any?> {
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        return if (launchSafely(intent)) {
+            batteryOptimizationResult(fallbackOutcome)
+        } else {
+            batteryOptimizationResult(BATTERY_OUTCOME_FAILED, failureMessage)
+        }
+    }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return false
+        return powerManager.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    private fun isPowerSaveMode(): Boolean {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return false
+        return powerManager.isPowerSaveMode
+    }
+
+    private fun launchSafely(intent: Intent): Boolean {
+        return try {
+            if (intent.resolveActivity(packageManager) == null) {
+                false
+            } else {
+                startActivity(intent)
+                true
+            }
+        } catch (e: ActivityNotFoundException) {
+            false
+        } catch (e: SecurityException) {
+            AppLog.w(TAG, "Could not launch settings intent ${intent.action}: ${e.message}")
+            false
+        } catch (e: RuntimeException) {
+            AppLog.w(TAG, "Could not launch settings intent ${intent.action}: ${e.message}")
+            false
+        }
+    }
+
+    private fun batteryOptimizationResult(outcome: String, message: String? = null): Map<String, Any?> {
+        return mapOf(
+            VpnContract.ARG_BATTERY_OPTIMIZATION_OUTCOME to outcome,
+            VpnContract.ARG_BATTERY_OPTIMIZATION_MESSAGE to message,
+        )
+    }
+
     private fun sanitizePort(raw: Any?, fallback: Int): Int {
         val candidate =
             when (raw) {
@@ -659,6 +837,14 @@ class MainActivity : FlutterActivity() {
         private const val REQUEST_VPN_PERMISSION = 0x4E50
         private const val REQUEST_POST_NOTIFICATIONS = 0x4E51
         private const val ProfileTransferMimeType = "application/vnd.tunnelforge.profile+json"
+        private const val BATTERY_STATE_UNSUPPORTED = "unsupported"
+        private const val BATTERY_STATE_ALLOWED = "allowed"
+        private const val BATTERY_STATE_RESTRICTED = "restricted"
+        private const val BATTERY_OUTCOME_UNSUPPORTED = "unsupported"
+        private const val BATTERY_OUTCOME_ALREADY_ALLOWED = "alreadyAllowed"
+        private const val BATTERY_OUTCOME_REQUESTED = "requested"
+        private const val BATTERY_OUTCOME_SETTINGS_OPENED = "settingsOpened"
+        private const val BATTERY_OUTCOME_FAILED = "failed"
     }
 }
 

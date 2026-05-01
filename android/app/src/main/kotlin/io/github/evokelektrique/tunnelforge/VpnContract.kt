@@ -9,10 +9,20 @@ object VpnContract {
     const val DISCONNECT = "disconnect"
     const val SET_LOG_LEVEL = "setLogLevel"
     const val GET_RUNTIME_STATE = "getRuntimeState"
+    const val GET_BATTERY_OPTIMIZATION_STATUS = "getBatteryOptimizationStatus"
+    const val REQUEST_IGNORE_BATTERY_OPTIMIZATIONS = "requestIgnoreBatteryOptimizations"
+    const val OPEN_BATTERY_OPTIMIZATION_SETTINGS = "openBatteryOptimizationSettings"
+    const val OPEN_MANUFACTURER_BACKGROUND_SETTINGS = "openManufacturerBackgroundSettings"
 
     /** Correlation id for one connect attempt (Flutter -> Android). */
     const val ARG_ATTEMPT_ID = "attemptId"
     const val ARG_LOG_LEVEL = "logLevel"
+    const val ARG_BATTERY_OPTIMIZATION_STATE = "state"
+    const val ARG_BATTERY_OPTIMIZATION_OUTCOME = "outcome"
+    const val ARG_BATTERY_OPTIMIZATION_MESSAGE = "message"
+    const val ARG_BATTERY_OPTIMIZATION_POWER_SAVE_MODE = "powerSaveMode"
+    const val ARG_BATTERY_OPTIMIZATION_MANUFACTURER = "manufacturer"
+    const val ARG_BATTERY_OPTIMIZATION_ANDROID_SDK_INT = "androidSdkInt"
 
     const val ARG_SERVER = "server"
     const val ARG_USER = "user"

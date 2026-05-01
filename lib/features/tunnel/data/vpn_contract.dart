@@ -10,10 +10,24 @@ abstract final class VpnContract {
   static const String disconnect = 'disconnect';
   static const String setLogLevel = 'setLogLevel';
   static const String getRuntimeState = 'getRuntimeState';
+  static const String getBatteryOptimizationStatus =
+      'getBatteryOptimizationStatus';
+  static const String requestIgnoreBatteryOptimizations =
+      'requestIgnoreBatteryOptimizations';
+  static const String openBatteryOptimizationSettings =
+      'openBatteryOptimizationSettings';
+  static const String openManufacturerBackgroundSettings =
+      'openManufacturerBackgroundSettings';
 
   /// Correlates one connect attempt across Dart UI, logs, and Android logcat.
   static const String argAttemptId = 'attemptId';
   static const String argLogLevel = 'logLevel';
+  static const String argBatteryOptimizationState = 'state';
+  static const String argBatteryOptimizationOutcome = 'outcome';
+  static const String argBatteryOptimizationMessage = 'message';
+  static const String argBatteryOptimizationPowerSaveMode = 'powerSaveMode';
+  static const String argBatteryOptimizationManufacturer = 'manufacturer';
+  static const String argBatteryOptimizationAndroidSdkInt = 'androidSdkInt';
 
   static const String argServer = 'server';
   static const String argUser = 'user';

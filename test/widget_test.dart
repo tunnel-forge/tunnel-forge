@@ -111,7 +111,11 @@ void main() {
 
   List<String> userInitiatedVpnMethods(List<String> methods) {
     return methods
-        .where((method) => method != VpnContract.getRuntimeState)
+        .where(
+          (method) =>
+              method != VpnContract.getRuntimeState &&
+              method != VpnContract.getBatteryOptimizationStatus,
+        )
         .toList(growable: false);
   }
 

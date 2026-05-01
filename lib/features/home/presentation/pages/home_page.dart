@@ -70,7 +70,8 @@ class _VpnHomePageView extends StatefulWidget {
   State<_VpnHomePageView> createState() => _VpnHomePageViewState();
 }
 
-class _VpnHomePageViewState extends State<_VpnHomePageView> {
+class _VpnHomePageViewState extends State<_VpnHomePageView>
+    with WidgetsBindingObserver {
   static const String _kGithubReleasesUrl =
       'https://github.com/evokelektrique/tunnel-forge/releases';
   static const String _kProjectGithubUrl =
@@ -81,20 +82,31 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
   bool _logsStickToBottom = true;
   int _lastProfilesMessageId = 0;
   int _lastTunnelMessageId = 0;
+  int _lastSettingsMessageId = 0;
   bool _lastTunnelUp = false;
   int _lastLogsEntryCount = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _logsScroll.addListener(_syncLogsStickToBottom);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _logsScroll.removeListener(_syncLogsStickToBottom);
     _logsScroll.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    context.read<SettingsBloc>().add(
+      const SettingsBatteryOptimizationRefreshRequested(),
+    );
   }
 
   void _syncLogsStickToBottom() {
@@ -332,6 +344,11 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
       return;
     }
     final profile = row.profile;
+    if (settingsState.connectionMode == ConnectionMode.vpnTunnel) {
+      context.read<SettingsBloc>().add(
+        const SettingsBatteryOptimizationVpnConnectAttempted(),
+      );
+    }
     final trimmedName = profile.displayName.trim();
     final dnsServers = profile.dnsAutomatic
         ? const <DnsServerConfig>[]
@@ -540,9 +557,17 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
         ),
         BlocListener<SettingsBloc, SettingsState>(
           listenWhen: (previous, current) =>
-              previous.installedVersionLoaded != current.installedVersionLoaded,
-          listener: (context, state) =>
-              _maybeRequestVersionCheck(state, navState.index),
+              previous.installedVersionLoaded !=
+                  current.installedVersionLoaded ||
+              previous.message != current.message,
+          listener: (context, state) {
+            _maybeRequestVersionCheck(state, navState.index);
+            final message = state.message;
+            if (message != null && message.id != _lastSettingsMessageId) {
+              _lastSettingsMessageId = message.id;
+              _toast(message.text, error: message.error);
+            }
+          },
         ),
       ],
       child: Scaffold(
@@ -766,6 +791,17 @@ class _VpnHomePageViewState extends State<_VpnHomePageView> {
                         context.read<SettingsBloc>().add(
                           SettingsConnectivityCheckSettingsChanged(settings),
                         ),
+                    batteryOptimizationStatus:
+                        settingsState.batteryOptimizationStatus,
+                    batteryOptimizationBusy:
+                        settingsState.batteryOptimizationBusy,
+                    onRefreshBatteryOptimization: () =>
+                        context.read<SettingsBloc>().add(
+                          const SettingsBatteryOptimizationRefreshRequested(),
+                        ),
+                    onRequestBatteryOptimization: () => context
+                        .read<SettingsBloc>()
+                        .add(const SettingsBatteryOptimizationRequestPressed()),
                     onChooseApps: _pickAppsForVpn,
                     onOpenL2tpSecurityNotice: _openL2tpSecurityNotice,
                     installedVersion: settingsState.installedVersion,

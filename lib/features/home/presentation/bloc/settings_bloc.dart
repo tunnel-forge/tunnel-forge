@@ -5,6 +5,7 @@ import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
 import '../../domain/home_models.dart';
 import '../../../home/domain/home_repositories.dart';
 import 'package:tunnel_forge/core/logging/log_entry.dart';
+import 'package:tunnel_forge/l10n/app_localizations.dart';
 
 sealed class SettingsEvent extends Equatable {
   const SettingsEvent();
@@ -37,6 +38,28 @@ final class SettingsSplitTunnelSettingsChanged extends SettingsEvent {
 
 final class SettingsVersionCheckRequested extends SettingsEvent {
   const SettingsVersionCheckRequested();
+}
+
+final class SettingsBatteryOptimizationRefreshRequested extends SettingsEvent {
+  const SettingsBatteryOptimizationRefreshRequested();
+}
+
+final class SettingsBatteryOptimizationRequestPressed extends SettingsEvent {
+  const SettingsBatteryOptimizationRequestPressed();
+}
+
+final class SettingsBatteryOptimizationVpnConnectAttempted
+    extends SettingsEvent {
+  const SettingsBatteryOptimizationVpnConnectAttempted();
+}
+
+final class SettingsBatteryOptimizationSettingsPressed extends SettingsEvent {
+  const SettingsBatteryOptimizationSettingsPressed();
+}
+
+final class SettingsManufacturerBackgroundSettingsPressed
+    extends SettingsEvent {
+  const SettingsManufacturerBackgroundSettingsPressed();
 }
 
 final class SettingsProxySettingsChanged extends SettingsEvent {
@@ -73,6 +96,9 @@ class SettingsState extends Equatable {
     this.latestReleaseVersion,
     this.latestReleaseUrl,
     this.updateErrorMessage,
+    this.batteryOptimizationStatus = const BatteryOptimizationStatus.unknown(),
+    this.batteryOptimizationBusy = false,
+    this.message,
   });
 
   final bool loading;
@@ -89,6 +115,9 @@ class SettingsState extends Equatable {
   final String? latestReleaseVersion;
   final String? latestReleaseUrl;
   final String? updateErrorMessage;
+  final BatteryOptimizationStatus batteryOptimizationStatus;
+  final bool batteryOptimizationBusy;
+  final HomeMessage? message;
 
   SettingsState copyWith({
     bool? loading,
@@ -109,6 +138,10 @@ class SettingsState extends Equatable {
     String? latestReleaseUrl,
     String? updateErrorMessage,
     bool clearUpdateErrorMessage = false,
+    BatteryOptimizationStatus? batteryOptimizationStatus,
+    bool? batteryOptimizationBusy,
+    HomeMessage? message,
+    bool clearMessage = false,
   }) {
     return SettingsState(
       loading: loading ?? this.loading,
@@ -135,6 +168,11 @@ class SettingsState extends Equatable {
       updateErrorMessage: clearUpdateErrorMessage
           ? null
           : (updateErrorMessage ?? this.updateErrorMessage),
+      batteryOptimizationStatus:
+          batteryOptimizationStatus ?? this.batteryOptimizationStatus,
+      batteryOptimizationBusy:
+          batteryOptimizationBusy ?? this.batteryOptimizationBusy,
+      message: clearMessage ? null : (message ?? this.message),
     );
   }
 
@@ -154,6 +192,9 @@ class SettingsState extends Equatable {
     latestReleaseVersion,
     latestReleaseUrl,
     updateErrorMessage,
+    batteryOptimizationStatus,
+    batteryOptimizationBusy,
+    message,
   ];
 }
 
@@ -163,6 +204,7 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
     this._appVersionRepository,
     this._appUpdateRepository,
     this._logsRepository,
+    this._tunnelRepository,
   ) : super(const SettingsState()) {
     on<SettingsStarted>(_onStarted);
     on<SettingsConnectionModeChanged>(_onConnectionModeChanged);
@@ -172,12 +214,30 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
       _onConnectivityCheckSettingsChanged,
     );
     on<SettingsVersionCheckRequested>(_onVersionCheckRequested);
+    on<SettingsBatteryOptimizationRefreshRequested>(
+      _onBatteryOptimizationRefreshRequested,
+    );
+    on<SettingsBatteryOptimizationRequestPressed>(
+      _onBatteryOptimizationRequestPressed,
+    );
+    on<SettingsBatteryOptimizationVpnConnectAttempted>(
+      _onBatteryOptimizationVpnConnectAttempted,
+    );
+    on<SettingsBatteryOptimizationSettingsPressed>(
+      _onBatteryOptimizationSettingsPressed,
+    );
+    on<SettingsManufacturerBackgroundSettingsPressed>(
+      _onManufacturerBackgroundSettingsPressed,
+    );
   }
 
   final SettingsRepository _settingsRepository;
   final AppVersionRepository _appVersionRepository;
   final AppUpdateRepository _appUpdateRepository;
   final LogsRepository _logsRepository;
+  final TunnelRepository _tunnelRepository;
+  int _messageId = 0;
+  bool _batteryOptimizationConnectPromptInFlight = false;
 
   Future<void> _onStarted(
     SettingsStarted event,
@@ -190,11 +250,14 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
     final connectivityCheckSettingsFuture = _settingsRepository
         .loadConnectivityCheckSettings();
     final installedVersionFuture = _appVersionRepository.loadInstalledVersion();
+    final batteryOptimizationStatusFuture = _tunnelRepository
+        .getBatteryOptimizationStatus();
 
     final connectionMode = await connectionModeFuture;
     final splitTunnelSettings = await splitTunnelSettingsFuture;
     final proxySettings = await proxySettingsFuture;
     final connectivityCheckSettings = await connectivityCheckSettingsFuture;
+    final batteryOptimizationStatus = await batteryOptimizationStatusFuture;
 
     emit(
       state.copyWith(
@@ -203,6 +266,7 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
         splitTunnelSettings: splitTunnelSettings,
         proxySettings: proxySettings,
         connectivityCheckSettings: connectivityCheckSettings,
+        batteryOptimizationStatus: batteryOptimizationStatus,
         clearConnectivityUrlError: true,
         clearUpdateErrorMessage: true,
       ),
@@ -222,6 +286,136 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
         installedVersionLoaded: true,
       ),
     );
+  }
+
+  Future<void> _onBatteryOptimizationRefreshRequested(
+    SettingsBatteryOptimizationRefreshRequested event,
+    Emitter<SettingsState> emit,
+  ) async {
+    final status = await _tunnelRepository.getBatteryOptimizationStatus();
+    emit(state.copyWith(batteryOptimizationStatus: status, clearMessage: true));
+  }
+
+  Future<void> _onBatteryOptimizationRequestPressed(
+    SettingsBatteryOptimizationRequestPressed event,
+    Emitter<SettingsState> emit,
+  ) async {
+    await _runBatteryOptimizationAction(
+      emit,
+      action: _tunnelRepository.requestIgnoreBatteryOptimizations,
+      logAction: 'request',
+    );
+  }
+
+  Future<void> _onBatteryOptimizationVpnConnectAttempted(
+    SettingsBatteryOptimizationVpnConnectAttempted event,
+    Emitter<SettingsState> emit,
+  ) async {
+    if (_batteryOptimizationConnectPromptInFlight) return;
+    if (state.batteryOptimizationBusy) return;
+    _batteryOptimizationConnectPromptInFlight = true;
+    try {
+      final alreadyShown = await _settingsRepository
+          .loadBatteryOptimizationConnectPromptShown();
+      if (alreadyShown) return;
+
+      var status = state.batteryOptimizationStatus;
+      if (status.state == BatteryOptimizationState.unknown) {
+        status = await _tunnelRepository.getBatteryOptimizationStatus();
+        emit(state.copyWith(batteryOptimizationStatus: status));
+      }
+      if (!status.canRequestExemption) return;
+
+      await _settingsRepository.saveBatteryOptimizationConnectPromptShown(true);
+      await _runBatteryOptimizationAction(
+        emit,
+        action: _tunnelRepository.requestIgnoreBatteryOptimizations,
+        logAction: 'connect-prompt',
+      );
+    } finally {
+      _batteryOptimizationConnectPromptInFlight = false;
+    }
+  }
+
+  Future<void> _onBatteryOptimizationSettingsPressed(
+    SettingsBatteryOptimizationSettingsPressed event,
+    Emitter<SettingsState> emit,
+  ) async {
+    await _runBatteryOptimizationAction(
+      emit,
+      action: _tunnelRepository.openBatteryOptimizationSettings,
+      logAction: 'settings',
+    );
+  }
+
+  Future<void> _onManufacturerBackgroundSettingsPressed(
+    SettingsManufacturerBackgroundSettingsPressed event,
+    Emitter<SettingsState> emit,
+  ) async {
+    await _runBatteryOptimizationAction(
+      emit,
+      action: _tunnelRepository.openManufacturerBackgroundSettings,
+      logAction: 'manufacturer-settings',
+    );
+  }
+
+  Future<void> _runBatteryOptimizationAction(
+    Emitter<SettingsState> emit, {
+    required Future<BatteryOptimizationRequestResult> Function() action,
+    required String logAction,
+  }) async {
+    emit(state.copyWith(batteryOptimizationBusy: true, clearMessage: true));
+    final result = await action();
+    final status = await _tunnelRepository.getBatteryOptimizationStatus();
+    final message = _batteryOptimizationMessage(result);
+    _appendLog(
+      result.outcome == BatteryOptimizationRequestOutcome.failed
+          ? LogLevel.warning
+          : LogLevel.info,
+      'battery_optimization: action=$logAction outcome=${result.outcome.name} state=${status.state.name}${result.message == null ? '' : ' message=${result.message}'}',
+    );
+    emit(
+      state.copyWith(
+        batteryOptimizationBusy: false,
+        batteryOptimizationStatus: status,
+        message: _nextMessage(
+          message,
+          error: result.outcome == BatteryOptimizationRequestOutcome.failed,
+        ),
+      ),
+    );
+  }
+
+  HomeMessage _nextMessage(String text, {bool error = false}) {
+    _messageId += 1;
+    return HomeMessage(id: _messageId, text: text, error: error);
+  }
+
+  String _batteryOptimizationMessage(BatteryOptimizationRequestResult result) {
+    return switch (result.outcome) {
+      BatteryOptimizationRequestOutcome.unsupported => AppText.pick(
+        'Battery optimization settings are not available on this device.',
+        'تنظیمات بهینه‌سازی باتری در این دستگاه در دسترس نیست.',
+      ),
+      BatteryOptimizationRequestOutcome.alreadyAllowed => AppText.pick(
+        'Battery optimization is already disabled for TunnelForge.',
+        'بهینه‌سازی باتری برای TunnelForge از قبل غیرفعال است.',
+      ),
+      BatteryOptimizationRequestOutcome.requested => AppText.pick(
+        'Battery optimization request opened.',
+        'درخواست بهینه‌سازی باتری باز شد.',
+      ),
+      BatteryOptimizationRequestOutcome.settingsOpened => AppText.pick(
+        'Battery settings opened.',
+        'تنظیمات باتری باز شد.',
+      ),
+      BatteryOptimizationRequestOutcome.failed =>
+        result.message ??
+            AppText.pick(
+              'Could not open battery settings.',
+              'تنظیمات باتری باز نشد.',
+            ),
+    };
   }
 
   Future<void> _onConnectionModeChanged(

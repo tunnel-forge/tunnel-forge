@@ -97,6 +97,7 @@ GetIt createAppLocator({
       locator<AppVersionRepository>(),
       locator<AppUpdateRepository>(),
       locator<LogsRepository>(),
+      locator<TunnelRepository>(),
     ),
   );
   locator.registerFactory<LogsBloc>(

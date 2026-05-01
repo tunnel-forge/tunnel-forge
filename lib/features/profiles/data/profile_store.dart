@@ -72,6 +72,8 @@ class ProfileStore {
   static const prefsKeyConnectivityCheckTimeoutMs =
       'connectivity_check_timeout_ms_v1';
   static const prefsKeyLogDisplayLevel = 'log_display_level_v1';
+  static const prefsKeyBatteryOptimizationConnectPromptShown =
+      'battery_optimization_connect_prompt_shown_v1';
 
   final SharedPreferences? _prefsOverride;
   final SecretStore _secrets;
@@ -234,6 +236,16 @@ class ProfileStore {
   Future<void> saveLogDisplayLevel(LogDisplayLevel level) async {
     final p = await _prefs();
     await p.setString(prefsKeyLogDisplayLevel, level.storageValue);
+  }
+
+  Future<bool> loadBatteryOptimizationConnectPromptShown() async {
+    final p = await _prefs();
+    return p.getBool(prefsKeyBatteryOptimizationConnectPromptShown) ?? false;
+  }
+
+  Future<void> saveBatteryOptimizationConnectPromptShown(bool shown) async {
+    final p = await _prefs();
+    await p.setBool(prefsKeyBatteryOptimizationConnectPromptShown, shown);
   }
 
   Future<void> _saveProfileList(List<Profile> list) async {

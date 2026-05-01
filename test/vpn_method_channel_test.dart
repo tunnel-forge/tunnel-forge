@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:tunnel_forge/features/profiles/domain/profile_models.dart';
 import 'package:tunnel_forge/core/logging/log_entry.dart';
+import 'package:tunnel_forge/features/home/domain/home_models.dart';
 import 'package:tunnel_forge/features/tunnel/data/vpn_client.dart';
 import 'package:tunnel_forge/features/tunnel/data/vpn_contract.dart';
 import 'package:tunnel_forge/features/tunnel/domain/tunnel_runtime_state.dart';
@@ -60,6 +61,19 @@ void main() {
                 return <Map<String, String>>[];
               case VpnContract.getAppIcon:
                 return Uint8List.fromList([0x89, 0x50, 0x4e, 0x47]);
+              case VpnContract.getBatteryOptimizationStatus:
+                return <String, Object?>{
+                  VpnContract.argBatteryOptimizationState: 'restricted',
+                  VpnContract.argBatteryOptimizationPowerSaveMode: true,
+                  VpnContract.argBatteryOptimizationManufacturer: 'Google',
+                  VpnContract.argBatteryOptimizationAndroidSdkInt: 35,
+                };
+              case VpnContract.requestIgnoreBatteryOptimizations:
+              case VpnContract.openBatteryOptimizationSettings:
+              case VpnContract.openManufacturerBackgroundSettings:
+                return <String, Object?>{
+                  VpnContract.argBatteryOptimizationOutcome: 'settingsOpened',
+                };
               default:
                 fail('unexpected method ${call.method}');
             }
@@ -80,6 +94,24 @@ void main() {
       expect(ok, isTrue);
       expect(calls, hasLength(1));
       expect(calls.single.method, VpnContract.prepareVpn);
+    });
+
+    test('getBatteryOptimizationStatus maps native snapshot', () async {
+      final status = await VpnClient().getBatteryOptimizationStatus();
+      expect(status.state, BatteryOptimizationState.restricted);
+      expect(status.powerSaveMode, isTrue);
+      expect(status.manufacturer, 'Google');
+      expect(status.androidSdkInt, 35);
+      expect(calls.single.method, VpnContract.getBatteryOptimizationStatus);
+    });
+
+    test('requestIgnoreBatteryOptimizations maps outcome', () async {
+      final result = await VpnClient().requestIgnoreBatteryOptimizations();
+      expect(result.outcome, BatteryOptimizationRequestOutcome.settingsOpened);
+      expect(
+        calls.single.method,
+        VpnContract.requestIgnoreBatteryOptimizations,
+      );
     });
 
     test('connect map', () async {

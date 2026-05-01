@@ -356,6 +356,11 @@ class _FakeTunnelRepository implements TunnelRepository {
   Future<TunnelRuntimeState> getRuntimeState() async => runtimeState;
 
   @override
+  Future<BatteryOptimizationStatus> getBatteryOptimizationStatus() async {
+    return const BatteryOptimizationStatus.unknown();
+  }
+
+  @override
   Future<void> connect(TunnelConnectRequest request) async {}
 
   @override
@@ -369,6 +374,34 @@ class _FakeTunnelRepository implements TunnelRepository {
 
   @override
   Future<List<CandidateApp>> listVpnCandidateApps() async => const [];
+
+  @override
+  Future<BatteryOptimizationRequestResult> openBatteryOptimizationSettings() {
+    return Future.value(
+      const BatteryOptimizationRequestResult(
+        outcome: BatteryOptimizationRequestOutcome.settingsOpened,
+      ),
+    );
+  }
+
+  @override
+  Future<BatteryOptimizationRequestResult>
+  openManufacturerBackgroundSettings() {
+    return Future.value(
+      const BatteryOptimizationRequestResult(
+        outcome: BatteryOptimizationRequestOutcome.settingsOpened,
+      ),
+    );
+  }
+
+  @override
+  Future<BatteryOptimizationRequestResult> requestIgnoreBatteryOptimizations() {
+    return Future.value(
+      const BatteryOptimizationRequestResult(
+        outcome: BatteryOptimizationRequestOutcome.requested,
+      ),
+    );
+  }
 
   @override
   Future<void> setLogLevel(LogDisplayLevel level) async {}

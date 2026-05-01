@@ -264,5 +264,13 @@ void main() {
 
       expect(await store.loadLogDisplayLevel(), LogDisplayLevel.warning);
     });
+
+    test('persists battery optimization connect prompt flag', () async {
+      expect(await store.loadBatteryOptimizationConnectPromptShown(), isFalse);
+
+      await store.saveBatteryOptimizationConnectPromptShown(true);
+
+      expect(await store.loadBatteryOptimizationConnectPromptShown(), isTrue);
+    });
   });
 }

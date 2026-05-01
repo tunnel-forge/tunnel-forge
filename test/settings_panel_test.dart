@@ -20,9 +20,16 @@ void main() {
     ProxyExposure? proxyExposure,
     ConnectivityCheckSettings connectivityCheckSettings =
         const ConnectivityCheckSettings(),
+    BatteryOptimizationStatus batteryOptimizationStatus =
+        const BatteryOptimizationStatus(
+          state: BatteryOptimizationState.restricted,
+        ),
+    bool batteryOptimizationBusy = false,
     ValueChanged<SplitTunnelSettings>? onSplitTunnelSettingsChanged,
     ValueChanged<ProxySettings>? onProxySettingsChanged,
     ValueChanged<ConnectivityCheckSettings>? onConnectivityCheckSettingsChanged,
+    VoidCallback? onRefreshBatteryOptimization,
+    VoidCallback? onRequestBatteryOptimization,
     VoidCallback? onOpenL2tpSecurityNotice,
   }) {
     final theme = ThemeData.light();
@@ -38,11 +45,15 @@ void main() {
           proxySettings: proxySettings,
           proxyExposure: proxyExposure,
           connectivityCheckSettings: connectivityCheckSettings,
+          batteryOptimizationStatus: batteryOptimizationStatus,
+          batteryOptimizationBusy: batteryOptimizationBusy,
           onConnectionModeChanged: (_) {},
           onSplitTunnelSettingsChanged: onSplitTunnelSettingsChanged ?? (_) {},
           onProxySettingsChanged: onProxySettingsChanged ?? (_) {},
           onConnectivityCheckSettingsChanged:
               onConnectivityCheckSettingsChanged ?? (_) {},
+          onRefreshBatteryOptimization: onRefreshBatteryOptimization ?? () {},
+          onRequestBatteryOptimization: onRequestBatteryOptimization ?? () {},
           onChooseApps: () {},
           onOpenL2tpSecurityNotice: onOpenL2tpSecurityNotice,
           installedVersion: '0.3.0+11',
@@ -319,6 +330,62 @@ void main() {
 
     expect(find.text('https://example.com/ping'), findsWidgets);
     expect(find.text('3200'), findsWidgets);
+  });
+
+  testWidgets('battery optimization card shows restricted action', (
+    tester,
+  ) async {
+    var requested = false;
+
+    await tester.pumpWidget(
+      buildPanel(
+        proxySettings: const ProxySettings(),
+        onRequestBatteryOptimization: () {
+          requested = true;
+        },
+      ),
+    );
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('battery_optimization_card')),
+      200,
+      scrollable: settingsScrollView(),
+    );
+
+    expect(find.byKey(const Key('battery_optimization_card')), findsOneWidget);
+    expect(find.text('Battery optimization'), findsOneWidget);
+    expect(find.text('Allow'), findsOneWidget);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('battery_optimization_request_button')),
+    );
+    await tester.pump();
+    await tester.tap(
+      find.byKey(const Key('battery_optimization_request_button')),
+    );
+    await tester.pump();
+
+    expect(requested, isTrue);
+  });
+
+  testWidgets('battery optimization allowed state hides request action', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildPanel(
+        proxySettings: const ProxySettings(),
+        batteryOptimizationStatus: const BatteryOptimizationStatus(
+          state: BatteryOptimizationState.allowed,
+        ),
+      ),
+    );
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('battery_optimization_card')),
+      200,
+      scrollable: settingsScrollView(),
+    );
+
+    expect(find.text('Allow'), findsNothing);
+    expect(find.text('Allowed for background use.'), findsOneWidget);
   });
 
   testWidgets('editing connectivity URL emits parsed global settings', (

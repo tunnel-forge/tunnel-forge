@@ -18,10 +18,14 @@ class SettingsPanel extends StatefulWidget {
     required this.proxySettings,
     this.proxyExposure,
     required this.connectivityCheckSettings,
+    required this.batteryOptimizationStatus,
+    required this.batteryOptimizationBusy,
     required this.onConnectionModeChanged,
     required this.onSplitTunnelSettingsChanged,
     required this.onProxySettingsChanged,
     required this.onConnectivityCheckSettingsChanged,
+    required this.onRefreshBatteryOptimization,
+    required this.onRequestBatteryOptimization,
     required this.onChooseApps,
     this.onOpenL2tpSecurityNotice,
     this.installedVersion,
@@ -47,11 +51,15 @@ class SettingsPanel extends StatefulWidget {
   final ProxySettings proxySettings;
   final ProxyExposure? proxyExposure;
   final ConnectivityCheckSettings connectivityCheckSettings;
+  final BatteryOptimizationStatus batteryOptimizationStatus;
+  final bool batteryOptimizationBusy;
   final ValueChanged<ConnectionMode> onConnectionModeChanged;
   final ValueChanged<SplitTunnelSettings> onSplitTunnelSettingsChanged;
   final ValueChanged<ProxySettings> onProxySettingsChanged;
   final ValueChanged<ConnectivityCheckSettings>
   onConnectivityCheckSettingsChanged;
+  final VoidCallback onRefreshBatteryOptimization;
+  final VoidCallback onRequestBatteryOptimization;
   final VoidCallback onChooseApps;
   final VoidCallback? onOpenL2tpSecurityNotice;
   final String? installedVersion;
@@ -462,6 +470,52 @@ class _SettingsPanelState extends State<SettingsPanel> {
           ),
         ),
         const SizedBox(height: _kSectionGap),
+        Card(
+          key: const Key('battery_optimization_card'),
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: _kCardTilePadding,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _cardTitle(t.batteryOptimization),
+                      _cardText(
+                        _batteryOptimizationSubtitle(t),
+                        color: _batteryOptimizationColor(),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                if (widget.batteryOptimizationStatus.canRequestExemption) ...[
+                  FilledButton.tonalIcon(
+                    key: const Key('battery_optimization_request_button'),
+                    onPressed: widget.batteryOptimizationBusy
+                        ? null
+                        : widget.onRequestBatteryOptimization,
+                    icon: const Icon(Icons.shield_outlined),
+                    label: Text(t.allowBackgroundVpn),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                IconButton.outlined(
+                  key: const Key('battery_optimization_refresh_button'),
+                  onPressed: widget.batteryOptimizationBusy
+                      ? null
+                      : widget.onRefreshBatteryOptimization,
+                  icon: const Icon(Icons.refresh),
+                  tooltip: t.refresh,
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: _kSectionGap),
         _sectionTitle(t.connectivityCheck),
         const SizedBox(height: _kSectionHeaderGap),
         Card(
@@ -687,6 +741,24 @@ class _SettingsPanelState extends State<SettingsPanel> {
         style: widget.textTheme.bodySmall?.copyWith(color: color),
       ),
     );
+  }
+
+  String _batteryOptimizationSubtitle(AppLocalizations t) {
+    return switch (widget.batteryOptimizationStatus.state) {
+      BatteryOptimizationState.allowed => t.batteryOptimizationAllowed,
+      BatteryOptimizationState.restricted => t.batteryOptimizationRestricted,
+      BatteryOptimizationState.unsupported => t.batteryOptimizationUnsupported,
+      BatteryOptimizationState.unknown => t.batteryOptimizationUnknown,
+    };
+  }
+
+  Color _batteryOptimizationColor() {
+    return switch (widget.batteryOptimizationStatus.state) {
+      BatteryOptimizationState.allowed => widget.colorScheme.primary,
+      BatteryOptimizationState.restricted => widget.colorScheme.error,
+      BatteryOptimizationState.unsupported ||
+      BatteryOptimizationState.unknown => widget.colorScheme.onSurfaceVariant,
+    };
   }
 
   String _updateTitle() {
