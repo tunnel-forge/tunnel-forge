@@ -983,7 +983,7 @@ void main() {
     expect(find.text('vpn.example.com'), findsWidgets);
   });
 
-  testWidgets('logs default to debug level and use cumulative filtering', (
+  testWidgets('logs default to info level and use cumulative filtering', (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
@@ -1043,8 +1043,8 @@ void main() {
     expect(find.textContaining('info message'), findsOneWidget);
     expect(find.textContaining('warn message'), findsOneWidget);
     expect(find.textContaining('error message'), findsOneWidget);
-    expect(find.textContaining('debug message'), findsOneWidget);
-    expect(find.text('DEBUG'), findsOneWidget);
+    expect(find.textContaining('debug message'), findsNothing);
+    expect(find.text('INFO'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Log level'));
     await tester.pumpAndSettle();

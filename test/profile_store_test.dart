@@ -257,12 +257,12 @@ void main() {
       expect(saved.timeoutMs, 3200);
     });
 
-    test('defaults log display level to debug and persists updates', () async {
-      expect(await store.loadLogDisplayLevel(), LogDisplayLevel.debug);
+    test('defaults log display level to info and persists updates', () async {
+      expect(await store.loadLogDisplayLevel(), LogDisplayLevel.info);
 
-      await store.saveLogDisplayLevel(LogDisplayLevel.debug);
+      await store.saveLogDisplayLevel(LogDisplayLevel.warning);
 
-      expect(await store.loadLogDisplayLevel(), LogDisplayLevel.debug);
+      expect(await store.loadLogDisplayLevel(), LogDisplayLevel.warning);
     });
   });
 }
