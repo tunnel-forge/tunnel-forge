@@ -313,6 +313,80 @@ void main() {
     },
     expect: () => const <TunnelState>[],
   );
+
+  blocTest<TunnelBloc, TunnelState>(
+    'proxy connected event surfaces changed port notice',
+    build: () => TunnelBloc(_FakeTunnelRepository(), _FakeLogsRepository()),
+    seed: () => const TunnelState(
+      awaitingTunnel: true,
+      connectionMode: ConnectionMode.proxyOnly,
+      activeAttemptId: 'attempt-current',
+    ),
+    act: (bloc) {
+      bloc.add(
+        const TunnelHostStateReceived(
+          TunnelHostUpdate(
+            state: VpnTunnelState.connected,
+            detail:
+                'Proxy ports changed: HTTP 127.0.0.1:8081, SOCKS5 127.0.0.1:1081',
+            attemptId: 'attempt-current',
+          ),
+        ),
+      );
+    },
+    expect: () => const [
+      TunnelState(
+        tunnelUp: true,
+        connectionMode: ConnectionMode.proxyOnly,
+        activeAttemptId: 'attempt-current',
+      ),
+      TunnelState(
+        tunnelUp: true,
+        connectionMode: ConnectionMode.proxyOnly,
+        activeAttemptId: 'attempt-current',
+        message: HomeMessage(
+          id: 1,
+          text:
+              'Proxy ports changed: HTTP 127.0.0.1:8081, SOCKS5 127.0.0.1:1081',
+        ),
+      ),
+    ],
+  );
+
+  blocTest<TunnelBloc, TunnelState>(
+    'vpn connected event does not surface proxy changed port notice',
+    build: () => TunnelBloc(_FakeTunnelRepository(), _FakeLogsRepository()),
+    seed: () => const TunnelState(
+      awaitingTunnel: true,
+      connectionMode: ConnectionMode.vpnTunnel,
+      activeAttemptId: 'attempt-current',
+    ),
+    act: (bloc) {
+      bloc.add(
+        const TunnelHostStateReceived(
+          TunnelHostUpdate(
+            state: VpnTunnelState.connected,
+            detail:
+                'Proxy ports changed: HTTP 127.0.0.1:8081, SOCKS5 127.0.0.1:1081',
+            attemptId: 'attempt-current',
+          ),
+        ),
+      );
+    },
+    expect: () => const [
+      TunnelState(
+        tunnelUp: true,
+        connectionMode: ConnectionMode.vpnTunnel,
+        activeAttemptId: 'attempt-current',
+      ),
+      TunnelState(
+        tunnelUp: true,
+        connectionMode: ConnectionMode.vpnTunnel,
+        activeAttemptId: 'attempt-current',
+        message: HomeMessage(id: 1, text: 'VPN connected'),
+      ),
+    ],
+  );
 }
 
 late _CountingTunnelRepository _countingTunnelRepository;

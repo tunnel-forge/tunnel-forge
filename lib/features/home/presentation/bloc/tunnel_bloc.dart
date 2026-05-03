@@ -528,7 +528,9 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
         if (!state.stopRequested) {
           _toast(
             emit,
-            proxyMode
+            proxyMode && _isProxyPortChangedNotice(update.detail)
+                ? update.detail
+                : proxyMode
                 ? t.proxyReady
                 : AppText.pick('VPN connected', 'وی‌پی‌ان متصل شد'),
           );
@@ -650,6 +652,10 @@ class TunnelBloc extends Bloc<TunnelEvent, TunnelState> {
   bool _isTerminalTunnelState(String tunnelState) {
     return tunnelState == VpnTunnelState.failed ||
         tunnelState == VpnTunnelState.stopped;
+  }
+
+  bool _isProxyPortChangedNotice(String detail) {
+    return detail.trim().startsWith('Proxy ports changed:');
   }
 
   void _onAwaitTimedOut(TunnelAwaitTimedOut event, Emitter<TunnelState> emit) {

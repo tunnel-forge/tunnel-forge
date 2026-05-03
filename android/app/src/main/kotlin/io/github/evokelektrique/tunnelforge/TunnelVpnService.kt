@@ -784,20 +784,52 @@ class TunnelVpnService : VpnService() {
                 socksPort = config.socksPort,
                 lanRequested = config.allowLanConnections,
             )
+        val portSelection =
+            ProxyPortAllocator.choosePreferredThenRandom(
+                requestedHttpPort = config.httpPort,
+                requestedSocksPort = config.socksPort,
+                bindHosts = exposure.listenerBindAddresses(),
+            ) ?: throw IllegalStateException(
+                "Couldn't start local proxy listeners: no available HTTP/SOCKS5 ports after ${ProxyPortAllocator.RANDOM_CHECKS} random checks.",
+            )
+        val effectiveConfig =
+            config.copy(
+                httpPort = portSelection.httpPort,
+                socksPort = portSelection.socksPort,
+            )
+        val effectiveExposure =
+            exposure.copy(
+                httpPort = portSelection.httpPort,
+                socksPort = portSelection.socksPort,
+            )
+        if (portSelection.randomFallbackUsed) {
+            VpnTunnelEvents.emitEngineLog(
+                Log.WARN,
+                TAG,
+                "${prefixAttempt(activeAttemptId)}Default proxy ports unavailable; selected random fallback ports requestedHttp=${config.httpPort} requestedSocks=${config.socksPort} http=${portSelection.httpPort} socks=${portSelection.socksPort}",
+            )
+        } else if (portSelection.differsFrom(config.httpPort, config.socksPort)) {
+            VpnTunnelEvents.emitEngineLog(
+                Log.WARN,
+                TAG,
+                "${prefixAttempt(activeAttemptId)}Proxy listener ports changed requestedHttp=${config.httpPort} requestedSocks=${config.socksPort} http=${portSelection.httpPort} socks=${portSelection.socksPort}",
+            )
+        }
+        activeProxyConfig = effectiveConfig
         val logger = { level: Int, message: String ->
             VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(activeAttemptId)}$message")
         }
         val runtime =
             ProxyServerRuntime(
-                config = localProxyRuntimeConfig(config, exposure),
+                config = localProxyRuntimeConfig(effectiveConfig, effectiveExposure),
                 transport = DirectSocketProxyTransport(logger = logger),
                 levelLogger = logger,
             )
         try {
             runtime.start()
             localProxyRuntime = runtime
-            VpnTunnelEvents.emitProxyExposureChanged(exposure)
-            exposure.warning?.let { warning ->
+            VpnTunnelEvents.emitProxyExposureChanged(effectiveExposure)
+            effectiveExposure.warning?.let { warning ->
                 VpnTunnelEvents.emitEngineLog(
                     Log.WARN,
                     TAG,

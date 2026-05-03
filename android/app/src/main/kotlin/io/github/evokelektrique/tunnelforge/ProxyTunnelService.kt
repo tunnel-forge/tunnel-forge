@@ -161,6 +161,7 @@ class ProxyTunnelService : Service() {
         var nativeOwnerAcquired = false
         var localRuntime: ProxyServerRuntime? = null
         var localLoopThread: Thread? = null
+        var effectiveProxyConfig = proxyConfig
         emitAttemptState(
             attemptId,
             VpnContract.TUNNEL_CONNECTING,
@@ -293,10 +294,49 @@ class ProxyTunnelService : Service() {
                     socksPort = proxyConfig.socksPort,
                     lanRequested = proxyConfig.allowLanConnections,
                 )
+            val portSelection =
+                ProxyPortAllocator.choosePreferredThenRandom(
+                    requestedHttpPort = proxyConfig.httpPort,
+                    requestedSocksPort = proxyConfig.socksPort,
+                    bindHosts = exposure.listenerBindAddresses(),
+                )
+            if (portSelection == null) {
+                emitAttemptTerminalState(
+                    attemptId,
+                    VpnContract.TUNNEL_FAILED,
+                    "Couldn't start proxy listeners: no available HTTP/SOCKS5 ports after ${ProxyPortAllocator.RANDOM_CHECKS} random checks.",
+                )
+                NativeTunnelSessions.shared.stopOwner(nativeOwner, reason = "proxy listener ports unavailable")
+                loopThread.join(5000)
+                return
+            }
+            effectiveProxyConfig =
+                proxyConfig.copy(
+                    httpPort = portSelection.httpPort,
+                    socksPort = portSelection.socksPort,
+                )
+            val effectiveExposure =
+                exposure.copy(
+                    httpPort = portSelection.httpPort,
+                    socksPort = portSelection.socksPort,
+                )
+            if (portSelection.randomFallbackUsed) {
+                VpnTunnelEvents.emitEngineLog(
+                    Log.WARN,
+                    TAG,
+                    "${prefixAttempt(attemptId)}Default proxy ports unavailable; selected random fallback ports requestedHttp=${proxyConfig.httpPort} requestedSocks=${proxyConfig.socksPort} http=${portSelection.httpPort} socks=${portSelection.socksPort}",
+                )
+            } else if (portSelection.differsFrom(proxyConfig.httpPort, proxyConfig.socksPort)) {
+                VpnTunnelEvents.emitEngineLog(
+                    Log.WARN,
+                    TAG,
+                    "${prefixAttempt(attemptId)}Proxy listener ports changed requestedHttp=${proxyConfig.httpPort} requestedSocks=${proxyConfig.socksPort} http=${portSelection.httpPort} socks=${portSelection.socksPort}",
+                )
+            }
             val runtime = ProxyServerRuntime(
                 config =
-                    proxyConfig.copy(
-                        exposure = exposure,
+                    effectiveProxyConfig.copy(
+                        exposure = effectiveExposure,
                         maxConcurrentClients = PROXY_ONLY_MAX_CONCURRENT_CLIENTS,
                         suppressUpstreamHttpErrors = true,
                     ),
@@ -317,6 +357,7 @@ class ProxyTunnelService : Service() {
                     proxyTransport = transport
                     proxyRuntime = runtime
                     proxyLoopThread = loopThread
+                    activeProxyConfig = effectiveProxyConfig
                 }
             }
             if (workerReplaced) {
@@ -335,8 +376,8 @@ class ProxyTunnelService : Service() {
                 throw IllegalStateException(ProxyTunnelServiceStopPolicy.WORKER_REPLACED_MESSAGE)
             }
             runtime.start()
-            VpnTunnelEvents.emitProxyExposureChanged(exposure)
-            exposure.warning?.let { warning ->
+            VpnTunnelEvents.emitProxyExposureChanged(effectiveExposure)
+            effectiveExposure.warning?.let { warning ->
                 VpnTunnelEvents.emitEngineLog(Log.WARN, TAG, "${prefixAttempt(attemptId)}$warning")
             }
             VpnTunnelEvents.emitEngineLog(
@@ -346,10 +387,17 @@ class ProxyTunnelService : Service() {
             )
             connectedEmitted = true
             updateForegroundNotification(runtime.endpointSummary())
+            val changedPortNotice =
+                if (portSelection.differsFrom(proxyConfig.httpPort, proxyConfig.socksPort)) {
+                    "Proxy ports changed: ${runtime.endpointSummary()}"
+                } else {
+                    null
+                }
             emitAttemptState(
                 attemptId,
                 VpnContract.TUNNEL_CONNECTED,
-                "Native TCP stack active. ${runtime.endpointSummary()}. Hostnames resolve before tunneled connect; IPv6 destinations are still unsupported.",
+                changedPortNotice
+                    ?: "Native TCP stack active. ${runtime.endpointSummary()}. Hostnames resolve before tunneled connect; IPv6 destinations are still unsupported.",
             )
             loopThread.join()
         } catch (e: InterruptedException) {
@@ -391,9 +439,9 @@ class ProxyTunnelService : Service() {
             }
             VpnTunnelEvents.emitProxyExposureChanged(
                 ProxyExposureInfo.inactive(
-                    httpPort = proxyConfig.httpPort,
-                    socksPort = proxyConfig.socksPort,
-                    lanRequested = proxyConfig.allowLanConnections,
+                    httpPort = effectiveProxyConfig.httpPort,
+                    socksPort = effectiveProxyConfig.socksPort,
+                    lanRequested = effectiveProxyConfig.allowLanConnections,
                 ),
             )
             VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}proxy worker finalizing")
