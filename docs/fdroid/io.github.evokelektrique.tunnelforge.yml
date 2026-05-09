@@ -10,9 +10,9 @@ RepoType: git
 Repo: https://github.com/evokelektrique/tunnel-forge.git
 
 Builds:
-  - versionName: 0.7.0
-    versionCode: 27
-    commit: dc2fa65dd32eb22ab3fe00ebd1c6af173914cf00
+  - versionName: 0.7.1
+    versionCode: 28
+    commit: REPLACE_WITH_RELEASE_TAG_COMMIT_HASH
     timeout: 14400
     sudo:
       - apt-get update
@@ -46,5 +46,5 @@ Builds:
 AutoUpdateMode: Version v%v
 UpdateCheckMode: Tags
 UpdateCheckData: pubspec.yaml|version:\s.+\+(\d+)|.|version:\s(.+)\+
-CurrentVersion: 0.7.0
-CurrentVersionCode: 27
+CurrentVersion: 0.7.1
+CurrentVersionCode: 28

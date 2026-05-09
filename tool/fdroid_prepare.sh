@@ -92,9 +92,9 @@ update_metadata() {
   local tmp_file
   tmp_file="$(mktemp)"
   sed \
-    -e "s/^    versionName: .*/    versionName: $VERSION_NAME/" \
-    -e "s/^    versionCode: .*/    versionCode: $VERSION_CODE/" \
-    -e "s/^    commit: .*/    commit: $COMMIT/" \
+    -e "s/^\([[:space:]]*-[[:space:]]*versionName:[[:space:]]*\).*/\1$VERSION_NAME/" \
+    -e "s/^\([[:space:]]*versionCode:[[:space:]]*\).*/\1$VERSION_CODE/" \
+    -e "s/^\([[:space:]]*commit:[[:space:]]*\).*/\1$COMMIT/" \
     -e "s/^CurrentVersion: .*/CurrentVersion: $VERSION_NAME/" \
     -e "s/^CurrentVersionCode: .*/CurrentVersionCode: $VERSION_CODE/" \
     "$METADATA_FILE" > "$tmp_file"
