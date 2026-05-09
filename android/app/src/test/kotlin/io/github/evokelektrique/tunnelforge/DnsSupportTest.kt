@@ -314,20 +314,23 @@ class DnsSupportTest {
     @Test
     fun vpnDnsPacketBridgeCloseInterruptsAndJoinsReaderThread() {
         val readStarted = CountDownLatch(1)
-        val interrupted = AtomicBoolean(false)
+        val readFinished = CountDownLatch(1)
         val nativeIo =
             object : VpnDnsNativeIo {
                 override fun readQuery(maxLen: Int): ByteArray? {
-                    readStarted.countDown()
-                    while (!Thread.currentThread().isInterrupted) {
-                        try {
-                            Thread.sleep(1_000)
-                        } catch (_: InterruptedException) {
-                            interrupted.set(true)
-                            Thread.currentThread().interrupt()
+                    try {
+                        readStarted.countDown()
+                        while (!Thread.currentThread().isInterrupted) {
+                            try {
+                                Thread.sleep(1_000)
+                            } catch (_: InterruptedException) {
+                                Thread.currentThread().interrupt()
+                            }
                         }
+                        return null
+                    } finally {
+                        readFinished.countDown()
                     }
-                    return null
                 }
 
                 override fun queueResponse(packet: ByteArray): Int = 0
@@ -347,7 +350,7 @@ class DnsSupportTest {
         assertTrue(readStarted.await(1, TimeUnit.SECONDS))
         bridge.close()
 
-        assertTrue(interrupted.get())
+        assertTrue(readFinished.await(1, TimeUnit.SECONDS))
     }
 
     @Test

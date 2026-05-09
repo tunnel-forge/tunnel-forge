@@ -93,6 +93,9 @@ internal class VpnDnsPacketBridge(
         val response =
             try {
                 buildResponsePacket(packet, virtualDnsIpv4, exchangeClient)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                null
             } catch (e: IOException) {
                 logger(Log.WARN, "vpn dns upstream error=${e.message}")
                 buildServfailResponsePacket(packet, virtualDnsIpv4)
