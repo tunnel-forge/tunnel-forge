@@ -80,6 +80,30 @@ jobs:
       - name: Run native tests
         run: sh tool/run_native_tests.sh
 
+  android-go-tests:
+    name: Android Go native tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: android/gvisor/go.mod
+          cache: true
+          cache-dependency-path: android/gvisor/go.sum
+
+      - name: Download Android Go module dependencies
+        working-directory: android/gvisor
+        run: go mod download
+
+      - name: Run Android Go module tests
+        working-directory: android/gvisor
+        run: go test ./...
+
   android-unit-tests:
     name: android-unit-tests
     runs-on: ubuntu-latest
@@ -102,11 +126,22 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Prepare Android Go dependencies
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: android/gvisor/go.mod
+          cache: true
+          cache-dependency-path: android/gvisor/go.sum
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
 
       - name: Get dependencies
         run: flutter pub get
+
+      - name: Download Android Go module dependencies
+        working-directory: android/gvisor
+        run: go mod download
 
       - name: Create Android local.properties
         working-directory: android
@@ -154,6 +189,7 @@ jobs:
     needs:
       - flutter-checks
       - native-tests
+      - android-go-tests
       - android-unit-tests
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
 
@@ -174,11 +210,22 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Prepare Android Go dependencies
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: android/gvisor/go.mod
+          cache: true
+          cache-dependency-path: android/gvisor/go.sum
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
 
       - name: Get dependencies
         run: flutter pub get
+
+      - name: Download Android Go module dependencies
+        working-directory: android/gvisor
+        run: go mod download
 
       - name: Create Android local.properties
         working-directory: android

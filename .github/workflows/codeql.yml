@@ -64,6 +64,59 @@ jobs:
         with:
           category: /language:actions
 
+  analyze-android-go:
+    name: Analyze Android Go
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: android/gvisor/go.mod
+          cache: true
+          cache-dependency-path: android/gvisor/go.sum
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: go
+          build-mode: manual
+          dependency-caching: true
+          queries: security-extended,security-and-quality
+          paths: |
+            android/gvisor
+          paths-ignore: |
+            .dart_tool/**
+            build/**
+            coverage/**
+            ios/**
+            linux/**
+            macos/**
+            web/**
+            windows/**
+            **/_deps/**
+            **/third_party/**
+            **/thirdparty/**
+            **/vendor/**
+            **/external/**
+
+      - name: Download Android Go module dependencies
+        working-directory: android/gvisor
+        run: go mod download
+
+      - name: Build Android Go module for CodeQL
+        working-directory: android/gvisor
+        run: go test ./...
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:go
+
   analyze-android-kotlin:
     name: Analyze Android Kotlin
     runs-on: ubuntu-latest

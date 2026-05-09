@@ -79,11 +79,22 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Prepare Android Go dependencies
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: android/gvisor/go.mod
+          cache: true
+          cache-dependency-path: android/gvisor/go.sum
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
 
       - name: Get dependencies
         run: flutter pub get
+
+      - name: Download Android Go module dependencies
+        working-directory: android/gvisor
+        run: go mod download
 
       - name: Create Android local.properties
         working-directory: android
