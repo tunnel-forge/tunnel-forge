@@ -100,6 +100,7 @@ class LogsBloc extends Bloc<LogsEvent, LogsState> {
     _entriesSub = _logsRepository.entriesStream.listen((entries) {
       add(LogsEntriesChanged(entries));
     });
+    await _logsRepository.loadPersisted();
     await _tunnelRepository.setLogLevel(LogDisplayLevel.debug);
     emit(state.copyWith(level: level, entries: _logsRepository.entries));
   }

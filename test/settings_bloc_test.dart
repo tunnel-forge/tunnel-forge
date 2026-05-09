@@ -116,6 +116,9 @@ class _FakeLogsRepository implements LogsRepository {
 
   @override
   Stream<List<LogEntry>> get entriesStream => Stream<List<LogEntry>>.empty();
+
+  @override
+  Future<void> loadPersisted() async {}
 }
 
 class _FakeTunnelRepository implements TunnelRepository {

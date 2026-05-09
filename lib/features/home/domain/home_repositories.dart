@@ -87,6 +87,7 @@ abstract class ProfileTransferRepository {
 abstract class LogsRepository {
   List<LogEntry> get entries;
   Stream<List<LogEntry>> get entriesStream;
+  Future<void> loadPersisted();
   void append(LogEntry entry);
   void clear();
 }

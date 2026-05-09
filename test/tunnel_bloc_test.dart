@@ -524,6 +524,9 @@ class _FakeLogsRepository implements LogsRepository {
   Stream<List<LogEntry>> get entriesStream => const Stream.empty();
 
   @override
+  Future<void> loadPersisted() async {}
+
+  @override
   void append(LogEntry entry) {
     entries.add(entry);
   }

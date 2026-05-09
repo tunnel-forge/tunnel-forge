@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:tunnel_forge/core/platform/app_info_bridge.dart';
 import 'package:tunnel_forge/core/network/connectivity_checker.dart';
@@ -549,11 +550,18 @@ class ProfileTransferRepositoryImpl implements ProfileTransferRepository {
 }
 
 class LogsRepositoryImpl implements LogsRepository {
-  static const int _maxLines = 10000;
+  LogsRepositoryImpl({SharedPreferences? prefsOverride})
+    : _prefsOverride = prefsOverride;
 
+  static const String prefsKeyLogsJson = 'logs_entries_json_v1';
+  static const int _maxLines = 10000;
+  static const int _maxPersistedLines = 2000;
+
+  final SharedPreferences? _prefsOverride;
   final List<LogEntry> _entries = <LogEntry>[];
   final StreamController<List<LogEntry>> _controller =
       StreamController<List<LogEntry>>.broadcast();
+  bool _loaded = false;
 
   @override
   List<LogEntry> get entries => List<LogEntry>.unmodifiable(_entries);
@@ -562,23 +570,109 @@ class LogsRepositoryImpl implements LogsRepository {
   Stream<List<LogEntry>> get entriesStream => _controller.stream;
 
   @override
+  Future<void> loadPersisted() async {
+    if (_loaded) return;
+    _loaded = true;
+    final prefs = await _prefs();
+    final raw = prefs.getString(prefsKeyLogsJson);
+    if (raw == null || raw.trim().isEmpty) return;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return;
+      final loaded = decoded
+          .map(_entryFromJson)
+          .whereType<LogEntry>()
+          .toList(growable: false);
+      if (loaded.isEmpty && _entries.isEmpty) return;
+      final currentSessionEntries = List<LogEntry>.from(_entries);
+      _entries
+        ..clear()
+        ..addAll((loaded + currentSessionEntries).takeLast(_maxLines));
+      _controller.add(entries);
+    } catch (_) {
+      await prefs.remove(prefsKeyLogsJson);
+    }
+  }
+
+  @override
   void append(LogEntry entry) {
     _entries.add(entry);
     if (_entries.length > _maxLines) {
       _entries.removeRange(0, _entries.length - _maxLines);
     }
     _controller.add(entries);
+    unawaited(_persist());
   }
 
   @override
   void clear() {
-    if (_entries.isEmpty) return;
+    if (_entries.isEmpty) {
+      unawaited(_clearPersisted());
+      return;
+    }
     _entries.clear();
     _controller.add(entries);
+    unawaited(_clearPersisted());
   }
 
   Future<void> dispose() async {
     await _controller.close();
+  }
+
+  Future<SharedPreferences> _prefs() async =>
+      _prefsOverride ?? await SharedPreferences.getInstance();
+
+  Future<void> _persist() async {
+    final prefs = await _prefs();
+    final persisted = _entries
+        .takeLast(_maxPersistedLines)
+        .map(_entryToJson)
+        .toList(growable: false);
+    await prefs.setString(prefsKeyLogsJson, jsonEncode(persisted));
+  }
+
+  Future<void> _clearPersisted() async {
+    final prefs = await _prefs();
+    await prefs.remove(prefsKeyLogsJson);
+  }
+
+  Map<String, Object?> _entryToJson(LogEntry entry) => <String, Object?>{
+    'timestamp': entry.timestamp.toIso8601String(),
+    'level': entry.level.name,
+    'source': entry.source.label,
+    'tag': entry.tag,
+    'message': entry.message,
+  };
+
+  LogEntry? _entryFromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final timestamp = DateTime.tryParse(raw['timestamp']?.toString() ?? '');
+    if (timestamp == null) return null;
+    return LogEntry(
+      timestamp: timestamp,
+      level: _logLevelFromStorage(raw['level']),
+      source: LogSource.parse(raw['source']?.toString()),
+      tag: raw['tag']?.toString() ?? '',
+      message: raw['message']?.toString() ?? '',
+    );
+  }
+
+  LogLevel _logLevelFromStorage(Object? raw) {
+    return switch (raw?.toString().trim().toLowerCase()) {
+      'debug' => LogLevel.debug,
+      'info' => LogLevel.info,
+      'warning' || 'warn' => LogLevel.warning,
+      'error' => LogLevel.error,
+      _ => LogLevel.info,
+    };
+  }
+}
+
+extension _TakeLastExtension<T> on Iterable<T> {
+  Iterable<T> takeLast(int count) {
+    final list = toList(growable: false);
+    if (list.length <= count) return list;
+    return list.skip(list.length - count);
   }
 }
 
