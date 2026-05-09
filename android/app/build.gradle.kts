@@ -108,6 +108,7 @@ android {
     val enableClangTidy = providers.gradleProperty("tunnelForgeClangTidy").orNull
     val innerUdpNoChecksum = providers.gradleProperty("tunnelForgeInnerUdpNoChecksum").orNull
     val keymatVariant = providers.gradleProperty("tunnelForgeKeymatVariant").orNull
+    val mbedtlsSourceDir = providers.gradleProperty("tunnelForgeMbedtlsSourceDir").orNull
     namespace = "io.github.evokelektrique.tunnelforge"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
@@ -139,6 +140,9 @@ android {
                 }
                 if (keymatVariant != null) {
                     arguments += listOf("-DTUNNEL_FORGE_KEYMAT_VARIANT=$keymatVariant")
+                }
+                if (mbedtlsSourceDir != null) {
+                    arguments += listOf("-DTUNNEL_FORGE_MBEDTLS_SOURCE_DIR=$mbedtlsSourceDir")
                 }
             }
         }

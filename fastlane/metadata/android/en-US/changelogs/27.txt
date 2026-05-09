@@ -1,0 +1,1 @@
+Release 0.7.0 improves the Android tunnel engine, profile handling, local proxy behavior, app routing, and diagnostics. It also includes updated tests and release packaging work for broader distribution.
