@@ -49,10 +49,8 @@ void tunnel_negotiated_dns_ipv4(uint8_t primary_out[4], uint8_t secondary_out[4]
 /** Phase 2: poll loop over TUN + ESP. Call after VPN establish(). Requires prior tunnel_negotiate() success. */
 int tunnel_run_loop(int tun_fd);
 
-/** Proxy-only placeholder until a userspace TCP/IP stack is integrated. Requires prior tunnel_negotiate(). */
+/** Proxy-only packet bridge. Requires prior tunnel_negotiate(). */
 int tunnel_run_proxy_loop(void);
-/** Proxy-only lwIP dataplane. Requires prior tunnel_negotiate(). */
-int tunnel_run_lwip_proxy_loop(const uint8_t client_ipv4[4], int mtu);
 int tunnel_proxy_is_bridge_active(void);
 int tunnel_proxy_enqueue_outbound_packet(const uint8_t *packet, size_t len);
 ssize_t tunnel_proxy_dequeue_inbound_packet(uint8_t *packet, size_t len);
@@ -87,6 +85,12 @@ void engine_dp_note_esp_rx(void);
 void engine_dp_note_esp_plain_ok(void);
 void engine_dp_note_esp_plain_fail(void);
 void engine_dp_note_tun_ipv4_outbound(const uint8_t *packet, size_t nbytes);
+void engine_dp_note_tun_ipv4_inbound(const uint8_t *packet, size_t nbytes);
+void engine_dp_note_tun_ipv4_inbound_accepted(size_t nbytes);
+void engine_dp_note_tun_ipv4_inbound_trimmed(size_t original_len, size_t trimmed_len);
+void engine_dp_note_tun_ipv4_inbound_malformed(size_t nbytes);
+void engine_dp_note_tun_ipv4_outbound_bad_l4_checksum(uint8_t proto);
+void engine_dp_note_tun_ipv4_outbound_checksum_fixup(uint8_t proto);
 void engine_dp_note_tun_ipv4_written(size_t nbytes);
 void engine_dp_note_tun_ipv4_protocol(uint8_t proto);
 void engine_dp_maybe_log_summary(time_t now);

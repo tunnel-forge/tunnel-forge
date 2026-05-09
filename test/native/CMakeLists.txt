@@ -37,3 +37,9 @@ add_executable(test_packet_endpoint test_packet_endpoint.c ../../android/app/src
 target_include_directories(test_packet_endpoint PRIVATE ../../android/app/src/main/cpp)
 target_link_libraries(test_packet_endpoint PRIVATE pthread)
 add_test(NAME packet_endpoint COMMAND test_packet_endpoint)
+
+add_executable(test_ipv4_dataplane test_ipv4_dataplane.c
+ ../../android/app/src/main/cpp/ipv4_dataplane.c
+ ../../android/app/src/main/cpp/util_endian.c)
+target_include_directories(test_ipv4_dataplane PRIVATE ../../android/app/src/main/cpp)
+add_test(NAME ipv4_dataplane COMMAND test_ipv4_dataplane)

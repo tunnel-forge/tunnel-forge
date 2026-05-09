@@ -7,6 +7,7 @@
 
 #include "engine.h"
 #include "esp_udp.h"
+#include "ipv4_dataplane.h"
 #include "ppp_mschap.h"
 
 #include <android/log.h>
@@ -1167,17 +1168,6 @@ static int ppp_ipcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr
   return 0;
 }
 
-#define PPP_IPPROTO_TCP 6u
-#define PPP_IPPROTO_UDP 17u
-
-/** RFC 1071 Internet checksum fold (16-bit one's complement). */
-static uint16_t ppp_inet_checksum_fold(uint32_t sum) {
-  while (sum >> 16) {
-    sum = (sum & 0xffffu) + (sum >> 16);
-  }
-  return (uint16_t)~sum;
-}
-
 static uint16_t ppp_sanitize_link_mtu(int tun_mtu) {
   if (tun_mtu < 576)
     return 576u;
@@ -1188,16 +1178,6 @@ static uint16_t ppp_sanitize_link_mtu(int tun_mtu) {
 
 static uint16_t ppp_tcp_mss_for_link_mtu(uint16_t link_mtu) {
   return link_mtu > 40u ? (uint16_t)(link_mtu - 40u) : 536u;
-}
-
-static uint32_t ppp_csum_acc_bytes(uint32_t sum, const uint8_t *p, size_t n) {
-  for (size_t i = 0; i < n; i += 2) {
-    uint32_t w = (uint32_t)p[i] << 8;
-    if (i + 1 < n)
-      w |= p[i + 1];
-    sum += w;
-  }
-  return sum;
 }
 
 /**
@@ -1225,7 +1205,7 @@ static int ppp_clamp_tcp_syn_mss(uint8_t *pkt, size_t len, uint16_t clamp_mss, u
   uint16_t frag = util_read_be16(pkt + 6);
   if ((frag & 0x3fffu) != 0u)
     return 0;
-  if (pkt[9] != PPP_IPPROTO_TCP)
+  if (pkt[9] != TF_IPPROTO_TCP)
     return 0;
 
   size_t l4_len = ip_len - ihl;
@@ -1274,65 +1254,79 @@ static int ppp_clamp_tcp_syn_mss(uint8_t *pkt, size_t len, uint16_t clamp_mss, u
 /**
  * Android VPN TUN often delivers IPv4 with header / TCP / UDP checksum 0 (offload semantics).
  * LNS stacks may drop those; normalize before PPP encapsulation.
+ *
+ * Returns non-zero when any checksum was filled and reports the fixed L4 protocol when available.
+ * This path intentionally updates counters without emitting per-packet debug logs.
  */
-static void ppp_fix_tun_ipv4_checksums(uint8_t *pkt, size_t len) {
+static int ppp_fix_tun_ipv4_checksums(uint8_t *pkt, size_t len, uint8_t *fixed_proto_out) {
   if (len < 20u)
-    return;
+    return 0;
   if ((pkt[0] >> 4) != 4u)
-    return;
+    return 0;
   unsigned ihl = (unsigned)(pkt[0] & 0x0fu) * 4u;
   if (ihl < 20u || ihl > len)
-    return;
+    return 0;
   uint16_t tot_len_be = util_read_be16(pkt + 2);
   if (tot_len_be < (uint16_t)ihl)
-    return;
+    return 0;
   size_t ip_len = (size_t)tot_len_be;
   if (ip_len > len)
-    return;
+    return 0;
+  int fixed = 0;
 
   if (util_read_be16(pkt + 10) == 0u) {
     util_write_be16(pkt + 10, 0);
-    uint32_t sum = ppp_csum_acc_bytes(0, pkt, ihl);
-    util_write_be16(pkt + 10, ppp_inet_checksum_fold(sum));
+    uint32_t sum = tf_csum_acc_bytes(0, pkt, ihl);
+    util_write_be16(pkt + 10, tf_inet_checksum_fold(sum));
+    fixed = 1;
   }
 
   uint16_t frag = util_read_be16(pkt + 6);
   unsigned frag_off = (unsigned)(frag & 0x1fffu);
   if (frag_off != 0u)
-    return;
+    return fixed;
 
   uint8_t proto = pkt[9];
+  if (fixed && fixed_proto_out != NULL)
+    *fixed_proto_out = proto;
   size_t l4_len = ip_len - ihl;
   if (l4_len < 8u || ihl + l4_len > len)
-    return;
+    return fixed;
   uint8_t *l4 = pkt + ihl;
 
-  if (proto == PPP_IPPROTO_UDP) {
+  if (proto == TF_IPPROTO_UDP) {
     if (util_read_be16(l4 + 6) != 0u)
-      return;
+      return fixed;
     uint32_t sum = 0;
-    sum = ppp_csum_acc_bytes(sum, pkt + 12, 4);
-    sum = ppp_csum_acc_bytes(sum, pkt + 16, 4);
-    sum += (uint32_t)PPP_IPPROTO_UDP;
+    sum = tf_csum_acc_bytes(sum, pkt + 12, 4);
+    sum = tf_csum_acc_bytes(sum, pkt + 16, 4);
+    sum += (uint32_t)TF_IPPROTO_UDP;
     sum += (uint32_t)l4_len;
-    sum = ppp_csum_acc_bytes(sum, l4, l4_len);
-    uint16_t c = ppp_inet_checksum_fold(sum);
+    sum = tf_csum_acc_bytes(sum, l4, l4_len);
+    uint16_t c = tf_inet_checksum_fold(sum);
     if (c == 0u)
       c = 0xffffu;
     util_write_be16(l4 + 6, c);
-  } else if (proto == PPP_IPPROTO_TCP) {
+    fixed = 1;
+    if (fixed_proto_out != NULL)
+      *fixed_proto_out = proto;
+  } else if (proto == TF_IPPROTO_TCP) {
     if (l4_len < 20u)
-      return;
+      return fixed;
     if (util_read_be16(l4 + 16) != 0u)
-      return;
+      return fixed;
     uint32_t sum = 0;
-    sum = ppp_csum_acc_bytes(sum, pkt + 12, 4);
-    sum = ppp_csum_acc_bytes(sum, pkt + 16, 4);
-    sum += (uint32_t)PPP_IPPROTO_TCP;
+    sum = tf_csum_acc_bytes(sum, pkt + 12, 4);
+    sum = tf_csum_acc_bytes(sum, pkt + 16, 4);
+    sum += (uint32_t)TF_IPPROTO_TCP;
     sum += (uint32_t)l4_len;
-    sum = ppp_csum_acc_bytes(sum, l4, l4_len);
-    util_write_be16(l4 + 16, ppp_inet_checksum_fold(sum));
+    sum = tf_csum_acc_bytes(sum, l4, l4_len);
+    util_write_be16(l4 + 16, tf_inet_checksum_fold(sum));
+    fixed = 1;
+    if (fixed_proto_out != NULL)
+      *fixed_proto_out = proto;
   }
+  return fixed;
 }
 
 /* --- Exported PPP API (negotiate, TUN egress, inbound dispatch) --- */
@@ -1386,6 +1380,18 @@ int ppp_encapsulate_and_send(int esp_fd, esp_keys_t *esp, const struct sockaddr 
   engine_dp_note_tun_ipv4_outbound(ip_packet, len);
   uint8_t *inner_ip = buf + prefix;
   memcpy(inner_ip, ip_packet, len);
+  tf_ipv4_info_t ipv4_info;
+  int ipv4_valid = tf_ipv4_parse(inner_ip, len, &ipv4_info) == 0;
+  if (ipv4_valid) {
+    tf_l4_checksum_result_t checksum_status = tf_ipv4_l4_checksum_status(inner_ip, len, &ipv4_info);
+    if (checksum_status == TF_L4_CHECKSUM_INVALID) {
+      engine_dp_note_tun_ipv4_outbound_bad_l4_checksum(ipv4_info.protocol);
+      tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "ppp outbound invalid l4 checksum proto=%u len=%zu total_len=%zu",
+                        (unsigned)ipv4_info.protocol, len, ipv4_info.total_len);
+    }
+  } else {
+    tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "ppp outbound malformed ipv4 len=%zu", len);
+  }
   if (ppp != NULL && ppp->tcp_mss >= 536u) {
     uint16_t old_mss = 0u;
     uint16_t new_mss = 0u;
@@ -1395,7 +1401,10 @@ int ppp_encapsulate_and_send(int esp_fd, esp_keys_t *esp, const struct sockaddr 
                         (unsigned)old_mss, (unsigned)new_mss, (unsigned)ppp->link_mtu);
     }
   }
-  ppp_fix_tun_ipv4_checksums(inner_ip, len);
+  uint8_t fixed_proto = 0u;
+  if (ppp_fix_tun_ipv4_checksums(inner_ip, len, &fixed_proto)) {
+    engine_dp_note_tun_ipv4_outbound_checksum_fixup(fixed_proto);
+  }
   return l2tp_send_ppp(esp_fd, esp, peer, peer_len, l2tp, buf, len + prefix);
 }
 
@@ -1520,18 +1529,36 @@ int ppp_dispatch_ppp_frame(int esp_fd, esp_keys_t *esp, const struct sockaddr *p
   len -= proto_len;
   /* 0x0021: deliver IPv4 datagram to TUN (or proxy endpoint). */
   if (proto == PROTO_IP) {
-    if (packet_endpoint_write(endpoint, p, len) != 0) {
+    tf_ipv4_info_t ipv4_info;
+    if (tf_ipv4_parse(p, len, &ipv4_info) != 0) {
+      engine_dp_note_tun_ipv4_inbound_malformed(len);
+      tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "ppp inbound malformed ipv4 dropped len=%zu", len);
+      return 0;
+    }
+    /*
+     * PPP frames may carry padding after the IPv4 payload. Deliver only the declared IPv4 length
+     * to TUN/gVisor so trailing bytes do not become part of the packet stream.
+     */
+    size_t write_len = ipv4_info.total_len;
+    engine_dp_note_tun_ipv4_inbound(p, write_len);
+    if (write_len < len) {
+      engine_dp_note_tun_ipv4_inbound_trimmed(len, write_len);
+      tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG, "ppp inbound ipv4 trimmed original_len=%zu total_len=%zu", len,
+                        write_len);
+    }
+    engine_dp_note_tun_ipv4_inbound_accepted(write_len);
+    if (packet_endpoint_write(endpoint, p, write_len) != 0) {
       static time_t s_last_tun_write_warn;
       time_t now = time(NULL);
       if (now - s_last_tun_write_warn >= 3) {
         s_last_tun_write_warn = now;
         tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG, "ppp ip write endpoint=%s failed errno=%d len=%zu",
-                          endpoint != NULL && endpoint->name != NULL ? endpoint->name : "unknown", errno, len);
+                          endpoint != NULL && endpoint->name != NULL ? endpoint->name : "unknown", errno, write_len);
       }
       return -1;
     }
-    engine_dp_note_tun_ipv4_written(len);
-    if (len >= 10u) {
+    engine_dp_note_tun_ipv4_written(write_len);
+    if (write_len >= 10u) {
       engine_dp_note_tun_ipv4_protocol(p[9]);
     }
     return 0;
@@ -1567,7 +1594,8 @@ int ppp_dispatch_ppp_frame(int esp_fd, esp_keys_t *esp, const struct sockaddr *p
   }
   static time_t s_last_nonip_warn;
   time_t now = time(NULL);
-  if (now - s_last_nonip_warn >= 3) {
+  /* IPv6CP is expected in IPv4-only mode and is too noisy to warn for every peer retry. */
+  if (proto != 0x8281u && now - s_last_nonip_warn >= 3) {
     s_last_nonip_warn = now;
     tunnel_engine_log(ANDROID_LOG_WARN, LOG_TAG,
                       "ppp dispatch non-ip proto=0x%04x frame_prefix=%02x%02x ppp_len=%zu (IPv4 0x0021 only)",

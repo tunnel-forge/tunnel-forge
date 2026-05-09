@@ -20,10 +20,10 @@
 
 #include "esp_udp.h"
 #include "ikev1.h"
+#include "ipv4_dataplane.h"
 #include "l2tp.h"
 #include "nat_t_keepalive.h"
 #include "ppp.h"
-#include "proxy_lwip.h"
 #include "util_endian.h"
 
 #define LOG_TAG "tunnel_engine"
@@ -415,9 +415,6 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
     }
     if (pr == 0) {
       /* Idle tick: emit periodic counters and send NAT-T keepalive when due. */
-      if (endpoint != NULL && endpoint->name != NULL && strcmp(endpoint->name, "lwip-proxy") == 0) {
-        proxy_lwip_tick();
-      }
       engine_dp_maybe_log_summary(time(NULL));
       if (g_state.esp.udp_encap && g_state.esp.enc_key_len) {
         time_t now = time(NULL);
@@ -500,9 +497,6 @@ static int tunnel_run_loop_with_endpoint(int tun_fd, packet_endpoint_t *endpoint
         }
       }
     }
-    if (endpoint != NULL && endpoint->name != NULL && strcmp(endpoint->name, "lwip-proxy") == 0) {
-      proxy_lwip_tick();
-    }
     engine_dp_maybe_log_summary(time(NULL));
   }
 
@@ -541,23 +535,6 @@ int tunnel_run_proxy_loop(void) {
   const int rc = tunnel_run_loop_with_endpoint(-1, &endpoint);
   packet_endpoint_destroy_proxy_queue(&g_proxy_queue);
   atomic_store(&g_proxy_bridge_active, 0);
-  return rc;
-}
-
-int tunnel_run_lwip_proxy_loop(const uint8_t client_ipv4[4], int mtu) {
-  if (!g_state.ready) {
-    tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "tunnel_run_lwip_proxy_loop: not negotiated");
-    return TUNNEL_EXIT_BAD_ARGS;
-  }
-  packet_endpoint_t endpoint;
-  if (proxy_lwip_start(&endpoint, client_ipv4, mtu) != 0) {
-    tunnel_engine_log(ANDROID_LOG_ERROR, LOG_TAG, "lwIP proxy endpoint init failed errno=%d", errno);
-    tunnel_close_active_session("lwIP proxy init failed", 1);
-    return TUNNEL_EXIT_PROXY_NOT_IMPLEMENTED;
-  }
-  tunnel_engine_log(ANDROID_LOG_INFO, LOG_TAG, "proxy-only mode negotiated; native lwIP endpoint active");
-  const int rc = tunnel_run_loop_with_endpoint(-1, &endpoint);
-  proxy_lwip_stop();
   return rc;
 }
 
@@ -637,11 +614,121 @@ static uint64_t g_dp_esp_rx;
 static uint64_t g_dp_esp_plain_ok;
 static uint64_t g_dp_esp_plain_fail;
 static uint64_t g_dp_tun_ipv4_tcp_syn_out;
+static uint64_t g_dp_tun_ipv4_tcp_synack_in;
+static uint64_t g_dp_tun_ipv4_tcp_rst_in;
+static uint64_t g_dp_tun_ipv4_tcp_fin_in;
+static uint64_t g_dp_tun_ipv4_tcp_ack_only_in;
+static uint64_t g_dp_tun_ipv4_tcp_in;
+static uint64_t g_dp_tun_ipv4_accepted_in;
+static uint64_t g_dp_tun_ipv4_trimmed_in;
+static uint64_t g_dp_tun_ipv4_malformed_in;
+static uint64_t g_dp_tun_ipv4_bad_l4_checksum_out;
+static uint64_t g_dp_tun_ipv4_checksum_fixup_out;
 static uint64_t g_dp_tun_ipv4_wr;
 static uint64_t g_dp_tun_ipv4_tcp_wr;
 static uint64_t g_dp_tun_ipv4_udp_wr;
 static uint64_t g_dp_tun_ipv4_icmp_wr;
 static uint64_t g_dp_tun_ipv4_other_wr;
+
+typedef struct {
+  uint32_t src;
+  uint32_t dst;
+  uint16_t sport;
+  uint16_t dport;
+  uint32_t flow_id;
+  time_t last_syn;
+  uint32_t syn_count;
+  int session_seen;
+} tcp_flow_diag_t;
+
+#define TCP_FLOW_DIAG_CAP 256u
+#define TCP_FLOW_RECENT_SECS 120
+
+/*
+ * Recent-flow cache used only for dataplane counters. It avoids per-packet logging while still
+ * letting tests and future diagnostics distinguish SYN repeats from matched inbound replies.
+ */
+static tcp_flow_diag_t g_tcp_flow_diag[TCP_FLOW_DIAG_CAP];
+static unsigned g_tcp_flow_diag_next;
+static uint64_t g_flow_unique_syn;
+static uint64_t g_flow_syn_repeats;
+static uint64_t g_flow_synack_matched;
+static uint64_t g_flow_rst_matched;
+static uint64_t g_flow_fin_matched;
+static uint64_t g_flow_in_unmatched;
+
+static uint32_t flow_read_ipv4(const uint8_t *p) {
+  return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
+static uint32_t flow_hash(uint32_t src, uint32_t dst, uint16_t sport, uint16_t dport) {
+  uint32_t h = 2166136261u;
+  h = (h ^ src) * 16777619u;
+  h = (h ^ dst) * 16777619u;
+  h = (h ^ sport) * 16777619u;
+  h = (h ^ dport) * 16777619u;
+  return h == 0u ? 1u : h;
+}
+
+static tcp_flow_diag_t *flow_find(uint32_t src, uint32_t dst, uint16_t sport, uint16_t dport, time_t now) {
+  for (unsigned i = 0; i < TCP_FLOW_DIAG_CAP; i++) {
+    tcp_flow_diag_t *f = &g_tcp_flow_diag[i];
+    if (f->last_syn == 0)
+      continue;
+    if (now - f->last_syn > TCP_FLOW_RECENT_SECS)
+      continue;
+    if (f->src == src && f->dst == dst && f->sport == sport && f->dport == dport)
+      return f;
+  }
+  return NULL;
+}
+
+static tcp_flow_diag_t *flow_slot(time_t now) {
+  for (unsigned i = 0; i < TCP_FLOW_DIAG_CAP; i++) {
+    if (g_tcp_flow_diag[i].last_syn == 0 || now - g_tcp_flow_diag[i].last_syn > TCP_FLOW_RECENT_SECS)
+      return &g_tcp_flow_diag[i];
+  }
+  tcp_flow_diag_t *slot = &g_tcp_flow_diag[g_tcp_flow_diag_next++ % TCP_FLOW_DIAG_CAP];
+  memset(slot, 0, sizeof(*slot));
+  return slot;
+}
+
+/* Records outbound client SYNs so inbound SYN/ACK, RST, and FIN packets can be matched later. */
+static void flow_note_syn(const uint8_t *packet, const tf_ipv4_info_t *info) {
+  const uint8_t *tcp = packet + info->ihl;
+  uint32_t src = flow_read_ipv4(packet + 12u);
+  uint32_t dst = flow_read_ipv4(packet + 16u);
+  uint16_t sport = read_be16_u8(tcp);
+  uint16_t dport = read_be16_u8(tcp + 2u);
+  time_t now = time(NULL);
+  tcp_flow_diag_t *f = flow_find(src, dst, sport, dport, now);
+  if (f != NULL) {
+    f->last_syn = now;
+    f->syn_count++;
+    g_flow_syn_repeats++;
+    return;
+  }
+  f = flow_slot(now);
+  f->src = src;
+  f->dst = dst;
+  f->sport = sport;
+  f->dport = dport;
+  f->flow_id = flow_hash(src, dst, sport, dport);
+  f->last_syn = now;
+  f->syn_count = 1u;
+  f->session_seen = 0;
+  g_flow_unique_syn++;
+}
+
+/* Matches reverse-direction inbound TCP packets to a recent outbound SYN flow. */
+static tcp_flow_diag_t *flow_match_inbound(const uint8_t *packet, const tf_ipv4_info_t *info) {
+  const uint8_t *tcp = packet + info->ihl;
+  uint32_t src = flow_read_ipv4(packet + 12u);
+  uint32_t dst = flow_read_ipv4(packet + 16u);
+  uint16_t sport = read_be16_u8(tcp);
+  uint16_t dport = read_be16_u8(tcp + 2u);
+  return flow_find(dst, src, dport, sport, time(NULL));
+}
 
 void engine_dp_note_tun_rx(void) { g_dp_tun_rx++; }
 
@@ -656,20 +743,82 @@ void engine_dp_note_esp_plain_ok(void) { g_dp_esp_plain_ok++; }
 void engine_dp_note_esp_plain_fail(void) { g_dp_esp_plain_fail++; }
 
 void engine_dp_note_tun_ipv4_outbound(const uint8_t *packet, size_t nbytes) {
-  if (packet == NULL || nbytes < 40u)
+  tf_ipv4_info_t info;
+  if (tf_ipv4_parse(packet, nbytes, &info) != 0 || info.total_len < info.ihl + 20u)
     return;
-  const uint8_t version = packet[0] >> 4;
-  const size_t ihl = (size_t)(packet[0] & 0x0fu) * 4u;
-  if (version != 4u || ihl < 20u || nbytes < ihl + 20u)
+  if (info.protocol != TF_IPPROTO_TCP)
     return;
-  if (packet[9] != 6u)
-    return;
-  const uint8_t flags = packet[ihl + 13u];
+  const uint8_t flags = packet[info.ihl + 13u];
   const int syn = (flags & 0x02u) != 0u;
   const int ack = (flags & 0x10u) != 0u;
   if (!syn || ack)
     return;
   g_dp_tun_ipv4_tcp_syn_out++;
+  flow_note_syn(packet, &info);
+}
+
+void engine_dp_note_tun_ipv4_inbound(const uint8_t *packet, size_t nbytes) {
+  tf_ipv4_info_t info;
+  if (tf_ipv4_parse(packet, nbytes, &info) != 0 || info.total_len < info.ihl + 20u)
+    return;
+  if (info.protocol != TF_IPPROTO_TCP)
+    return;
+  g_dp_tun_ipv4_tcp_in++;
+  const uint8_t flags = packet[info.ihl + 13u];
+  const int syn = (flags & 0x02u) != 0u;
+  const int ack = (flags & 0x10u) != 0u;
+  const int rst = (flags & 0x04u) != 0u;
+  const int fin = (flags & 0x01u) != 0u;
+  tcp_flow_diag_t *matched = flow_match_inbound(packet, &info);
+  if (syn && ack) {
+    g_dp_tun_ipv4_tcp_synack_in++;
+    if (matched != NULL) {
+      matched->session_seen = 1;
+      g_flow_synack_matched++;
+    } else {
+      g_flow_in_unmatched++;
+    }
+  } else if (matched == NULL) {
+    g_flow_in_unmatched++;
+  }
+  if (rst) {
+    g_dp_tun_ipv4_tcp_rst_in++;
+    if (matched != NULL)
+      g_flow_rst_matched++;
+  }
+  if (fin) {
+    g_dp_tun_ipv4_tcp_fin_in++;
+    if (matched != NULL)
+      g_flow_fin_matched++;
+  }
+  if (ack && !syn && !rst && !fin)
+    g_dp_tun_ipv4_tcp_ack_only_in++;
+}
+
+void engine_dp_note_tun_ipv4_inbound_accepted(size_t nbytes) {
+  (void)nbytes;
+  g_dp_tun_ipv4_accepted_in++;
+}
+
+void engine_dp_note_tun_ipv4_inbound_trimmed(size_t original_len, size_t trimmed_len) {
+  (void)original_len;
+  (void)trimmed_len;
+  g_dp_tun_ipv4_trimmed_in++;
+}
+
+void engine_dp_note_tun_ipv4_inbound_malformed(size_t nbytes) {
+  (void)nbytes;
+  g_dp_tun_ipv4_malformed_in++;
+}
+
+void engine_dp_note_tun_ipv4_outbound_bad_l4_checksum(uint8_t proto) {
+  (void)proto;
+  g_dp_tun_ipv4_bad_l4_checksum_out++;
+}
+
+void engine_dp_note_tun_ipv4_outbound_checksum_fixup(uint8_t proto) {
+  (void)proto;
+  g_dp_tun_ipv4_checksum_fixup_out++;
 }
 
 void engine_dp_note_tun_ipv4_written(size_t nbytes) {
@@ -690,20 +839,6 @@ void engine_dp_note_tun_ipv4_protocol(uint8_t proto) {
 }
 
 void engine_dp_maybe_log_summary(time_t now) {
-  static time_t s_last;
-  if (s_last == 0)
-    s_last = now;
-  if (now - s_last < 30)
-    return;
-  s_last = now;
-  tunnel_engine_log(ANDROID_LOG_DEBUG, LOG_TAG,
-                    "dataplane 30s tun_rx=%llu encap_ok=%llu encap_fail=%llu esp_rx=%llu esp_plain_ok=%llu "
-                    "esp_plain_fail=%llu tun_tcp_syn_out=%llu tun_ipv4_wr=%llu tun_ipv4_tcp=%llu tun_ipv4_udp=%llu "
-                    "tun_ipv4_icmp=%llu tun_ipv4_other=%llu",
-                    (unsigned long long)g_dp_tun_rx, (unsigned long long)g_dp_encap_ok,
-                    (unsigned long long)g_dp_encap_fail, (unsigned long long)g_dp_esp_rx,
-                    (unsigned long long)g_dp_esp_plain_ok, (unsigned long long)g_dp_esp_plain_fail,
-                    (unsigned long long)g_dp_tun_ipv4_tcp_syn_out, (unsigned long long)g_dp_tun_ipv4_wr,
-                    (unsigned long long)g_dp_tun_ipv4_tcp_wr, (unsigned long long)g_dp_tun_ipv4_udp_wr,
-                    (unsigned long long)g_dp_tun_ipv4_icmp_wr, (unsigned long long)g_dp_tun_ipv4_other_wr);
+  /* Counters remain active for tests/debuggers; the periodic app/logcat summary was too noisy. */
+  (void)now;
 }
