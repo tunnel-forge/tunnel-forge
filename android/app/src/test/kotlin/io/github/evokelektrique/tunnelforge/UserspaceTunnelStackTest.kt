@@ -217,13 +217,12 @@ class UserspaceTunnelStackTest {
         assertNull(ProxyTunnelService.PROXY_ONLY_MAX_CONCURRENT_CLIENTS)
         assertNull(ProxyTunnelService.PROXY_ONLY_MAX_PENDING_TCP_CONNECTS)
         assertEquals(60_000L, ProxyTunnelService.PROXY_ONLY_CONNECT_TIMEOUT_MS)
-        assertEquals(10_000L, ProxyTunnelService.PROXY_ONLY_CONNECT_RESPONSE_TIMEOUT_MS)
-        assertEquals(10_000L, ProxyTunnelService.PROXY_ONLY_UPSTREAM_CONNECT_TIMEOUT_MS)
+        assertEquals(30_000L, ProxyTunnelService.PROXY_ONLY_CONNECT_RESPONSE_TIMEOUT_MS)
         assertEquals(
             listOf(1_000L, 2_000L, 4_000L, 8_000L),
             ProxyTunnelService.PROXY_ONLY_SYN_RETRANSMIT_DELAYS_MS,
         )
-        assertEquals(20L, ProxyTunnelService.PROXY_ONLY_SYN_PACING_INTERVAL_MS)
+        assertEquals(0L, ProxyTunnelService.PROXY_ONLY_SYN_PACING_INTERVAL_MS)
         assertEquals(5_000L, ProxyTunnelService.PROXY_ONLY_TCP_FIN_DRAIN_TIMEOUT_MS)
     }
 

@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -1382,7 +1383,7 @@ class ProxyServerRuntimeTest {
     }
 
     @Test
-    fun httpConnectLogsClientAbortWhenErrorResponseCannotBeWritten() {
+    fun httpConnectSuppressesClientAbortWhenErrorResponseCannotBeWritten() {
         val logs = CopyOnWriteArrayList<String>()
         val closeLatch = CountDownLatch(1)
         val transport =
@@ -1423,11 +1424,8 @@ class ProxyServerRuntimeTest {
                 output.flush()
             }
             assertTrue(closeLatch.await(1, TimeUnit.SECONDS))
-            repeat(40) {
-                if (logs.any { it.contains("reason=clientAborted") }) return@repeat
-                Thread.sleep(25)
-            }
-            assertTrue(logs.any { it.contains("reason=clientAborted") && it.contains("phase=pre-success") })
+            Thread.sleep(100)
+            assertFalse(logs.any { it.contains("reason=clientAborted") })
         } finally {
             runtime.stop()
         }
