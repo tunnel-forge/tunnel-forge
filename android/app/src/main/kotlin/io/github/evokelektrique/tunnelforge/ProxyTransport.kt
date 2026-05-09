@@ -27,6 +27,26 @@ enum class ProxyTransportFailureReason {
     clientAborted,
 }
 
+enum class GvisorTcpFailureCategory {
+    cleanEof,
+    connectionReset,
+    readTimeout,
+    writeTimeout,
+    sessionClosedLocally,
+    internalGvisorError,
+}
+
+internal fun gvisorTcpFailureCategory(error: IOException, writePath: Boolean = false): GvisorTcpFailureCategory {
+    val message = error.message.orEmpty().lowercase()
+    return when {
+        "connection reset" in message || "reset by peer" in message -> GvisorTcpFailureCategory.connectionReset
+        "session closed locally" in message || "already closed" in message -> GvisorTcpFailureCategory.sessionClosedLocally
+        "timeout" in message || "timed out" in message ->
+            if (writePath) GvisorTcpFailureCategory.writeTimeout else GvisorTcpFailureCategory.readTimeout
+        else -> GvisorTcpFailureCategory.internalGvisorError
+    }
+}
+
 class ProxyTransportException(
     val failureReason: ProxyTransportFailureReason,
     message: String,
@@ -62,6 +82,16 @@ interface ProxyTransportSession : Closeable {
 
     @Throws(IOException::class)
     fun awaitConnected(timeoutMs: Long)
+
+    @Throws(IOException::class)
+    fun readRemoteBytes(maxLen: Int, timeoutMs: Int): ByteArray? {
+        throw ProxyTransportException(ProxyTransportFailureReason.localServiceUnavailable, "Streaming reads are not supported by this proxy transport.")
+    }
+
+    @Throws(IOException::class)
+    fun writeClientBytes(bytes: ByteArray, timeoutMs: Int): Int {
+        throw ProxyTransportException(ProxyTransportFailureReason.localServiceUnavailable, "Streaming writes are not supported by this proxy transport.")
+    }
 
     @Throws(IOException::class)
     fun pumpBidirectional(client: ProxyClientConnection)
@@ -175,8 +205,16 @@ class DirectSocketProxyTransport(
         )
 }
 
-interface NativeLwipTcpBackend {
-    fun open(remoteIpv4: IntArray, port: Int, timeoutMs: Int): Int
+interface GvisorTcpBackend {
+    /**
+     * Opens a native gVisor TCP session.
+     *
+     * [openId] is the Android-side descriptor ID. The native bridge uses it for cancellation and
+     * diagnostics until it returns a positive native session ID.
+     */
+    fun open(openId: Int, remoteIpv4: IntArray, port: Int, timeoutMs: Int): Int
+
+    fun cancelOpen(openId: Int): Int = -2
 
     fun read(sessionId: Int, maxLen: Int, timeoutMs: Int): ByteArray?
 
@@ -184,144 +222,79 @@ interface NativeLwipTcpBackend {
 
     fun close(sessionId: Int)
 
-    fun openUdp(): Int
+    fun stats(): IntArray = IntArray(GVISOR_STATS_COUNT)
 
-    fun sendUdp(sessionId: Int, remoteIpv4: IntArray, port: Int, payload: ByteArray): Int
-
-    fun receiveUdp(sessionId: Int, maxLen: Int, timeoutMs: Int): ByteArray?
-
-    fun closeUdp(sessionId: Int)
+    fun openDiagnostics(openId: Int): String = ""
 }
 
-object VpnBridgeNativeLwipTcpBackend : NativeLwipTcpBackend {
-    override fun open(remoteIpv4: IntArray, port: Int, timeoutMs: Int): Int =
-        VpnBridge.nativeLwipTcpOpen(remoteIpv4, port, timeoutMs)
+private const val GVISOR_STATS_COUNT = 17
+
+/** Formats the positional native stats array; keep this order aligned with gvisor_bridge_stats. */
+fun formatGvisorStats(stats: IntArray): String {
+    fun at(index: Int): Int = stats.getOrElse(index) { -1 }
+    return "gvisorStats running=${at(0)} activeTcp=${at(1)} outboundQueued=${at(2)} openAttempts=${at(3)} " +
+        "openOk=${at(4)} openFailed=${at(5)} outboundPackets=${at(6)} inboundPackets=${at(7)} " +
+        "pendingOpens=${at(8)} openTimeouts=${at(9)} openImmediate=${at(10)} openResets=${at(11)} " +
+        "openInternal=${at(12)} openCanceled=${at(13)} openSynOut=${at(14)} openSynAckIn=${at(15)} openRstIn=${at(16)}"
+}
+
+object VpnBridgeGvisorTcpBackend : GvisorTcpBackend {
+    override fun open(openId: Int, remoteIpv4: IntArray, port: Int, timeoutMs: Int): Int =
+        VpnBridge.nativeGvisorTcpOpenCancelable(openId, remoteIpv4, port, timeoutMs)
+
+    override fun cancelOpen(openId: Int): Int =
+        VpnBridge.nativeGvisorTcpCancelOpen(openId)
 
     override fun read(sessionId: Int, maxLen: Int, timeoutMs: Int): ByteArray? =
-        VpnBridge.nativeLwipTcpRead(sessionId, maxLen, timeoutMs)
+        VpnBridge.nativeGvisorTcpRead(sessionId, maxLen, timeoutMs)
 
     override fun write(sessionId: Int, bytes: ByteArray, timeoutMs: Int): Int =
-        VpnBridge.nativeLwipTcpWrite(sessionId, bytes, timeoutMs)
+        VpnBridge.nativeGvisorTcpWrite(sessionId, bytes, timeoutMs)
 
     override fun close(sessionId: Int) {
-        VpnBridge.nativeLwipTcpClose(sessionId)
+        VpnBridge.nativeGvisorTcpClose(sessionId)
     }
 
-    override fun openUdp(): Int = VpnBridge.nativeLwipUdpOpen()
+    override fun stats(): IntArray = VpnBridge.nativeGvisorStats()
 
-    override fun sendUdp(sessionId: Int, remoteIpv4: IntArray, port: Int, payload: ByteArray): Int =
-        VpnBridge.nativeLwipUdpSend(sessionId, remoteIpv4, port, payload)
-
-    override fun receiveUdp(sessionId: Int, maxLen: Int, timeoutMs: Int): ByteArray? =
-        VpnBridge.nativeLwipUdpReceive(sessionId, maxLen, timeoutMs)
-
-    override fun closeUdp(sessionId: Int) {
-        VpnBridge.nativeLwipUdpClose(sessionId)
-    }
+    override fun openDiagnostics(openId: Int): String = VpnBridge.nativeGvisorOpenDiagnostics(openId)
 }
 
-class NativeLwipProxyTransport(
+/**
+ * Proxy transport backed by the native gVisor TCP bridge.
+ *
+ * Hostname resolution may be provided by [tunneledResolver] so proxy-only mode does not leak DNS
+ * to Android. The resulting IPv4 endpoint is opened through native gVisor; this class only adapts
+ * listener sessions to the bridge API and owns Android-side cancellation.
+ */
+class GvisorProxyTransport(
     private val resolver: (String) -> List<InetAddress> = { host -> InetAddress.getAllByName(host).toList() },
-    private val backend: NativeLwipTcpBackend = VpnBridgeNativeLwipTcpBackend,
+    private val tunneledResolver: ((String) -> String)? = null,
+    private val requireTunneledDns: Boolean = false,
+    private val backend: GvisorTcpBackend = VpnBridgeGvisorTcpBackend,
     private val threadFactory: (String, Runnable) -> Thread = { name, task -> Thread(task, name) },
     private val logger: (Int, String) -> Unit = { _, _ -> },
 ) : ProxyTransport {
     private val nextSessionId = AtomicInteger(1)
 
     override fun openTcpSession(request: ProxyConnectRequest): ProxyTransportSession =
-        NativeLwipProxyTransportSession(
+        GvisorProxyTransportSession(
             descriptor = ProxySessionDescriptor(nextSessionId.getAndIncrement(), request, System.currentTimeMillis()),
             resolver = resolver,
+            tunneledResolver = tunneledResolver,
+            requireTunneledDns = requireTunneledDns,
             backend = backend,
             threadFactory = threadFactory,
             logger = logger,
         )
-
-    override fun openUdpAssociation(request: ProxyConnectRequest): ProxyUdpAssociation =
-        NativeLwipProxyUdpAssociation(
-            descriptor = ProxySessionDescriptor(nextSessionId.getAndIncrement(), request, System.currentTimeMillis()),
-            resolver = resolver,
-            backend = backend,
-            logger = logger,
-        )
 }
 
-private class NativeLwipProxyUdpAssociation(
+private class GvisorProxyTransportSession(
     override val descriptor: ProxySessionDescriptor,
     private val resolver: (String) -> List<InetAddress>,
-    private val backend: NativeLwipTcpBackend,
-    private val logger: (Int, String) -> Unit,
-) : ProxyUdpAssociation {
-    private val closed = AtomicBoolean(false)
-    private val nativeSessionId: Int =
-        backend.openUdp().also { id ->
-            if (id <= 0) {
-                throw ProxyTransportException(ProxyTransportFailureReason.localServiceUnavailable, "Native lwIP UDP association failed.")
-            }
-            logger(Log.DEBUG, "proxy lwip udp open sid=${descriptor.sessionId} native=$id")
-        }
-
-    override fun send(datagram: ProxyUdpDatagram) {
-        if (closed.get()) throw IOException("UDP association is already closed.")
-        val remoteAddress = resolveIpv4Target(datagram.host)
-        val octets = remoteAddress.address.map { it.toInt() and 0xff }.toIntArray()
-        val rc = backend.sendUdp(nativeSessionId, octets, datagram.port, datagram.payload)
-        if (rc != 0) {
-            throw ProxyTransportException(ProxyTransportFailureReason.upstreamConnectFailed, "Native lwIP UDP send failed.")
-        }
-        logger(
-            Log.DEBUG,
-            "proxy lwip udp out sid=${descriptor.sessionId} target=${datagram.host}:${datagram.port} ip=${remoteAddress.hostAddress} bytes=${datagram.payload.size}",
-        )
-    }
-
-    override fun receive(timeoutMs: Long): ProxyUdpDatagram? {
-        if (closed.get()) return null
-        val timeout = timeoutMs.coerceIn(1L, Int.MAX_VALUE.toLong()).toInt()
-        val packet = backend.receiveUdp(nativeSessionId, MAX_UDP_PACKET_BYTES + UDP_HEADER_BYTES, timeout) ?: return null
-        if (packet.size < UDP_HEADER_BYTES) return null
-        val host =
-            listOf(
-                packet[0].toInt() and 0xff,
-                packet[1].toInt() and 0xff,
-                packet[2].toInt() and 0xff,
-                packet[3].toInt() and 0xff,
-            ).joinToString(".")
-        val port = ((packet[4].toInt() and 0xff) shl 8) or (packet[5].toInt() and 0xff)
-        if (port !in 1..65535) return null
-        return ProxyUdpDatagram(
-            host = host,
-            port = port,
-            payload = packet.copyOfRange(UDP_HEADER_BYTES, packet.size),
-        )
-    }
-
-    override fun close() {
-        if (!closed.compareAndSet(false, true)) return
-        backend.closeUdp(nativeSessionId)
-    }
-
-    private fun resolveIpv4Target(host: String): InetAddress {
-        host.toIpv4LiteralOrNull()?.let { literal ->
-            return InetAddress.getByName(literal)
-        }
-        val resolved =
-            resolver(host).firstOrNull { it is Inet4Address }
-                ?: throw ProxyTransportException(ProxyTransportFailureReason.networkUnreachable, "IPv6 destinations are not supported in proxy mode.")
-        logger(Log.DEBUG, "proxy lwip udp resolve sid=${descriptor.sessionId} host=$host ip=${resolved.hostAddress}")
-        return resolved
-    }
-
-    private companion object {
-        private const val UDP_HEADER_BYTES = 6
-        private const val MAX_UDP_PACKET_BYTES = 65535
-    }
-}
-
-private class NativeLwipProxyTransportSession(
-    override val descriptor: ProxySessionDescriptor,
-    private val resolver: (String) -> List<InetAddress>,
-    private val backend: NativeLwipTcpBackend,
+    private val tunneledResolver: ((String) -> String)?,
+    private val requireTunneledDns: Boolean,
+    private val backend: GvisorTcpBackend,
     private val threadFactory: (String, Runnable) -> Thread,
     private val logger: (Int, String) -> Unit,
 ) : ProxyTransportSession {
@@ -329,42 +302,97 @@ private class NativeLwipProxyTransportSession(
     private val closed = AtomicBoolean(false)
     private val tearingDown = AtomicBoolean(false)
     private val nativeSessionId = AtomicInteger(0)
+    private val openStarted = AtomicBoolean(false)
 
+    /**
+     * Resolves the target and opens the native gVisor session.
+     *
+     * Native returns <= 0 for classified open failures and > 0 for a live session. If the client
+     * closes while native open is pending, [close] cancels by descriptor ID and this method reports
+     * the result as [ProxyTransportFailureReason.clientAborted].
+     */
     override fun awaitConnected(timeoutMs: Long) {
         if (closed.get()) throw IOException("Proxy transport session is already closed.")
         if (connected.get()) return
+        val resolveStartMs = System.currentTimeMillis()
         val remoteAddress = resolveIpv4Target()
+        val resolveElapsedMs = System.currentTimeMillis() - resolveStartMs
         val octets = remoteAddress.address.map { it.toInt() and 0xff }.toIntArray()
         val timeout = timeoutMs.coerceIn(1L, Int.MAX_VALUE.toLong()).toInt()
         logger(
             Log.DEBUG,
-            "proxy lwip connect sid=${descriptor.sessionId} target=${descriptor.request.host}:${descriptor.request.port} ip=${remoteAddress.hostAddress} timeoutMs=$timeout",
+            "proxy gvisor connect sid=${descriptor.sessionId} target=${descriptor.request.host}:${descriptor.request.port} " +
+                "ip=${remoteAddress.hostAddress} timeoutMs=$timeout resolveMs=$resolveElapsedMs thread=${Thread.currentThread().name} " +
+                formatGvisorStats(backend.stats()),
         )
-        val id = backend.open(octets, descriptor.request.port, timeout)
+        val openStartMs = System.currentTimeMillis()
+        openStarted.set(true)
+        val id = backend.open(descriptor.sessionId, octets, descriptor.request.port, timeout)
+        val openElapsedMs = System.currentTimeMillis() - openStartMs
         if (id <= 0) {
-            throw ProxyTransportException(ProxyTransportFailureReason.upstreamConnectFailed, "Native lwIP TCP connect failed.")
+            val reason = failureReasonForOpenCode(id)
+            val diagnostics = backend.openDiagnostics(descriptor.sessionId).takeIf { it.isNotBlank() }?.let { " $it" }.orEmpty()
+            if (reason != ProxyTransportFailureReason.clientAborted) {
+                logger(
+                    Log.WARN,
+                    "proxy gvisor connect failed sid=${descriptor.sessionId} target=${descriptor.request.host}:${descriptor.request.port} " +
+                        "ip=${remoteAddress.hostAddress} openMs=$openElapsedMs code=$id reason=$reason$diagnostics " + formatGvisorStats(backend.stats()),
+                )
+            }
+            throw ProxyTransportException(
+                reason,
+                "gVisor TCP connect failed code=$id.${diagnostics.ifBlank { "" }}",
+            )
+        }
+        if (closed.get()) {
+            backend.close(id)
+            throw ProxyTransportException(
+                ProxyTransportFailureReason.clientAborted,
+                "gVisor TCP connect canceled because the client closed before establishment.",
+            )
         }
         nativeSessionId.set(id)
         connected.set(true)
+        val diagnostics = backend.openDiagnostics(descriptor.sessionId).takeIf { it.isNotBlank() }?.let { " $it" }.orEmpty()
+        logger(
+            Log.DEBUG,
+            "proxy gvisor connect ok sid=${descriptor.sessionId} native=$id target=${descriptor.request.host}:${descriptor.request.port} " +
+                "ip=${remoteAddress.hostAddress} openMs=$openElapsedMs$diagnostics " + formatGvisorStats(backend.stats()),
+        )
     }
 
     override fun pumpBidirectional(client: ProxyClientConnection) {
         if (!connected.get()) throw IOException("TCP session is not connected.")
         val failure = AtomicReference<IOException?>(null)
+        /*
+         * The native bridge exposes blocking read/write operations, so each direction owns a
+         * daemon thread. Timeouts are polling points for shutdown, not user-visible failures.
+         */
         val remoteToClient =
             threadFactory(
-                "proxy-lwip-remote-${descriptor.sessionId}",
+                "proxy-gvisor-remote-${descriptor.sessionId}",
                 Runnable {
                     try {
                         while (!tearingDown.get()) {
                             val chunk = backend.read(nativeSessionId.get(), RELAY_BUFFER_BYTES, READ_TIMEOUT_MS)
                             if (chunk == null) continue
-                            if (chunk.isEmpty()) break
+                            if (chunk.isEmpty()) {
+                                logGvisorClose(GvisorTcpFailureCategory.cleanEof, "remote->client")
+                                break
+                            }
                             client.output.write(chunk)
                             client.output.flush()
                         }
                     } catch (e: IOException) {
-                        if (!tearingDown.get()) failure.compareAndSet(null, e)
+                        if (!tearingDown.get()) {
+                            val category = gvisorTcpFailureCategory(e)
+                            logGvisorFailure(category, "remote->client", e)
+                            if (category != GvisorTcpFailureCategory.connectionReset &&
+                                category != GvisorTcpFailureCategory.sessionClosedLocally
+                            ) {
+                                failure.compareAndSet(null, e)
+                            }
+                        }
                     } finally {
                         shutdownSocketOutput(client.socket)
                     }
@@ -381,12 +409,20 @@ private class NativeLwipProxyTransportSession(
                 while (offset < read) {
                     val chunk = buffer.copyOfRange(offset, read)
                     val written = backend.write(nativeSessionId.get(), chunk, WRITE_TIMEOUT_MS)
-                    if (written <= 0) throw IOException("Native lwIP TCP write failed.")
+                    if (written <= 0) throw gvisorWriteFailure(written)
                     offset += written
                 }
             }
         } catch (e: IOException) {
-            if (!tearingDown.get()) failure.compareAndSet(null, e)
+            if (!tearingDown.get()) {
+                val category = gvisorTcpFailureCategory(e, writePath = true)
+                logGvisorFailure(category, "client->remote", e)
+                if (category != GvisorTcpFailureCategory.connectionReset &&
+                    category != GvisorTcpFailureCategory.sessionClosedLocally
+                ) {
+                    failure.compareAndSet(null, e)
+                }
+            }
         } finally {
             tearingDown.set(true)
             shutdownSocketOutput(client.socket)
@@ -402,23 +438,80 @@ private class NativeLwipProxyTransportSession(
         failure.get()?.let { throw it }
     }
 
+    override fun readRemoteBytes(maxLen: Int, timeoutMs: Int): ByteArray? {
+        if (!connected.get()) throw IOException("TCP session is not connected.")
+        if (tearingDown.get()) return ByteArray(0)
+        val chunk = backend.read(nativeSessionId.get(), maxLen, timeoutMs)
+        if (chunk == null) return null
+        if (chunk.isEmpty()) {
+            tearingDown.set(true)
+        }
+        return chunk
+    }
+
+    override fun writeClientBytes(bytes: ByteArray, timeoutMs: Int): Int {
+        if (!connected.get()) throw IOException("TCP session is not connected.")
+        if (bytes.isEmpty()) return 0
+        var offset = 0
+        while (offset < bytes.size) {
+            val chunk = bytes.copyOfRange(offset, bytes.size)
+            val written = backend.write(nativeSessionId.get(), chunk, timeoutMs)
+            if (written <= 0) throw gvisorWriteFailure(written)
+            offset += written
+        }
+        return offset
+    }
+
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         tearingDown.set(true)
         val id = nativeSessionId.getAndSet(0)
-        if (id > 0) backend.close(id)
+        if (id > 0) {
+            backend.close(id)
+        } else if (openStarted.get() && !connected.get()) {
+            backend.cancelOpen(descriptor.sessionId)
+        }
     }
 
     private fun resolveIpv4Target(): InetAddress {
         descriptor.request.host.toIpv4LiteralOrNull()?.let { literal ->
             return InetAddress.getByName(literal)
         }
+        val tunneledResolve = tunneledResolver
+        if (tunneledResolve != null) {
+            try {
+                val resolvedIpv4 = tunneledResolve(descriptor.request.host)
+                logger(
+                    Log.DEBUG,
+                    "proxy gvisor resolve sid=${descriptor.sessionId} host=${descriptor.request.host} mode=tunneled ip=$resolvedIpv4",
+                )
+                return InetAddress.getByName(resolvedIpv4)
+            } catch (e: IOException) {
+                throw ProxyTransportException(
+                    ProxyTransportFailureReason.dnsFailed,
+                    e.message ?: "Tunneled DNS lookup failed.",
+                    e,
+                )
+            } catch (e: RuntimeException) {
+                throw ProxyTransportException(
+                    ProxyTransportFailureReason.dnsFailed,
+                    e.message ?: "Tunneled DNS lookup failed.",
+                    e,
+                )
+            }
+        }
+        if (requireTunneledDns) {
+            throw ProxyTransportException(
+                ProxyTransportFailureReason.dnsFailed,
+                "Proxy-only mode requires tunneled DNS for hostname targets.",
+            )
+        }
         val resolved =
             resolver(descriptor.request.host).firstOrNull { it is Inet4Address }
                 ?: throw ProxyTransportException(ProxyTransportFailureReason.networkUnreachable, "IPv6 destinations are not supported in proxy mode.")
         logger(
             Log.DEBUG,
-            "proxy lwip resolve sid=${descriptor.sessionId} host=${descriptor.request.host} ip=${resolved.hostAddress}",
+            "proxy gvisor resolve sid=${descriptor.sessionId} host=${descriptor.request.host} ip=${resolved.hostAddress}",
         )
         return resolved
     }
@@ -428,6 +521,48 @@ private class NativeLwipProxyTransportSession(
             socket.shutdownOutput()
         } catch (_: IOException) {
         }
+    }
+
+    private fun failureReasonForOpenCode(code: Int): ProxyTransportFailureReason =
+        when (code) {
+            -4 -> ProxyTransportFailureReason.upstreamTimeout
+            -7 -> ProxyTransportFailureReason.clientAborted
+            -6 -> ProxyTransportFailureReason.networkUnreachable
+            -2 -> ProxyTransportFailureReason.localServiceUnavailable
+            -1 -> ProxyTransportFailureReason.protocolError
+            else -> ProxyTransportFailureReason.upstreamConnectFailed
+        }
+
+    private fun gvisorWriteFailure(code: Int): IOException =
+        when (code) {
+            -4 -> IOException("gVisor TCP write failed: write timeout.")
+            -5 -> IOException("gVisor TCP write failed: connection reset.")
+            -2 -> IOException("gVisor TCP write failed: session closed locally.")
+            else -> IOException("gVisor TCP write failed: internal gVisor error code=$code.")
+        }
+
+    private fun logGvisorClose(category: GvisorTcpFailureCategory, direction: String) {
+        logger(
+            Log.DEBUG,
+            "proxy gvisor tcp close sid=${descriptor.sessionId} native=${nativeSessionId.get()} category=$category " +
+                "direction=$direction target=${descriptor.request.host}:${descriptor.request.port} ageMs=${System.currentTimeMillis() - descriptor.openedAtMs}",
+        )
+    }
+
+    private fun logGvisorFailure(category: GvisorTcpFailureCategory, direction: String, error: IOException) {
+        val level =
+            when (category) {
+                GvisorTcpFailureCategory.connectionReset,
+                GvisorTcpFailureCategory.sessionClosedLocally,
+                -> Log.DEBUG
+                else -> Log.WARN
+            }
+        logger(
+            level,
+            "proxy gvisor tcp close sid=${descriptor.sessionId} native=${nativeSessionId.get()} category=$category " +
+                "direction=$direction target=${descriptor.request.host}:${descriptor.request.port} " +
+                "ageMs=${System.currentTimeMillis() - descriptor.openedAtMs} error=${error.message ?: error.javaClass.simpleName}",
+        )
     }
 
     private companion object {

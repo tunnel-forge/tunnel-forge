@@ -47,11 +47,23 @@ data class ProxyRuntimeConfig(
 )
 
 /**
- * Local proxy listeners shared by VPN and local-proxy modes.
+ * Local proxy listener lifecycle shared by VPN and proxy-only modes.
  *
- * v1 runtime responsibility is listener lifecycle and protocol-safe failure responses until the
- * userspace transport is attached to [ProxyPacketBridge].
+ * Implementations own only HTTP/SOCKS listener sockets and protocol framing. The transport owns
+ * tunneled TCP/UDP sessions, so callers can swap the listener runtime without changing dataplane
+ * ownership.
  */
+interface LocalProxyRuntime : Closeable {
+    fun start()
+    fun stop()
+    fun endpointSummary(): String
+    fun exposureInfo(): ProxyExposureInfo
+
+    override fun close() {
+        stop()
+    }
+}
+
 class ProxyServerRuntime(
     private val config: ProxyRuntimeConfig,
     private val logger: (String) -> Unit = {},
@@ -61,7 +73,7 @@ class ProxyServerRuntime(
     private val upstreamConnectTimeoutMs: Long = connectTimeoutMs,
     private val levelLogger: ((Int, String) -> Unit)? = null,
     private val secureSocketFactory: ProxySecureSocketFactory = SystemProxySecureSocketFactory,
-) {
+) : LocalProxyRuntime {
     internal enum class ProxyFailureReason {
         localServiceUnavailable,
         upstreamConnectFailed,
@@ -84,7 +96,7 @@ class ProxyServerRuntime(
     private val nextHttpErrorId = AtomicInteger(1)
     private val clientPermits = config.maxConcurrentClients?.let { Semaphore(it, true) }
 
-    fun start() {
+    override fun start() {
         if (!config.httpEnabled && !config.socksEnabled) {
             throw IllegalArgumentException("Enable HTTP or SOCKS5 before starting proxy listeners")
         }
@@ -114,7 +126,7 @@ class ProxyServerRuntime(
         }
     }
 
-    fun stop() {
+    override fun stop() {
         running.set(false)
         debug("proxy runtime stop listeners=${listenerThreads.size} clients=${activeClientWorkers.get()} sockets=${activeClientSockets.size}")
         for (socket in serverSockets) {
@@ -132,14 +144,14 @@ class ProxyServerRuntime(
         clientExecutor.shutdownNow()
     }
 
-    fun endpointSummary(): String {
+    override fun endpointSummary(): String {
         return config.exposure.endpointSummary(
             httpEnabled = config.httpEnabled,
             socksEnabled = config.socksEnabled,
         )
     }
 
-    fun exposureInfo(): ProxyExposureInfo = config.exposure
+    override fun exposureInfo(): ProxyExposureInfo = config.exposure
 
     private fun startListener(
         name: String,
@@ -333,7 +345,7 @@ class ProxyServerRuntime(
         try {
             transport.openTcpSession(connectRequest).use { session ->
                 sessionId = session.descriptor.sessionId
-                session.awaitConnected(connectResponseTimeoutMs.coerceAtMost(connectTimeoutMs).coerceAtLeast(1L))
+                session.awaitConnected(connectResponseTimeoutMs.coerceAtLeast(1L))
                 debug("proxy connect ok proto=http-connect sid=${session.descriptor.sessionId} target=${connectRequest.host}:${connectRequest.port}")
                 output.write("HTTP/1.1 200 Connection Established\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
                 output.flush()
@@ -869,19 +881,7 @@ class ProxyServerRuntime(
     ) {
         try {
             writeHttpError(output, code, status, message, context)
-        } catch (e: IOException) {
-            warn(
-                listOfNotNull(
-                    "proxy fail proto=${context.protocol}",
-                    "phase=${context.phase}",
-                    "reason=${ProxyFailureReason.clientAborted.name}",
-                    context.sessionId?.let { "sid=$it" } ?: "sid=pending",
-                    context.target?.let { "target=$it" },
-                    "status=none",
-                    "error=${(e.message ?: "client closed before proxy response").sanitizeForLog()}",
-                    runtimeDiagnostics(),
-                ).joinToString(" "),
-            )
+        } catch (_: IOException) {
         }
     }
 

@@ -36,38 +36,51 @@ object VpnBridge {
     @JvmStatic
     external fun nativeStartProxyLoop(): Int
 
+    /*
+     * gVisor bridge calls are used only by proxy-only mode. Packet direction is relative to
+     * gVisor: inbound packets are injected from PPP, outbound packets are read for PPP send.
+     */
     @JvmStatic
-    external fun nativeStartLwipProxyLoop(clientIpv4: IntArray, mtu: Int): Int
+    external fun nativeGvisorStart(clientIpv4: IntArray, mtu: Int): Int
 
     @JvmStatic
-    external fun nativeLwipTcpOpen(remoteIpv4: IntArray, port: Int, timeoutMs: Int): Int
+    external fun nativeGvisorStop()
 
     @JvmStatic
-    external fun nativeLwipTcpRead(sessionId: Int, maxLen: Int, timeoutMs: Int): ByteArray?
+    external fun nativeGvisorInjectInbound(packet: ByteArray): Int
 
     @JvmStatic
-    external fun nativeLwipTcpWrite(sessionId: Int, bytes: ByteArray, timeoutMs: Int): Int
+    external fun nativeGvisorReadOutbound(maxLen: Int, timeoutMs: Int): ByteArray?
 
     @JvmStatic
-    external fun nativeLwipTcpClose(sessionId: Int)
+    external fun nativeGvisorTcpOpen(remoteIpv4: IntArray, port: Int, timeoutMs: Int): Int
 
     @JvmStatic
-    external fun nativeLwipUdpOpen(): Int
+    external fun nativeGvisorTcpOpenCancelable(openId: Int, remoteIpv4: IntArray, port: Int, timeoutMs: Int): Int
 
     @JvmStatic
-    external fun nativeLwipUdpSend(sessionId: Int, remoteIpv4: IntArray, port: Int, payload: ByteArray): Int
+    external fun nativeGvisorTcpCancelOpen(openId: Int): Int
 
     @JvmStatic
-    external fun nativeLwipUdpReceive(sessionId: Int, maxLen: Int, timeoutMs: Int): ByteArray?
+    external fun nativeGvisorTcpRead(sessionId: Int, maxLen: Int, timeoutMs: Int): ByteArray?
 
     @JvmStatic
-    external fun nativeLwipUdpClose(sessionId: Int)
+    external fun nativeGvisorTcpWrite(sessionId: Int, bytes: ByteArray, timeoutMs: Int): Int
+
+    @JvmStatic
+    external fun nativeGvisorTcpClose(sessionId: Int)
+
+    @JvmStatic
+    external fun nativeGvisorStats(): IntArray
+
+    @JvmStatic
+    external fun nativeGvisorLastOpenDiagnostics(): String
+
+    @JvmStatic
+    external fun nativeGvisorOpenDiagnostics(openId: Int): String
 
     @JvmStatic
     external fun nativeIsProxyPacketBridgeActive(): Boolean
-
-    @JvmStatic
-    external fun nativeIsLwipProxyActive(): Boolean
 
     @JvmStatic
     external fun nativeQueueProxyOutboundPacket(packet: ByteArray): Int

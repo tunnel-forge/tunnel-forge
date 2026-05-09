@@ -197,6 +197,7 @@ class TunnelVpnService : VpnService() {
                 activeProxyConfig = proxyConfig
                 activeServer = server
                 activeProfileName = profileName.ifEmpty { null }
+                RuntimeEnvironmentInfo.emit(this, TAG, prefixAttempt(attemptId), mode = VpnContract.MODE_VPN_TUNNEL)
                 VpnTunnelEvents.emitEngineLog(
                     Log.DEBUG,
                     TAG,

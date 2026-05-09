@@ -17,13 +17,13 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Foreground service for proxy-only mode.
  *
  * This reuses the real native negotiation path without VpnService socket protection. TCP proxy
- * sessions are carried by the native lwIP dataplane so this mode can coexist with another app's
- * Android VPN/TUN.
+ * sessions are carried by a gVisor netstack connected to the native packet bridge so this mode can
+ * coexist with another app's Android VPN/TUN.
  */
 class ProxyTunnelService : Service() {
     private val sessionLock = Any()
     private var worker: Thread? = null
-    private var proxyRuntime: ProxyServerRuntime? = null
+    private var proxyRuntime: LocalProxyRuntime? = null
     private var proxyTransport: ProxyTransport? = null
     private var proxyLoopThread: Thread? = null
     private var activeProxyConfig: ProxyRuntimeConfig? = null
@@ -114,6 +114,7 @@ class ProxyTunnelService : Service() {
                 stopRequested = false
                 terminalEventEmitted.set(false)
                 activeProxyConfig = proxyConfig
+                RuntimeEnvironmentInfo.emit(this, TAG, prefixAttempt(attemptId), mode = VpnContract.MODE_PROXY_ONLY)
                 val startupThread = Thread(
                     {
                         runProxyNegotiation(
@@ -159,8 +160,12 @@ class ProxyTunnelService : Service() {
         val currentWorker = Thread.currentThread()
         val nativeOwner = NativeTunnelOwner(VpnContract.MODE_PROXY_ONLY, attemptId)
         var nativeOwnerAcquired = false
-        var localRuntime: ProxyServerRuntime? = null
+        var localRuntime: LocalProxyRuntime? = null
         var localLoopThread: Thread? = null
+        var localGvisorOutboundThread: Thread? = null
+        var localGvisorInboundThread: Thread? = null
+        var localPacketBridge: ProxyPacketBridge? = null
+        var localGvisorStarted = false
         var effectiveProxyConfig = proxyConfig
         emitAttemptState(
             attemptId,
@@ -231,12 +236,12 @@ class ProxyTunnelService : Service() {
             VpnTunnelEvents.emitEngineLog(
                 Log.DEBUG,
                 TAG,
-                "${prefixAttempt(attemptId)}Negotiated tunnel clientIpv4=${negotiatedClientIp.joinToString(".")}; awaiting native lwIP proxy dataplane",
+                "${prefixAttempt(attemptId)}Negotiated tunnel clientIpv4=${negotiatedClientIp.joinToString(".")}; awaiting native packet bridge",
             )
             emitAttemptState(
                 attemptId,
                 VpnContract.TUNNEL_CONNECTING,
-                "Tunnel negotiated. Starting native local-proxy TCP stack...",
+                "Tunnel negotiated. Starting gVisor local-proxy TCP stack...",
             )
             val loopThread = Thread(
                 {
@@ -245,7 +250,7 @@ class ProxyTunnelService : Service() {
                         emitEngineLog = { level, message ->
                             VpnTunnelEvents.emitEngineLog(level, TAG, message)
                         },
-                        startLoop = { VpnBridge.nativeStartLwipProxyLoop(negotiatedClientIp, proxyMtu) },
+                        startLoop = { VpnBridge.nativeStartProxyLoop() },
                         detailForCode = ::tunnelExitDetail,
                         isStopRequested = { stopRequested },
                         isConnected = { connectedEmitted },
@@ -253,7 +258,7 @@ class ProxyTunnelService : Service() {
                             emitAttemptTerminalState(terminalAttemptId, state, detail)
                         },
                         onLoopCrash = { throwable ->
-                            AppLog.e(TAG, "${prefixAttempt(attemptId)}nativeStartLwipProxyLoop failed", throwable)
+                            AppLog.e(TAG, "${prefixAttempt(attemptId)}nativeStartProxyLoop failed", throwable)
                         },
                     )
                 },
@@ -265,25 +270,84 @@ class ProxyTunnelService : Service() {
                     proxyLoopThread = loopThread
                 }
             }
+            /*
+             * Proxy-only dataplane boot order is strict: native PPP bridge first, then gVisor,
+             * then DNS/pump/listener wiring. Starting listeners earlier would accept clients
+             * before there is a packet path to the negotiated tunnel.
+             */
             loopThread.start()
-            VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}waiting for native lwIP proxy readiness")
-            if (!waitUntilLwipProxyActive()) {
+            VpnTunnelEvents.emitEngineLog(Log.DEBUG, TAG, "${prefixAttempt(attemptId)}waiting for native packet bridge readiness")
+            if (!waitUntilProxyPacketBridgeActive()) {
                 if (!ProxyTunnelServiceStopPolicy.shouldFailBridgeReadiness(stopRequested)) {
                     VpnTunnelEvents.emitEngineLog(
                         Log.DEBUG,
                         TAG,
-                        "${prefixAttempt(attemptId)}lwIP proxy readiness wait ended after stop request",
+                        "${prefixAttempt(attemptId)}packet bridge readiness wait ended after stop request",
                     )
                 } else {
-                    emitAttemptTerminalState(attemptId, VpnContract.TUNNEL_FAILED, "Native local proxy TCP stack did not become ready")
+                    emitAttemptTerminalState(attemptId, VpnContract.TUNNEL_FAILED, "Native proxy packet bridge did not become ready")
                 }
-                NativeTunnelSessions.shared.stopOwner(nativeOwner, reason = "lwIP proxy readiness failed")
+                NativeTunnelSessions.shared.stopOwner(nativeOwner, reason = "proxy packet bridge readiness failed")
                 loopThread.join(5000)
                 return
             }
-            VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}Native lwIP proxy dataplane ready")
+            val gvisorStartResult = VpnBridge.nativeGvisorStart(negotiatedClientIp, proxyMtu)
+            if (gvisorStartResult != 0) {
+                emitAttemptTerminalState(
+                    attemptId,
+                    VpnContract.TUNNEL_FAILED,
+                    "gVisor local proxy TCP stack did not start: code $gvisorStartResult",
+                )
+                NativeTunnelSessions.shared.stopOwner(nativeOwner, reason = "gVisor startup failed")
+                loopThread.join(5000)
+                return
+            }
+            localGvisorStarted = true
+            VpnTunnelEvents.emitEngineLog(Log.INFO, TAG, "${prefixAttempt(attemptId)}gVisor proxy dataplane ready")
+            val packetBridge = ProxyPacketBridge()
+            if (!packetBridge.waitUntilActive(timeoutMs = 1000, pollIntervalMs = 25)) {
+                emitAttemptTerminalState(attemptId, VpnContract.TUNNEL_FAILED, "Native proxy packet bridge became unavailable before gVisor startup completed")
+                NativeTunnelSessions.shared.stopOwner(nativeOwner, reason = "proxy packet bridge unavailable after gVisor startup")
+                loopThread.join(5000)
+                return
+            }
+            localPacketBridge = packetBridge
+            val udpDnsServers = effectiveDnsServers.filter { it.protocol == DnsProtocol.dnsOverUdp }
+            /*
+             * Proxy-only hostname resolution must stay inside the tunnel. Without a UDP DNS
+             * server from negotiation, hostname targets fail closed instead of using Android DNS.
+             */
+            val dnsResolver =
+                if (udpDnsServers.isNotEmpty()) {
+                    TunneledDnsResolver(
+                        bridge = packetBridge,
+                        clientIpv4 = negotiatedClientIp.joinToString("."),
+                        dnsServers = udpDnsServers,
+                        openTunneledSocket = {
+                            throw java.io.IOException("Only DNS-over-UDP is supported in proxy-only gVisor resolver.")
+                        },
+                        logger = { level, message ->
+                            VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
+                        },
+                    )
+                } else {
+                    VpnTunnelEvents.emitEngineLog(
+                        Log.WARN,
+                        TAG,
+                        "${prefixAttempt(attemptId)}No UDP DNS server available for tunneled proxy hostname resolution; hostname targets will fail closed instead of using Android DNS",
+                    )
+                    null
+            }
+            /*
+             * Pumps connect packet-level gVisor to packet-level PPP. The transport below handles
+             * stream sessions, while these threads keep raw IP packets flowing in both directions.
+             */
+            localGvisorOutboundThread = startGvisorOutboundPump(attemptId, loopThread, packetBridge)
+            localGvisorInboundThread = startGvisorInboundPump(attemptId, loopThread, dnsResolver)
             val transport =
-                NativeLwipProxyTransport(
+                GvisorProxyTransport(
+                    tunneledResolver = dnsResolver?.let { resolver -> { host -> resolver.resolve(host) } },
+                    requireTunneledDns = true,
                     logger = { level, message ->
                         VpnTunnelEvents.emitEngineLog(level, TAG, "${prefixAttempt(attemptId)}$message")
                     },
@@ -333,7 +397,7 @@ class ProxyTunnelService : Service() {
                     "${prefixAttempt(attemptId)}Proxy listener ports changed requestedHttp=${proxyConfig.httpPort} requestedSocks=${proxyConfig.socksPort} http=${portSelection.httpPort} socks=${portSelection.socksPort}",
                 )
             }
-            val runtime = ProxyServerRuntime(
+            val runtime = NettyProxyServerRuntime(
                 config =
                     effectiveProxyConfig.copy(
                         exposure = effectiveExposure,
@@ -346,7 +410,6 @@ class ProxyTunnelService : Service() {
                 transport = transport,
                 connectTimeoutMs = PROXY_ONLY_CONNECT_TIMEOUT_MS,
                 connectResponseTimeoutMs = PROXY_ONLY_CONNECT_RESPONSE_TIMEOUT_MS,
-                upstreamConnectTimeoutMs = PROXY_ONLY_UPSTREAM_CONNECT_TIMEOUT_MS,
             )
             localRuntime = runtime
             var workerReplaced = false
@@ -397,7 +460,7 @@ class ProxyTunnelService : Service() {
                 attemptId,
                 VpnContract.TUNNEL_CONNECTED,
                 changedPortNotice
-                    ?: "Native TCP stack active. ${runtime.endpointSummary()}. Hostnames resolve before tunneled connect; IPv6 destinations are still unsupported.",
+                    ?: "gVisor TCP stack active. ${runtime.endpointSummary()}. Hostnames resolve before tunneled connect; IPv6 destinations are still unsupported.",
             )
             loopThread.join()
         } catch (e: InterruptedException) {
@@ -424,7 +487,19 @@ class ProxyTunnelService : Service() {
                 emitAttemptTerminalState(attemptId, VpnContract.TUNNEL_FAILED, t.message ?: "proxy startup failed")
             }
         } finally {
+            /*
+             * Tear down consumers before producers: stop listeners, stop packet pumps/bridge,
+             * stop gVisor, then release the native tunnel owner.
+             */
             localRuntime?.stop()
+            localGvisorOutboundThread?.interrupt()
+            localGvisorInboundThread?.interrupt()
+            localPacketBridge?.stop()
+            if (localGvisorStarted) {
+                VpnBridge.nativeGvisorStop()
+            }
+            joinQuietly(localGvisorOutboundThread, 1000)
+            joinQuietly(localGvisorInboundThread, 1000)
             if (nativeOwnerAcquired) {
                 NativeTunnelSessions.shared.stopOwner(nativeOwner, reason = "proxy worker cleanup")
             }
@@ -534,10 +609,10 @@ class ProxyTunnelService : Service() {
     private fun currentAttemptId(): String =
         synchronized(sessionLock) { activeAttemptId }
 
-    private fun waitUntilLwipProxyActive(timeoutMs: Long = 4000, pollIntervalMs: Long = 100): Boolean {
+    private fun waitUntilProxyPacketBridgeActive(timeoutMs: Long = 4000, pollIntervalMs: Long = 100): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
-            if (VpnBridge.nativeIsLwipProxyActive()) return true
+            if (VpnBridge.nativeIsProxyPacketBridgeActive()) return true
             try {
                 Thread.sleep(pollIntervalMs)
             } catch (_: InterruptedException) {
@@ -545,7 +620,128 @@ class ProxyTunnelService : Service() {
                 return false
             }
         }
-        return VpnBridge.nativeIsLwipProxyActive()
+        return VpnBridge.nativeIsProxyPacketBridgeActive()
+    }
+
+    private fun startGvisorOutboundPump(
+        attemptId: String,
+        loopThread: Thread,
+        packetBridge: ProxyPacketBridge,
+    ): Thread =
+        /*
+         * Outbound means "from gVisor toward the negotiated PPP tunnel". These packets are read
+         * from the native gVisor queue and handed to the native packet bridge for encapsulation.
+         */
+        Thread(
+            {
+                while (!stopRequested && loopThread.isAlive && !Thread.currentThread().isInterrupted) {
+                    try {
+                        val packet = VpnBridge.nativeGvisorReadOutbound(PROXY_PACKET_MAX_BYTES, 50)
+                        if (packet == null || packet.isEmpty()) continue
+                        logGvisorPacketEvent(attemptId, "out", packet)
+                        if (!packetBridge.queueOutboundPacket(packet)) {
+                            VpnTunnelEvents.emitEngineLog(
+                                Log.WARN,
+                                TAG,
+                                "${prefixAttempt(attemptId)}gVisor outbound packet enqueue failed len=${packet.size}",
+                            )
+                        }
+                    } catch (t: Throwable) {
+                        if (stopRequested || Thread.currentThread().isInterrupted) break
+                        VpnTunnelEvents.emitEngineLog(
+                            Log.WARN,
+                            TAG,
+                            "${prefixAttempt(attemptId)}gVisor outbound pump error: ${t.message ?: t.javaClass.simpleName}",
+                        )
+                    }
+                }
+            },
+            "gvisor-outbound-pump",
+        ).also {
+            it.isDaemon = true
+            it.start()
+        }
+
+    private fun startGvisorInboundPump(
+        attemptId: String,
+        loopThread: Thread,
+        dnsResolver: TunneledDnsResolver?,
+    ): Thread =
+        /*
+         * Inbound means "from PPP toward gVisor". DNS replies are offered to the tunneled resolver
+         * before TCP packets are injected into gVisor.
+         */
+        Thread(
+            {
+                while (!stopRequested && loopThread.isAlive && !Thread.currentThread().isInterrupted) {
+                    try {
+                        val packet = VpnBridge.nativeReadProxyInboundPacket(PROXY_PACKET_MAX_BYTES)
+                        if (packet == null || packet.isEmpty()) continue
+                        if (dnsResolver != null && handleDnsInboundPacket(dnsResolver, packet)) {
+                            continue
+                        }
+                        logGvisorPacketEvent(attemptId, "in", packet)
+                        val rc = VpnBridge.nativeGvisorInjectInbound(packet)
+                        if (rc != 0) {
+                            VpnTunnelEvents.emitEngineLog(
+                                Log.WARN,
+                                TAG,
+                                "${prefixAttempt(attemptId)}gVisor inbound packet inject failed rc=$rc len=${packet.size}",
+                            )
+                        }
+                    } catch (t: Throwable) {
+                        if (stopRequested || Thread.currentThread().isInterrupted) break
+                        VpnTunnelEvents.emitEngineLog(
+                            Log.WARN,
+                            TAG,
+                            "${prefixAttempt(attemptId)}gVisor inbound pump error: ${t.message ?: t.javaClass.simpleName}",
+                        )
+                    }
+                }
+            },
+            "gvisor-inbound-pump",
+        ).also {
+            it.isDaemon = true
+            it.start()
+        }
+
+    private fun handleDnsInboundPacket(dnsResolver: TunneledDnsResolver, packet: ByteArray): Boolean {
+        val ipv4 = IpPacketParser.parseIpv4(packet) ?: return false
+        if (ipv4.protocol != IpPacketParser.IP_PROTOCOL_UDP) return false
+        val udp = IpPacketParser.parseUdp(packet, ipv4) ?: return false
+        return dnsResolver.handleInboundPacket(ipv4, udp, packet)
+    }
+
+    private fun logGvisorPacketEvent(attemptId: String, direction: String, packet: ByteArray) {
+        val ipv4 = IpPacketParser.parseIpv4(packet)
+        if (ipv4 == null) {
+            if (packet.isNotEmpty() && ((packet[0].toInt() ushr 4) and 0x0f) == 4) {
+                VpnTunnelEvents.emitEngineLog(
+                    Log.WARN,
+                    TAG,
+                    "${prefixAttempt(attemptId)}gVisor packet $direction malformed-ipv4 len=${packet.size} first=${packet.first().toInt() and 0xff}",
+                )
+            }
+            return
+        }
+        if (ipv4.protocol != IpPacketParser.IP_PROTOCOL_TCP) return
+        val tcp = IpPacketParser.parseTcp(packet, ipv4)
+        if (tcp == null) {
+            VpnTunnelEvents.emitEngineLog(
+                Log.WARN,
+                TAG,
+                "${prefixAttempt(attemptId)}gVisor packet $direction malformed-tcp ipTotal=${ipv4.totalLength} packetLen=${packet.size}",
+            )
+        }
+    }
+
+    private fun joinQuietly(thread: Thread?, timeoutMs: Long) {
+        if (thread == null || thread === Thread.currentThread() || !thread.isAlive) return
+        try {
+            thread.join(timeoutMs)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
     }
 
     private fun shouldHandleAttempt(attemptId: String, stage: String): Boolean {
@@ -664,10 +860,10 @@ class ProxyTunnelService : Service() {
         internal val PROXY_ONLY_MAX_TCP_SESSIONS: Int? = null
         internal val PROXY_ONLY_MAX_PENDING_TCP_CONNECTS: Int? = null
         internal const val PROXY_ONLY_CONNECT_TIMEOUT_MS = 60_000L
-        internal const val PROXY_ONLY_CONNECT_RESPONSE_TIMEOUT_MS = 10_000L
-        internal const val PROXY_ONLY_UPSTREAM_CONNECT_TIMEOUT_MS = 10_000L
+        internal const val PROXY_ONLY_CONNECT_RESPONSE_TIMEOUT_MS = 30_000L
+        internal const val PROXY_PACKET_MAX_BYTES = 65_535
         internal val PROXY_ONLY_SYN_RETRANSMIT_DELAYS_MS = listOf(1_000L, 2_000L, 4_000L, 8_000L)
-        internal const val PROXY_ONLY_SYN_PACING_INTERVAL_MS = 20L
+        internal const val PROXY_ONLY_SYN_PACING_INTERVAL_MS = 0L
         internal const val PROXY_ONLY_TCP_FIN_DRAIN_TIMEOUT_MS = 5_000L
 
         private const val CHANNEL_ID = "tunnel_forge_proxy"
@@ -737,7 +933,7 @@ class ProxyTunnelService : Service() {
 private data class ActiveProxySession(
     val attemptId: String,
     val worker: Thread?,
-    val runtime: ProxyServerRuntime?,
+    val runtime: LocalProxyRuntime?,
     val loopThread: Thread?,
     val hasTransport: Boolean,
 ) {
