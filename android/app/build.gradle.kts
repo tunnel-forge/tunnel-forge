@@ -68,6 +68,9 @@ fun findAndroidNdkTool(name: String): File? {
         ?.firstOrNull { it.isFile }
 }
 
+fun androidNdkClang(name: String): String =
+    findAndroidNdkTool(name)?.absolutePath ?: name
+
 // Check PATH explicitly so Gradle passes an absolute executable path to Exec.
 // Environment variables below still allow CI to pin an exact LLVM version.
 fun findPathTool(name: String): String? {
@@ -99,6 +102,7 @@ val gradleWrapperCommand =
     } else {
         "./gradlew"
     }
+val androidGoJniLibsDir = layout.buildDirectory.dir("androidGoJniLibs")
 
 android {
     val enableClangTidy = providers.gradleProperty("tunnelForgeClangTidy").orNull
@@ -176,9 +180,22 @@ android {
         }
     }
 
+    packaging {
+        resources {
+            excludes += "META-INF/INDEX.LIST"
+            excludes += "META-INF/io.netty.versions.properties"
+        }
+    }
+
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
+        }
+    }
+
+    sourceSets {
+        getByName("main") {
+            jniLibs.srcDir(androidGoJniLibsDir)
         }
     }
 }
@@ -186,6 +203,8 @@ android {
 dependencies {
     implementation("androidx.annotation:annotation:1.8.2")
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("io.netty:netty-codec-http:4.2.12.Final")
+    implementation("io.netty:netty-codec-socks:4.2.12.Final")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test:runner:1.2.0")
@@ -207,6 +226,66 @@ val androidNativeCSources =
     }
 val repoRootDir = rootProject.projectDir.parentFile
 val nativeTestBuildDir = repoRootDir.resolve("build/native_test")
+val androidGoModuleDir = rootProject.projectDir.resolve("gvisor")
+
+data class AndroidGoAbi(
+    val abi: String,
+    val goArch: String,
+    val clangName: String,
+    val goArm: String? = null,
+)
+
+val androidGoAbis =
+    listOf(
+        AndroidGoAbi("arm64-v8a", "arm64", "aarch64-linux-android31-clang"),
+        AndroidGoAbi("armeabi-v7a", "arm", "armv7a-linux-androideabi31-clang", goArm = "7"),
+        AndroidGoAbi("x86_64", "amd64", "x86_64-linux-android31-clang"),
+        AndroidGoAbi("x86", "386", "i686-linux-android31-clang"),
+    )
+
+tasks.register("buildAndroidGoNative") {
+    group = "build"
+    description = "Builds the Android Go native shared library for Android ABIs."
+    inputs.files(androidGoModuleDir.resolve("go.mod"), androidGoModuleDir.resolve("go.sum"), androidGoModuleDir.resolve("main.go"))
+    outputs.dirs(androidGoAbis.map { androidGoJniLibsDir.get().asFile.resolve(it.abi) })
+    doLast {
+        if (!androidGoModuleDir.resolve("go.mod").isFile) {
+            throw GradleException("Missing android/gvisor/go.mod. Run the documented Go module setup before building.")
+        }
+        val goBuildCache = layout.buildDirectory.dir("go-cache").get().asFile
+        goBuildCache.mkdirs()
+        androidGoAbis.forEach { abi ->
+            val outDir = androidGoJniLibsDir.get().asFile.resolve(abi.abi)
+            outDir.mkdirs()
+            exec {
+                workingDir = androidGoModuleDir
+                executable = "go"
+                args(
+                    "build",
+                    "-buildmode=c-shared",
+                    "-trimpath",
+                    "-o",
+                    outDir.resolve("libtunnel_gvisor.so").absolutePath,
+                    ".",
+                )
+                environment("CGO_ENABLED", "1")
+                environment("GOOS", "android")
+                environment("GOARCH", abi.goArch)
+                abi.goArm?.let { environment("GOARM", it) }
+                environment("CC", androidNdkClang(abi.clangName))
+                environment("GOCACHE", goBuildCache.absolutePath)
+            }
+        }
+    }
+}
+
+tasks.matching {
+    it.name == "preBuild" ||
+        it.name.startsWith("externalNativeBuild") ||
+        (it.name.startsWith("merge") && it.name.endsWith("JniLibFolders"))
+}.configureEach {
+    dependsOn("buildAndroidGoNative")
+}
 
 // Rewrites Android native C sources in-place using the repo .clang-format file.
 tasks.register<Exec>("formatAndroidNativeC") {

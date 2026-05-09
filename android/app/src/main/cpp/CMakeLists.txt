@@ -28,47 +28,14 @@ if(TARGET mbedcrypto)
   target_compile_definitions(mbedcrypto PRIVATE MBEDTLS_MD4_C)
 endif()
 
-FetchContent_Declare(
-  lwip
-  URL https://github.com/lwip-tcpip/lwip/archive/refs/tags/STABLE-2_2_0_RELEASE.tar.gz
-)
-FetchContent_MakeAvailable(lwip)
-
-set(LWIP_CORE_SOURCES
-  ${lwip_SOURCE_DIR}/src/core/def.c
-  ${lwip_SOURCE_DIR}/src/core/inet_chksum.c
-  ${lwip_SOURCE_DIR}/src/core/init.c
-  ${lwip_SOURCE_DIR}/src/core/ip.c
-  ${lwip_SOURCE_DIR}/src/core/mem.c
-  ${lwip_SOURCE_DIR}/src/core/memp.c
-  ${lwip_SOURCE_DIR}/src/core/netif.c
-  ${lwip_SOURCE_DIR}/src/core/pbuf.c
-  ${lwip_SOURCE_DIR}/src/core/raw.c
-  ${lwip_SOURCE_DIR}/src/core/stats.c
-  ${lwip_SOURCE_DIR}/src/core/sys.c
-  ${lwip_SOURCE_DIR}/src/core/tcp.c
-  ${lwip_SOURCE_DIR}/src/core/tcp_in.c
-  ${lwip_SOURCE_DIR}/src/core/tcp_out.c
-  ${lwip_SOURCE_DIR}/src/core/timeouts.c
-  ${lwip_SOURCE_DIR}/src/core/udp.c
-  ${lwip_SOURCE_DIR}/src/core/ipv4/autoip.c
-  ${lwip_SOURCE_DIR}/src/core/ipv4/dhcp.c
-  ${lwip_SOURCE_DIR}/src/core/ipv4/etharp.c
-  ${lwip_SOURCE_DIR}/src/core/ipv4/icmp.c
-  ${lwip_SOURCE_DIR}/src/core/ipv4/igmp.c
-  ${lwip_SOURCE_DIR}/src/core/ipv4/ip4.c
-  ${lwip_SOURCE_DIR}/src/core/ipv4/ip4_addr.c
-  ${lwip_SOURCE_DIR}/src/core/ipv4/ip4_frag.c
-  ${lwip_SOURCE_DIR}/src/netif/ethernet.c
-)
-
 add_library(
   tunnel_engine
   SHARED
   vpn_jni.c
   tunnel_loop.c
   packet_endpoint.c
-  proxy_lwip.c
+  gvisor_bridge.c
+  ipv4_dataplane.c
   nat_t_keepalive.c
   util.c
   util_endian.c
@@ -79,7 +46,6 @@ add_library(
   l2tp.c
   ppp_mschap.c
   ppp.c
-  ${LWIP_CORE_SOURCES}
 )
 
 if(TUNNEL_FORGE_CLANG_TIDY)
@@ -90,13 +56,11 @@ target_include_directories(
   tunnel_engine
   PRIVATE
     ${mbedtls_SOURCE_DIR}/include
-    ${lwip_SOURCE_DIR}/src/include
-    ${CMAKE_CURRENT_LIST_DIR}/lwip
 )
 
 target_link_libraries(
   tunnel_engine
-  PRIVATE mbedtls mbedx509 mbedcrypto log
+  PRIVATE mbedtls mbedx509 mbedcrypto log dl
 )
 
 # Inner L2TP-in-UDP checksum: RFC 768 allows 0 = unused. Some kernels drop wrong computed checksums after ESP decap.
