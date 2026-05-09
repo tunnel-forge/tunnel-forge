@@ -1,0 +1,1 @@
+Release 0.7.1 adds explicit consent before checking GitHub Releases for updates and refreshes the F-Droid submission metadata for the current Android build.
