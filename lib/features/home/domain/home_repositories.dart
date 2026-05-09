@@ -42,6 +42,8 @@ abstract class SettingsRepository {
   Future<void> saveLogDisplayLevel(LogDisplayLevel level);
   Future<bool> loadBatteryOptimizationConnectPromptShown();
   Future<void> saveBatteryOptimizationConnectPromptShown(bool shown);
+  Future<bool> loadUpdateCheckConsentGranted();
+  Future<void> saveUpdateCheckConsentGranted(bool granted);
 }
 
 abstract class AppVersionRepository {

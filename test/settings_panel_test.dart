@@ -25,11 +25,13 @@ void main() {
           state: BatteryOptimizationState.restricted,
         ),
     bool batteryOptimizationBusy = false,
+    bool updateCheckConsentGranted = true,
     ValueChanged<SplitTunnelSettings>? onSplitTunnelSettingsChanged,
     ValueChanged<ProxySettings>? onProxySettingsChanged,
     ValueChanged<ConnectivityCheckSettings>? onConnectivityCheckSettingsChanged,
     VoidCallback? onRefreshBatteryOptimization,
     VoidCallback? onRequestBatteryOptimization,
+    VoidCallback? onRefreshVersionCheck,
     VoidCallback? onOpenL2tpSecurityNotice,
   }) {
     final theme = ThemeData.light();
@@ -57,8 +59,9 @@ void main() {
           onChooseApps: () {},
           onOpenL2tpSecurityNotice: onOpenL2tpSecurityNotice,
           installedVersion: '0.3.0+11',
+          updateCheckConsentGranted: updateCheckConsentGranted,
           appUpdateStatus: AppUpdateStatus.idle,
-          onRefreshVersionCheck: () {},
+          onRefreshVersionCheck: onRefreshVersionCheck ?? () {},
           onOpenTelegram: () {},
           onOpenGithub: () {},
           routingLocked: false,
@@ -542,5 +545,36 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('update check asks for consent before refreshing', (
+    tester,
+  ) async {
+    var refreshCount = 0;
+    await tester.pumpWidget(
+      buildPanel(
+        proxySettings: const ProxySettings(),
+        updateCheckConsentGranted: false,
+        onRefreshVersionCheck: () {
+          refreshCount += 1;
+        },
+      ),
+    );
+
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('settings_update_refresh_button')),
+      250,
+      scrollable: settingsScrollView(),
+    );
+    await tester.tap(find.byKey(const Key('settings_update_refresh_button')));
+    await tester.pumpAndSettle();
+
+    expect(refreshCount, 0);
+    expect(find.text('Check GitHub releases?'), findsOneWidget);
+
+    await tester.tap(find.text('Check releases'));
+    await tester.pumpAndSettle();
+
+    expect(refreshCount, 1);
   });
 }

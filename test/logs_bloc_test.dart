@@ -77,12 +77,18 @@ class _FakeSettingsRepository implements SettingsRepository {
   Future<bool> loadBatteryOptimizationConnectPromptShown() async => false;
 
   @override
+  Future<bool> loadUpdateCheckConsentGranted() async => false;
+
+  @override
   Future<void> saveLogDisplayLevel(LogDisplayLevel level) async {
     savedLevels.add(level);
   }
 
   @override
   Future<void> saveBatteryOptimizationConnectPromptShown(bool shown) async {}
+
+  @override
+  Future<void> saveUpdateCheckConsentGranted(bool granted) async {}
 
   @override
   Future<ConnectionMode> loadConnectionMode() async => ConnectionMode.vpnTunnel;

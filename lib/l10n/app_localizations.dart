@@ -356,6 +356,14 @@ extension AppStrings on AppLocalizations {
     'Looking up the latest published GitHub release.',
     'در حال دریافت آخرین انتشار GitHub.',
   );
+  String get updateCheckConsentTitle =>
+      AppText.pick('Check GitHub releases?', 'بررسی انتشارهای GitHub؟');
+  String get updateCheckConsentMessage => AppText.pick(
+    'TunnelForge will contact GitHub Releases to compare your installed version with the latest published build. This is used only when you request an update check.',
+    'TunnelForge برای مقایسه نسخه نصب‌شده با آخرین انتشار، به GitHub Releases وصل می‌شود. این کار فقط زمانی انجام می‌شود که خودتان بررسی به‌روزرسانی را درخواست کنید.',
+  );
+  String get updateCheckConsentAllow =>
+      AppText.pick('Check releases', 'بررسی انتشارها');
   String latestReleaseRunning(String latest, String installed) => AppText.pick(
     'Latest release: $latest. You are running $installed.',
     'آخرین انتشار: $latest. نسخه نصب‌شده شما $installed است.',

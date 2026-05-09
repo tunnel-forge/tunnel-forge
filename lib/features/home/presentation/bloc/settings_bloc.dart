@@ -40,6 +40,10 @@ final class SettingsVersionCheckRequested extends SettingsEvent {
   const SettingsVersionCheckRequested();
 }
 
+final class SettingsVersionCheckConsentGranted extends SettingsEvent {
+  const SettingsVersionCheckConsentGranted();
+}
+
 final class SettingsBatteryOptimizationRefreshRequested extends SettingsEvent {
   const SettingsBatteryOptimizationRefreshRequested();
 }
@@ -92,6 +96,7 @@ class SettingsState extends Equatable {
     this.installedVersion,
     this.installedVersionError,
     this.installedSemanticVersion,
+    this.updateCheckConsentGranted = false,
     this.appUpdateStatus = AppUpdateStatus.idle,
     this.latestReleaseVersion,
     this.latestReleaseUrl,
@@ -111,6 +116,7 @@ class SettingsState extends Equatable {
   final String? installedVersion;
   final String? installedVersionError;
   final SemanticVersion? installedSemanticVersion;
+  final bool updateCheckConsentGranted;
   final AppUpdateStatus appUpdateStatus;
   final String? latestReleaseVersion;
   final String? latestReleaseUrl;
@@ -133,6 +139,7 @@ class SettingsState extends Equatable {
     bool clearInstalledVersionError = false,
     SemanticVersion? installedSemanticVersion,
     bool preserveInstalledSemanticVersion = true,
+    bool? updateCheckConsentGranted,
     AppUpdateStatus? appUpdateStatus,
     String? latestReleaseVersion,
     String? latestReleaseUrl,
@@ -162,6 +169,8 @@ class SettingsState extends Equatable {
       installedSemanticVersion: preserveInstalledSemanticVersion
           ? (installedSemanticVersion ?? this.installedSemanticVersion)
           : installedSemanticVersion,
+      updateCheckConsentGranted:
+          updateCheckConsentGranted ?? this.updateCheckConsentGranted,
       appUpdateStatus: appUpdateStatus ?? this.appUpdateStatus,
       latestReleaseVersion: latestReleaseVersion ?? this.latestReleaseVersion,
       latestReleaseUrl: latestReleaseUrl ?? this.latestReleaseUrl,
@@ -188,6 +197,7 @@ class SettingsState extends Equatable {
     installedVersion,
     installedVersionError,
     installedSemanticVersion,
+    updateCheckConsentGranted,
     appUpdateStatus,
     latestReleaseVersion,
     latestReleaseUrl,
@@ -214,6 +224,7 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
       _onConnectivityCheckSettingsChanged,
     );
     on<SettingsVersionCheckRequested>(_onVersionCheckRequested);
+    on<SettingsVersionCheckConsentGranted>(_onVersionCheckConsentGranted);
     on<SettingsBatteryOptimizationRefreshRequested>(
       _onBatteryOptimizationRefreshRequested,
     );
@@ -252,12 +263,15 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
     final installedVersionFuture = _appVersionRepository.loadInstalledVersion();
     final batteryOptimizationStatusFuture = _tunnelRepository
         .getBatteryOptimizationStatus();
+    final updateCheckConsentFuture = _settingsRepository
+        .loadUpdateCheckConsentGranted();
 
     final connectionMode = await connectionModeFuture;
     final splitTunnelSettings = await splitTunnelSettingsFuture;
     final proxySettings = await proxySettingsFuture;
     final connectivityCheckSettings = await connectivityCheckSettingsFuture;
     final batteryOptimizationStatus = await batteryOptimizationStatusFuture;
+    final updateCheckConsentGranted = await updateCheckConsentFuture;
 
     emit(
       state.copyWith(
@@ -267,6 +281,7 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
         proxySettings: proxySettings,
         connectivityCheckSettings: connectivityCheckSettings,
         batteryOptimizationStatus: batteryOptimizationStatus,
+        updateCheckConsentGranted: updateCheckConsentGranted,
         clearConnectivityUrlError: true,
         clearUpdateErrorMessage: true,
       ),
@@ -472,6 +487,21 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
     SettingsVersionCheckRequested event,
     Emitter<SettingsState> emit,
   ) async {
+    if (!state.updateCheckConsentGranted) {
+      emit(
+        state.copyWith(
+          appUpdateStatus: AppUpdateStatus.idle,
+          updateErrorMessage: null,
+          clearUpdateErrorMessage: true,
+        ),
+      );
+      _appendLog(
+        LogLevel.info,
+        'update: GitHub release check skipped until consent is granted.',
+      );
+      return;
+    }
+
     emit(
       state.copyWith(
         appUpdateStatus: AppUpdateStatus.loading,
@@ -530,6 +560,15 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
         ),
       );
     }
+  }
+
+  Future<void> _onVersionCheckConsentGranted(
+    SettingsVersionCheckConsentGranted event,
+    Emitter<SettingsState> emit,
+  ) async {
+    await _settingsRepository.saveUpdateCheckConsentGranted(true);
+    emit(state.copyWith(updateCheckConsentGranted: true));
+    add(const SettingsVersionCheckRequested());
   }
 
   void _appendLog(LogLevel level, String message) {

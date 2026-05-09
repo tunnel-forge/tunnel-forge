@@ -20,6 +20,7 @@ class _FakeSettingsRepository implements SettingsRepository {
         timeoutMs: 3200,
       );
   bool batteryOptimizationConnectPromptShown = false;
+  bool updateCheckConsentGranted = false;
 
   @override
   Future<ConnectionMode> loadConnectionMode() async => connectionMode;
@@ -37,6 +38,11 @@ class _FakeSettingsRepository implements SettingsRepository {
   @override
   Future<bool> loadBatteryOptimizationConnectPromptShown() async {
     return batteryOptimizationConnectPromptShown;
+  }
+
+  @override
+  Future<bool> loadUpdateCheckConsentGranted() async {
+    return updateCheckConsentGranted;
   }
 
   @override
@@ -68,6 +74,11 @@ class _FakeSettingsRepository implements SettingsRepository {
   }
 
   @override
+  Future<void> saveUpdateCheckConsentGranted(bool granted) async {
+    updateCheckConsentGranted = granted;
+  }
+
+  @override
   Future<void> saveProxySettings(ProxySettings settings) async {
     proxySettings = settings;
   }
@@ -92,9 +103,11 @@ class _FakeAppUpdateRepository implements AppUpdateRepository {
 
   final AppReleaseInfo? release;
   final Object? error;
+  int fetchCount = 0;
 
   @override
   Future<AppReleaseInfo> fetchLatestRelease() async {
+    fetchCount += 1;
     if (error != null) throw error!;
     return release!;
   }
@@ -255,10 +268,113 @@ void main() {
       ],
     );
 
+    test('does not fetch release data before update-check consent', () async {
+      final updates = _FakeAppUpdateRepository(
+        release: AppReleaseInfo(
+          version: const SemanticVersion(major: 0, minor: 4, patch: 0),
+          htmlUrl:
+              'https://github.com/evokelektrique/tunnel-forge/releases/tag/v0.4.0',
+          publishedAt: DateTime.utc(2026, 4, 23),
+          prerelease: true,
+        ),
+      );
+      final bloc = SettingsBloc(
+        _FakeSettingsRepository(),
+        _FakeAppVersionRepository(
+          const AppVersionInfo(
+            displayVersion: '0.3.0+11',
+            semanticVersion: SemanticVersion(major: 0, minor: 3, patch: 0),
+          ),
+        ),
+        updates,
+        _FakeLogsRepository(),
+        _FakeTunnelRepository(),
+      );
+      addTearDown(bloc.close);
+
+      bloc.add(const SettingsVersionCheckRequested());
+      await Future<void>.delayed(Duration.zero);
+
+      expect(updates.fetchCount, 0);
+      expect(bloc.state.appUpdateStatus, AppUpdateStatus.idle);
+    });
+
+    blocTest<SettingsBloc, SettingsState>(
+      'persists update-check consent before checking releases',
+      build: () => SettingsBloc(
+        settingsRepository,
+        _FakeAppVersionRepository(
+          const AppVersionInfo(
+            displayVersion: '0.3.0+11',
+            semanticVersion: SemanticVersion(major: 0, minor: 3, patch: 0),
+          ),
+        ),
+        _FakeAppUpdateRepository(
+          release: AppReleaseInfo(
+            version: const SemanticVersion(major: 0, minor: 3, patch: 0),
+            htmlUrl: 'https://github.com/evokelektrique/tunnel-forge/releases',
+            publishedAt: DateTime.utc(2026, 4, 19),
+            prerelease: false,
+          ),
+        ),
+        _FakeLogsRepository(),
+        _FakeTunnelRepository(),
+      ),
+      setUp: () {
+        settingsRepository = _FakeSettingsRepository();
+      },
+      seed: () => const SettingsState(
+        installedVersionLoaded: true,
+        installedVersion: '0.3.0+11',
+        installedSemanticVersion: SemanticVersion(major: 0, minor: 3, patch: 0),
+      ),
+      act: (bloc) => bloc.add(const SettingsVersionCheckConsentGranted()),
+      expect: () => const [
+        SettingsState(
+          installedVersionLoaded: true,
+          installedVersion: '0.3.0+11',
+          installedSemanticVersion: SemanticVersion(
+            major: 0,
+            minor: 3,
+            patch: 0,
+          ),
+          updateCheckConsentGranted: true,
+        ),
+        SettingsState(
+          installedVersionLoaded: true,
+          installedVersion: '0.3.0+11',
+          installedSemanticVersion: SemanticVersion(
+            major: 0,
+            minor: 3,
+            patch: 0,
+          ),
+          updateCheckConsentGranted: true,
+          appUpdateStatus: AppUpdateStatus.loading,
+        ),
+        SettingsState(
+          installedVersionLoaded: true,
+          installedVersion: '0.3.0+11',
+          installedSemanticVersion: SemanticVersion(
+            major: 0,
+            minor: 3,
+            patch: 0,
+          ),
+          updateCheckConsentGranted: true,
+          appUpdateStatus: AppUpdateStatus.upToDate,
+          latestReleaseVersion: '0.3.0',
+          latestReleaseUrl:
+              'https://github.com/evokelektrique/tunnel-forge/releases',
+        ),
+      ],
+      verify: (bloc) {
+        expect(settingsRepository.updateCheckConsentGranted, isTrue);
+      },
+    );
+
     blocTest<SettingsBloc, SettingsState>(
       'marks update available when release semver is newer than installed build',
       build: () => SettingsBloc(
-        _FakeSettingsRepository(),
+        _FakeSettingsRepository()..updateCheckConsentGranted = true,
         _FakeAppVersionRepository(
           const AppVersionInfo(
             displayVersion: '0.3.0+11',
@@ -287,6 +403,7 @@ void main() {
           loading: false,
           connectionMode: ConnectionMode.proxyOnly,
           proxySettings: ProxySettings(httpPort: 18080),
+          updateCheckConsentGranted: true,
           connectivityCheckSettings: ConnectivityCheckSettings(
             url: 'https://example.com/ping',
             timeoutMs: 3200,
@@ -297,6 +414,7 @@ void main() {
           installedVersionLoaded: true,
           connectionMode: ConnectionMode.proxyOnly,
           proxySettings: ProxySettings(httpPort: 18080),
+          updateCheckConsentGranted: true,
           connectivityCheckSettings: ConnectivityCheckSettings(
             url: 'https://example.com/ping',
             timeoutMs: 3200,
@@ -313,6 +431,7 @@ void main() {
           installedVersionLoaded: true,
           connectionMode: ConnectionMode.proxyOnly,
           proxySettings: ProxySettings(httpPort: 18080),
+          updateCheckConsentGranted: true,
           connectivityCheckSettings: ConnectivityCheckSettings(
             url: 'https://example.com/ping',
             timeoutMs: 3200,
@@ -330,6 +449,7 @@ void main() {
           installedVersionLoaded: true,
           connectionMode: ConnectionMode.proxyOnly,
           proxySettings: ProxySettings(httpPort: 18080),
+          updateCheckConsentGranted: true,
           connectivityCheckSettings: ConnectivityCheckSettings(
             url: 'https://example.com/ping',
             timeoutMs: 3200,
@@ -351,7 +471,7 @@ void main() {
     blocTest<SettingsBloc, SettingsState>(
       'surfaces a specific error when update checks fail',
       build: () => SettingsBloc(
-        _FakeSettingsRepository(),
+        _FakeSettingsRepository()..updateCheckConsentGranted = true,
         _FakeAppVersionRepository(
           const AppVersionInfo(
             displayVersion: '0.3.0+11',
@@ -377,6 +497,7 @@ void main() {
           loading: false,
           connectionMode: ConnectionMode.proxyOnly,
           proxySettings: ProxySettings(httpPort: 18080),
+          updateCheckConsentGranted: true,
           connectivityCheckSettings: ConnectivityCheckSettings(
             url: 'https://example.com/ping',
             timeoutMs: 3200,
@@ -387,6 +508,7 @@ void main() {
           installedVersionLoaded: true,
           connectionMode: ConnectionMode.proxyOnly,
           proxySettings: ProxySettings(httpPort: 18080),
+          updateCheckConsentGranted: true,
           connectivityCheckSettings: ConnectivityCheckSettings(
             url: 'https://example.com/ping',
             timeoutMs: 3200,
@@ -403,6 +525,7 @@ void main() {
           installedVersionLoaded: true,
           connectionMode: ConnectionMode.proxyOnly,
           proxySettings: ProxySettings(httpPort: 18080),
+          updateCheckConsentGranted: true,
           connectivityCheckSettings: ConnectivityCheckSettings(
             url: 'https://example.com/ping',
             timeoutMs: 3200,
@@ -420,6 +543,7 @@ void main() {
           installedVersionLoaded: true,
           connectionMode: ConnectionMode.proxyOnly,
           proxySettings: ProxySettings(httpPort: 18080),
+          updateCheckConsentGranted: true,
           connectivityCheckSettings: ConnectivityCheckSettings(
             url: 'https://example.com/ping',
             timeoutMs: 3200,
@@ -439,7 +563,7 @@ void main() {
     blocTest<SettingsBloc, SettingsState>(
       'still checks releases when installed version is unavailable',
       build: () => SettingsBloc(
-        _FakeSettingsRepository(),
+        _FakeSettingsRepository()..updateCheckConsentGranted = true,
         _FakeAppVersionRepository(
           const AppVersionInfo(
             semanticVersion: null,
@@ -468,6 +592,7 @@ void main() {
           loading: false,
           connectionMode: ConnectionMode.proxyOnly,
           proxySettings: ProxySettings(httpPort: 18080),
+          updateCheckConsentGranted: true,
           connectivityCheckSettings: ConnectivityCheckSettings(
             url: 'https://example.com/ping',
             timeoutMs: 3200,
@@ -478,6 +603,7 @@ void main() {
           installedVersionLoaded: true,
           connectionMode: ConnectionMode.proxyOnly,
           proxySettings: ProxySettings(httpPort: 18080),
+          updateCheckConsentGranted: true,
           connectivityCheckSettings: ConnectivityCheckSettings(
             url: 'https://example.com/ping',
             timeoutMs: 3200,
@@ -489,6 +615,7 @@ void main() {
           installedVersionLoaded: true,
           connectionMode: ConnectionMode.proxyOnly,
           proxySettings: ProxySettings(httpPort: 18080),
+          updateCheckConsentGranted: true,
           connectivityCheckSettings: ConnectivityCheckSettings(
             url: 'https://example.com/ping',
             timeoutMs: 3200,
@@ -501,6 +628,7 @@ void main() {
           installedVersionLoaded: true,
           connectionMode: ConnectionMode.proxyOnly,
           proxySettings: ProxySettings(httpPort: 18080),
+          updateCheckConsentGranted: true,
           connectivityCheckSettings: ConnectivityCheckSettings(
             url: 'https://example.com/ping',
             timeoutMs: 3200,

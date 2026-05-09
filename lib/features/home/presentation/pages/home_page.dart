@@ -142,13 +142,6 @@ class _VpnHomePageViewState extends State<_VpnHomePageView>
     showAppSnackBar(context, text, error: error);
   }
 
-  void _maybeRequestVersionCheck(SettingsState settingsState, int navIndex) {
-    if (navIndex != 2) return;
-    if (!settingsState.installedVersionLoaded) return;
-    if (settingsState.appUpdateStatus != AppUpdateStatus.idle) return;
-    context.read<SettingsBloc>().add(const SettingsVersionCheckRequested());
-  }
-
   Future<void> _handleProfilesStateChange(ProfilesState state) async {
     final message = state.message;
     if (message != null && message.id != _lastProfilesMessageId) {
@@ -557,11 +550,8 @@ class _VpnHomePageViewState extends State<_VpnHomePageView>
         ),
         BlocListener<SettingsBloc, SettingsState>(
           listenWhen: (previous, current) =>
-              previous.installedVersionLoaded !=
-                  current.installedVersionLoaded ||
               previous.message != current.message,
           listener: (context, state) {
-            _maybeRequestVersionCheck(state, navState.index);
             final message = state.message;
             if (message != null && message.id != _lastSettingsMessageId) {
               _lastSettingsMessageId = message.id;
@@ -806,12 +796,17 @@ class _VpnHomePageViewState extends State<_VpnHomePageView>
                     onOpenL2tpSecurityNotice: _openL2tpSecurityNotice,
                     installedVersion: settingsState.installedVersion,
                     installedVersionError: settingsState.installedVersionError,
+                    updateCheckConsentGranted:
+                        settingsState.updateCheckConsentGranted,
                     appUpdateStatus: settingsState.appUpdateStatus,
                     latestReleaseVersion: settingsState.latestReleaseVersion,
                     updateErrorMessage: settingsState.updateErrorMessage,
-                    onRefreshVersionCheck: () => context
-                        .read<SettingsBloc>()
-                        .add(const SettingsVersionCheckRequested()),
+                    onRefreshVersionCheck: () =>
+                        context.read<SettingsBloc>().add(
+                          settingsState.updateCheckConsentGranted
+                              ? const SettingsVersionCheckRequested()
+                              : const SettingsVersionCheckConsentGranted(),
+                        ),
                     onOpenReleasePage: () => _openReleasePage(
                       settingsState.latestReleaseUrl ?? _kGithubReleasesUrl,
                     ),
@@ -856,10 +851,6 @@ class _VpnHomePageViewState extends State<_VpnHomePageView>
           onDestinationSelected: (index) {
             context.read<HomeNavBloc>().add(HomeNavChanged(index));
             if (index == 1) _scheduleScrollLogsToEnd();
-            _maybeRequestVersionCheck(
-              context.read<SettingsBloc>().state,
-              index,
-            );
           },
           backgroundColor: Theme.of(context).colorScheme.surface,
           surfaceTintColor: Colors.transparent,

@@ -272,5 +272,13 @@ void main() {
 
       expect(await store.loadBatteryOptimizationConnectPromptShown(), isTrue);
     });
+
+    test('persists update check consent flag', () async {
+      expect(await store.loadUpdateCheckConsentGranted(), isFalse);
+
+      await store.saveUpdateCheckConsentGranted(true);
+
+      expect(await store.loadUpdateCheckConsentGranted(), isTrue);
+    });
   });
 }

@@ -136,6 +136,11 @@ class SettingsRepositoryImpl implements SettingsRepository {
   }
 
   @override
+  Future<bool> loadUpdateCheckConsentGranted() {
+    return _profileStore.loadUpdateCheckConsentGranted();
+  }
+
+  @override
   Future<ProxySettings> loadProxySettings() {
     return _profileStore.loadProxySettings();
   }
@@ -165,6 +170,11 @@ class SettingsRepositoryImpl implements SettingsRepository {
   @override
   Future<void> saveBatteryOptimizationConnectPromptShown(bool shown) {
     return _profileStore.saveBatteryOptimizationConnectPromptShown(shown);
+  }
+
+  @override
+  Future<void> saveUpdateCheckConsentGranted(bool granted) {
+    return _profileStore.saveUpdateCheckConsentGranted(granted);
   }
 
   @override

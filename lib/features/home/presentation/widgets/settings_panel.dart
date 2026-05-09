@@ -30,6 +30,7 @@ class SettingsPanel extends StatefulWidget {
     this.onOpenL2tpSecurityNotice,
     this.installedVersion,
     this.installedVersionError,
+    required this.updateCheckConsentGranted,
     required this.appUpdateStatus,
     this.latestReleaseVersion,
     this.updateErrorMessage,
@@ -64,6 +65,7 @@ class SettingsPanel extends StatefulWidget {
   final VoidCallback? onOpenL2tpSecurityNotice;
   final String? installedVersion;
   final String? installedVersionError;
+  final bool updateCheckConsentGranted;
   final AppUpdateStatus appUpdateStatus;
   final String? latestReleaseVersion;
   final String? updateErrorMessage;
@@ -635,7 +637,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                   children: [
                     OutlinedButton.icon(
                       key: const Key('settings_update_refresh_button'),
-                      onPressed: widget.onRefreshVersionCheck,
+                      onPressed: _handleVersionCheckPressed,
                       icon: const Icon(Icons.refresh),
                       label: Text(t.refresh),
                     ),
@@ -741,6 +743,33 @@ class _SettingsPanelState extends State<SettingsPanel> {
         style: widget.textTheme.bodySmall?.copyWith(color: color),
       ),
     );
+  }
+
+  Future<void> _handleVersionCheckPressed() async {
+    if (widget.updateCheckConsentGranted) {
+      widget.onRefreshVersionCheck();
+      return;
+    }
+    final t = AppLocalizations.of(context);
+    final granted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(t.updateCheckConsentTitle),
+        content: Text(t.updateCheckConsentMessage),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t.updateCheckConsentAllow),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || granted != true) return;
+    widget.onRefreshVersionCheck();
   }
 
   String _batteryOptimizationSubtitle(AppLocalizations t) {

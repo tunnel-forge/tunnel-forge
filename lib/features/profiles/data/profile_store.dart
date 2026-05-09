@@ -74,6 +74,8 @@ class ProfileStore {
   static const prefsKeyLogDisplayLevel = 'log_display_level_v1';
   static const prefsKeyBatteryOptimizationConnectPromptShown =
       'battery_optimization_connect_prompt_shown_v1';
+  static const prefsKeyUpdateCheckConsentGranted =
+      'update_check_consent_granted_v1';
 
   final SharedPreferences? _prefsOverride;
   final SecretStore _secrets;
@@ -246,6 +248,16 @@ class ProfileStore {
   Future<void> saveBatteryOptimizationConnectPromptShown(bool shown) async {
     final p = await _prefs();
     await p.setBool(prefsKeyBatteryOptimizationConnectPromptShown, shown);
+  }
+
+  Future<bool> loadUpdateCheckConsentGranted() async {
+    final p = await _prefs();
+    return p.getBool(prefsKeyUpdateCheckConsentGranted) ?? false;
+  }
+
+  Future<void> saveUpdateCheckConsentGranted(bool granted) async {
+    final p = await _prefs();
+    await p.setBool(prefsKeyUpdateCheckConsentGranted, granted);
   }
 
   Future<void> _saveProfileList(List<Profile> list) async {
