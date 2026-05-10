@@ -19,6 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  flutter-version: '90673a4eef275d1a6692c26ac80d6d746d41a73a'
   FLUTTER_VERSION: 3.41.2
 
 defaults:
