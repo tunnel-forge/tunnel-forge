@@ -1,0 +1,1 @@
+Release 0.7.2 updates the public app name to TunnelForge across the app, store listing, release metadata, and F-Droid metadata. No VPN behavior changes are included in this release.
