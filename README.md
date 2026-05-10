@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="resources/logo/tf-xxxhdpi.png" alt="Tunnel Forge logo" width="160">
+  <img src="resources/logo/tf-xxxhdpi.png" alt="TunnelForge logo" width="160">
 </p>
 
-<h1 align="center">Tunnel Forge</h1>
+<h1 align="center">TunnelForge</h1>
 
 <p align="center">
   Flutter app for Android L2TP/IPsec (IKEv1), with VPN tunnel mode, proxy-only mode,

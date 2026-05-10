@@ -784,7 +784,7 @@ class ProxyTunnelService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Tunnel Forge proxy")
+            .setContentTitle("TunnelForge proxy")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_share)
             .setContentIntent(pending)
@@ -816,7 +816,7 @@ class ProxyTunnelService : Service() {
         nm.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "Tunnel Forge proxy",
+                "TunnelForge proxy",
                 NotificationManager.IMPORTANCE_LOW,
             ),
         )

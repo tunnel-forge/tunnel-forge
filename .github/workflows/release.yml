@@ -186,5 +186,5 @@ jobs:
               --repo "${{ github.repository }}" \
               --verify-tag \
               --generate-notes \
-              --title "Tunnel Forge ${{ steps.tag.outputs.version }}"
+              --title "TunnelForge ${{ steps.tag.outputs.version }}"
           fi

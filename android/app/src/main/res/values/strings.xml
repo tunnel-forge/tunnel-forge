@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Tunnel Forge</string>
-    <string name="vpn_session_name">Tunnel Forge</string>
-    <string name="vpn_notification_title">Tunnel Forge VPN</string>
+    <string name="app_name">TunnelForge</string>
+    <string name="vpn_session_name">TunnelForge</string>
+    <string name="vpn_notification_title">TunnelForge VPN</string>
     <string name="vpn_notification_connecting">Connecting...</string>
     <string name="vpn_notification_connected">VPN active</string>
     <string name="vpn_notification_connected_profile">Connected: %1$s</string>

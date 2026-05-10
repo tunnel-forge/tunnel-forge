@@ -1,6 +1,6 @@
-Tunnel Forge is an Android VPN client for networks that still rely on L2TP/IPsec with IKEv1.
+TunnelForge is an Android VPN client for networks that still rely on L2TP/IPsec with IKEv1.
 
-Android 12 removed the built-in L2TP and PPTP VPN options. Tunnel Forge provides a maintained client path for organizations, schools, universities, and personal networks that cannot immediately replace existing L2TP/IPsec servers.
+Android 12 removed the built-in L2TP and PPTP VPN options. TunnelForge provides a maintained client path for organizations, schools, universities, and personal networks that cannot immediately replace existing L2TP/IPsec servers.
 
 Features:
 
@@ -13,4 +13,4 @@ Features:
 * Configurable MTU
 * Connection state and detailed local logs
 
-Tunnel Forge does not provide a VPN service or account. You need access to an existing compatible VPN server.
+TunnelForge does not provide a VPN service or account. You need access to an existing compatible VPN server.
