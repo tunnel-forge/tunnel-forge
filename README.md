@@ -59,10 +59,6 @@ TunnelForge is an Android client for those setups. It connects to existing L2TP/
 - Custom DNS supporting UDP, TCP, TLS and HTTPS
 - Variable MTU
 
-### Supported platform
-
-TunnelForge is built for Android 12+ (`minSdk 31`). The other Flutter platform folders are kept for tooling and project structure, not as supported VPN targets.
-
 ## Screenshots
 
 <table>
