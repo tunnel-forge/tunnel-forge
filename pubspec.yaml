@@ -2,7 +2,7 @@ name: tunnel_forge
 description: TunnelForge - L2TP/IPsec VPN for Android.
 publish_to: "none"
 
-version: 0.7.1+28
+version: 0.7.2+29
 
 environment:
   sdk: ^3.11.0
